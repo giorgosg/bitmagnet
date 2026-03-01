@@ -1,6 +1,5 @@
-// the listener connection code has been disabled:
-// it would rarely be used anyway since a delay is now added to crawler jobs;
-// if re-enabled in the future, some work is needed to gracefully handle disconnection
+// Hybrid LISTEN/NOTIFY + polling: the listener wakes the handler immediately
+// for new jobs; polling runs as a safety net at the configured CheckInterval.
 
 package server
 
@@ -8,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
@@ -15,6 +15,7 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/queue"
 	"github.com/bitmagnet-io/bitmagnet/internal/queue/handler"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 	"golang.org/x/sync/semaphore"
 	"gorm.io/gen"
@@ -23,9 +24,9 @@ import (
 )
 
 type server struct {
-	stopped chan struct{}
-	query   *dao.Query
-	// pool       *pgxpool.Pool
+	stopped    chan struct{}
+	query      *dao.Query
+	pool       *pgxpool.Pool
 	handlers   []handler.Handler
 	gcInterval time.Duration
 	logger     *zap.SugaredLogger
@@ -39,31 +40,21 @@ func (s *server) Start(ctx context.Context) (err error) {
 			cancel()
 		}
 	}()
-	// pListenerConn, listenerConnErr := s.newListenerConn(ctx)
-	// if listenerConnErr != nil {
-	// 	err = listenerConnErr
-	// 	return
-	// }
-	// listenerConn := pListenerConn.Conn()
+
 	handlers := make([]serverHandler, len(s.handlers))
 	listenerChans := make(map[string]chan pgconn.Notification)
 
 	for i, h := range s.handlers {
-		listenerChan := make(chan pgconn.Notification)
+		listenerChan := make(chan pgconn.Notification, h.Concurrency)
 		sh := serverHandler{
-			Handler: h,
-			sem:     semaphore.NewWeighted(int64(h.Concurrency)),
-			query:   s.query,
-			// listenerConn: listenerConn,
+			Handler:      h,
+			sem:          semaphore.NewWeighted(int64(h.Concurrency)),
+			query:        s.query,
 			listenerChan: listenerChan,
 			logger:       s.logger.With("queue", h.Queue),
 		}
 		handlers[i] = sh
 		listenerChans[h.Queue] = listenerChan
-		// if _, listenErr := listenerConn.Exec(ctx, fmt.Sprintf(`LISTEN %q`, h.Queue)); listenErr != nil {
-		//	err = listenErr
-		//	return
-		//}
 		go sh.start(ctx)
 	}
 
@@ -73,54 +64,74 @@ func (s *server) Start(ctx context.Context) (err error) {
 			case <-s.stopped:
 				cancel()
 			case <-ctx.Done():
-				// pListenerConn.Release()
 				return
 			}
 		}
 	}()
-	// go func() {
-	// 	for {
-	// 		select {
-	// 		case <-ctx.Done():
-	// 			return
-	// 		default:
-	// 			notification, waitErr := listenerConn.WaitForNotification(ctx)
-	// 			if waitErr != nil {
-	// 				if !errors.Is(waitErr, context.Canceled) {
-	// 					s.logger.Errorf("Error waiting for notification: %s", waitErr)
-	// 				}
-	// 				continue
-	// 			}
-	// 			ch, ok := listenerChans[notification.Channel]
-	// 			if !ok {
-	// 				s.logger.Errorf("Received notification for unknown channel: %s", notification.Channel)
-	// 				continue
-	// 			}
-	// 			select {
-	// 			case <-ctx.Done():
-	// 				return
-	// 			case ch <- *notification:
-	// 				continue
-	// 			}
-	// 		}
-	// 	}
-	// }()
+
+	// Start LISTEN/NOTIFY listener for instant job wakeup.
+	go s.runListener(ctx, listenerChans)
+
 	go s.runGarbageCollection(ctx)
 
 	return
 }
 
-// func (s *server) newListenerConn(ctx context.Context) (*pgxpool.Conn, error) {
-//	conn, err := s.pool.Acquire(ctx)
-//	if err != nil {
-//		return nil, err
-//	}
-//	_, err = conn.Exec(ctx, "SET idle_in_transaction_session_timeout = 0")
-//	if err != nil {
-//		return nil, err
-//	}
-//	return conn, nil
-//}
+func (s *server) runListener(ctx context.Context, listenerChans map[string]chan pgconn.Notification) {
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+
+		if err := s.listenLoop(ctx, listenerChans); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+
+			s.logger.Warnw("listener disconnected, reconnecting in 5s", "error", err)
+
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+			}
+		}
+	}
+}
+
+func (s *server) listenLoop(ctx context.Context, listenerChans map[string]chan pgconn.Notification) error {
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Release()
+
+	pgConn := conn.Conn()
+
+	for ch := range listenerChans {
+		if _, execErr := pgConn.Exec(ctx, fmt.Sprintf("LISTEN %q", ch)); execErr != nil {
+			return execErr
+		}
+	}
+
+	for {
+		notification, waitErr := pgConn.WaitForNotification(ctx)
+		if waitErr != nil {
+			return waitErr
+		}
+
+		ch, ok := listenerChans[notification.Channel]
+		if !ok {
+			continue
+		}
+
+		select {
+		case ch <- *notification:
+		default:
+			// Channel full; the polling fallback will pick up the job.
+		}
+	}
+}
 
 func (s *server) runGarbageCollection(ctx context.Context) {
 	for {
