@@ -17,14 +17,20 @@ type Config struct {
 	SSLCertPath       string
 	SSLKeyPath        string
 	SSLRootCertPath   string
+	// MaxConns is the maximum number of connections in the pool.
+	MaxConns int32
+	// MinConns is the minimum number of idle connections maintained in the pool.
+	MinConns int32
 }
 
 func NewDefaultConfig() Config {
 	return Config{
-		Host: "localhost",
-		User: "postgres",
-		Port: 5432,
-		Name: "bitmagnet",
+		Host:     "localhost",
+		User:     "postgres",
+		Port:     5432,
+		Name:     "bitmagnet",
+		MaxConns: 50,
+		MinConns: 10,
 	}
 }
 

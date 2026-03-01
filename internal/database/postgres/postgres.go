@@ -33,7 +33,21 @@ func New(p Params) (Result, error) {
 	waitGroup := &sync.WaitGroup{}
 	lazyPool := lazy.New(func() (*pgxpool.Pool, error) {
 		ctx, cancel := context.WithCancel(context.Background())
-		pl, plErr := pgxpool.New(ctx, p.Config.CreateDSN())
+		poolConfig, parseErr := pgxpool.ParseConfig(p.Config.CreateDSN())
+		if parseErr != nil {
+			cancel()
+			return nil, parseErr
+		}
+
+		if p.Config.MaxConns > 0 {
+			poolConfig.MaxConns = p.Config.MaxConns
+		}
+
+		if p.Config.MinConns > 0 {
+			poolConfig.MinConns = p.Config.MinConns
+		}
+
+		pl, plErr := pgxpool.NewWithConfig(ctx, poolConfig)
 
 		if plErr != nil {
 			cancel()
