@@ -133,7 +133,23 @@ func (s *server) listenLoop(ctx context.Context, listenerChans map[string]chan p
 	}
 }
 
+const gcBatchSize = 1000
+
 func (s *server) runGarbageCollection(ctx context.Context) {
+	for {
+		s.runGCBatch(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(s.gcInterval):
+			continue
+		}
+	}
+}
+
+// runGCBatch deletes expired jobs in batches to avoid long-held locks and
+// excessive WAL generation that could happen with unbounded DELETEs.
+func (s *server) runGCBatch(ctx context.Context) {
 	for {
 		tx := s.query.QueueJob.WithContext(ctx).Where(
 			s.query.QueueJob.Status.In(string(model.QueueJobStatusProcessed), string(model.QueueJobStatusFailed)),
@@ -141,17 +157,20 @@ func (s *server) runGarbageCollection(ctx context.Context) {
 			UnderlyingDB().Where(
 			"queue_jobs.ran_at + queue_jobs.archival_duration < ?::timestamptz",
 			time.Now(),
+		).Where(
+			"queue_jobs.id IN (SELECT id FROM queue_jobs WHERE status IN (?, ?) AND ran_at + archival_duration < ?::timestamptz LIMIT ?)",
+			string(model.QueueJobStatusProcessed), string(model.QueueJobStatusFailed), time.Now(), gcBatchSize,
 		).Delete(&model.QueueJob{})
 		if tx.Error != nil {
 			s.logger.Errorw("error deleting old queue jobs", "error", tx.Error)
-		} else if tx.RowsAffected > 0 {
+			return
+		}
+		if tx.RowsAffected > 0 {
 			s.logger.Debugw("deleted old queue jobs", "count", tx.RowsAffected)
 		}
-		select {
-		case <-ctx.Done():
+		// If we deleted fewer than the batch size, we're done for this cycle.
+		if tx.RowsAffected < gcBatchSize {
 			return
-		case <-time.After(s.gcInterval):
-			continue
 		}
 	}
 }
