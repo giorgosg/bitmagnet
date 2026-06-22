@@ -13,8 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v26
+        uses: actions/checkout@v4.2.2
+      - uses: cachix/install-nix-action@v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
       - name: Install web UI
@@ -35,8 +35,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v26
+        uses: actions/checkout@v4.2.2
+      - uses: cachix/install-nix-action@v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
       - name: Install web UI
@@ -69,8 +69,8 @@ jobs:
           - 5432:5432
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v26
+        uses: actions/checkout@v4.2.2
+      - uses: cachix/install-nix-action@v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
       - name: Install web UI, apply database migrations, generate code, extract translations and build web app
