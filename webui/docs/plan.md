@@ -82,7 +82,7 @@ needs unmatched-path fallback or a deep link 404s on refresh.
 **4. The row and the look.** ✅ As above, plus byte and date formatting. Fixed row height,
 because virtualization depends on it.
 
-**5. Search state in the URL.** ✅ for `q` — sort and facets join it at step 9. The model
+**5. Search state in the URL.** ✅ for `q` and `sort` — facets join them at step 9. The model
 derives from the URL rather than the reverse: typing writes the URL after a 300ms quiet
 period with `replaceUrl`, and the resulting `onUrlChange` is what issues the query. Enter
 uses `pushUrl`, so the back button walks searches you committed to rather than every
@@ -130,6 +130,29 @@ as an estimate (2.87M, `true`); a narrow query came back exact (2715, `false`). 
 having no indexed files. Trusting the count draws an expander that opens onto nothing.
 Confirmed in the running UI: a 222-file `over_threshold` row draws metadata and no file
 expander, while a 23-file `multi` row beside it draws both.
+
+**Sorting is a menu of single orderings, not a sort builder.** bitmagnet's `orderBy` is a
+list of field/direction pairs and composes arbitrarily, but a UI for composing them is one
+nobody reads. Seven named orderings sit next to the search box — relevance, newest, oldest,
+largest, smallest, most seeders, name — each a single field. `Sort` is one type shared by
+the URL, the query and the menu, so adding an ordering is a compile error in all three
+places at once. The default is left out of the URL, so an ordinary search stays a bare
+`?q=`, and an unknown `sort=` degrades to the default rather than failing the route.
+
+Changing the ordering uses `pushUrl`, unlike the keystrokes `replaceUrl` collapses:
+choosing a sort is a deliberate act and is worth a history entry. Verified — selecting one
+adds exactly one entry, and back restores both the previous ordering and the menu.
+
+**Rows are centred one by one, not by centring their container.** The container is
+`InfiniteList`'s, and it writes `margin: 0; padding: 0` as an *inline* style, which beats
+any rule in the stylesheet — so a centred wrapper silently does nothing and the column
+sits flush left. The rule goes on `.item` instead.
+
+Two pixel-level corrections came out of measuring rather than looking: the scrollbar is
+taken out of one side of the scrollport only, which pulled rows a few pixels left of the
+header until `scrollbar-gutter: stable both-edges` made it symmetric; and a row's own
+0.5rem of hover padding is subtracted from the wrapper, so row text lands on the same
+column as the header while only the hover highlight bleeds past it.
 
 **Padding files are dropped from expanded file lists.** They are alignment filler, not
 content, and they can outnumber the real files — a ten-episode season came back as 19

@@ -47,12 +47,13 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Everything that isn't the scroll container lines up on this column. */
+/* Everything lines up on this column. Rows centre themselves individually rather than
+   sitting in a centred wrapper: the element wrapping them belongs to InfiniteList, which
+   writes `margin: 0` as an inline style and so beats any rule written here. */
 header,
 .tally,
 .notice,
-.single,
-.list > div {
+.item {
   width: 100%;
   max-width: 62rem;
   margin-left: auto;
@@ -100,10 +101,14 @@ main {
 
 .search {
   flex: 1;
+  display: flex;
+  align-items: stretch;
+  gap: 0.75rem;
 }
 
 .search input {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 0.5rem 0.75rem;
   border: 1px solid var(--faint);
   border-radius: 6px;
@@ -112,13 +117,36 @@ main {
   font: inherit;
 }
 
-.search input:focus {
+.search input:focus,
+.search .sort:focus {
   outline: none;
   border-color: var(--accent);
 }
 
 .search input::placeholder {
   color: var(--dim);
+}
+
+/* Quieter than the search field: an adjustment to a search, not a second search. */
+.search .sort {
+  flex: none;
+  padding: 0.5rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.search .sort:hover {
+  color: var(--fg);
+}
+
+.search .sort option {
+  background: var(--bg);
+  color: var(--fg);
 }
 
 .tally {
@@ -139,12 +167,25 @@ main {
 
 /* Rows -------------------------------------------------------------------- */
 
+/* A row carries 0.5rem of its own padding, so the hover highlight has air around the
+   text. That is subtracted here: the text lands on the same 1.5rem column as the header
+   and the tally, and only the highlight bleeds past it. */
+.item {
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
 .list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   padding-bottom: 2rem;
+
+  /* Reserve the scrollbar's width on both edges. Without this the bar is taken out of
+     one side only, the scrollport is asymmetric, and rows centre a few pixels left of
+     the header they are supposed to line up with. */
+  scrollbar-gutter: stable both-edges;
 }
 
 .row {

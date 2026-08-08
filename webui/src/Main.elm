@@ -17,6 +17,7 @@ import Magnes.Api.Enum.FilesStatus exposing (FilesStatus(..))
 import Process
 import Route exposing (Route)
 import Set exposing (Set)
+import Sort exposing (Sort)
 import Svg
 import Svg.Attributes as SvgAttr
 import Task
@@ -213,6 +214,7 @@ type Msg
     | FieldChanged String
     | DebounceElapsed Int
     | Submitted
+    | SortChanged String
     | Scrolled Value
     | Resized Int
     | GotZone Time.Zone
@@ -278,14 +280,17 @@ update msg model =
 
             else
                 ( model
-                , Nav.replaceUrl model.key
-                    (Route.toHref (Route.Search { q = trimToMaybe model.field }))
+                , Nav.replaceUrl model.key (Route.toHref (searchRoute model (currentSort model)))
                 )
 
         Submitted ->
+            ( model, Nav.pushUrl model.key (Route.toHref (searchRoute model (currentSort model))) )
+
+        SortChanged raw ->
+            -- Choosing an ordering is a deliberate act, so it earns a history entry —
+            -- unlike the keystrokes that `replaceUrl` collapses.
             ( model
-            , Nav.pushUrl model.key
-                (Route.toHref (Route.Search { q = trimToMaybe model.field }))
+            , Nav.pushUrl model.key (Route.toHref (searchRoute model (Sort.fromParam raw)))
             )
 
         Resized height ->
@@ -383,6 +388,24 @@ syncField model route =
             model.field
 
 
+{-| The search the box and the menu currently describe. Both the field and the ordering
+travel together, so changing one never silently drops the other.
+-}
+searchRoute : Model -> Sort -> Route
+searchRoute model sort =
+    Route.Search { q = trimToMaybe model.field, sort = sort }
+
+
+currentSort : Model -> Sort
+currentSort model =
+    case model.route of
+        Route.Search params ->
+            params.sort
+
+        _ ->
+            Sort.default
+
+
 trimToMaybe : String -> Maybe String
 trimToMaybe raw =
     case String.trim raw of
@@ -443,7 +466,7 @@ load : String -> Int -> Route -> ( Results, Cmd Msg )
 load apiUrl epoch route =
     case route of
         Route.Search params ->
-            ( Loading, fetch apiUrl epoch (searchArgs params.q 0) )
+            ( Loading, fetch apiUrl epoch (searchArgs params 0) )
 
         Route.Torrent infoHash ->
             ( Loading, fetch apiUrl epoch (Bitmagnet.byInfoHash infoHash) )
@@ -452,9 +475,14 @@ load apiUrl epoch route =
             ( Blank, Cmd.none )
 
 
-searchArgs : Maybe String -> Int -> Bitmagnet.SearchArgs
-searchArgs queryString offset =
-    { queryString = queryString, infoHashes = [], limit = pageSize, offset = offset }
+searchArgs : Route.SearchParams -> Int -> Bitmagnet.SearchArgs
+searchArgs params offset =
+    { queryString = params.q
+    , infoHashes = []
+    , sort = params.sort
+    , limit = pageSize
+    , offset = offset
+    }
 
 
 fetch : String -> Int -> Bitmagnet.SearchArgs -> Cmd Msg
@@ -473,7 +501,7 @@ requestMore model =
         ( Feed feed, Route.Search params ) ->
             if feed.hasNextPage && not feed.fetching then
                 ( { model | results = Feed { feed | fetching = True } }
-                , fetch model.apiUrl model.epoch (searchArgs params.q (List.length feed.items))
+                , fetch model.apiUrl model.epoch (searchArgs params (List.length feed.items))
                 )
 
             else
@@ -584,7 +612,7 @@ view model =
         [ header []
             [ a [ class "wordmark", href (Route.toHref (Route.Search Route.emptySearch)) ]
                 [ h1 [] [ text "magnes" ] ]
-            , searchBox model.field
+            , searchBox model
             ]
         , main_ [] [ viewRoute model ]
         ]
@@ -614,19 +642,42 @@ documentTitle model =
             "not found — magnes"
 
 
-searchBox : String -> Html Msg
-searchBox field =
+searchBox : Model -> Html Msg
+searchBox model =
     form [ class "search", onSubmit Submitted ]
         [ input
             [ type_ "search"
             , placeholder "search the index"
-            , value field
+            , value model.field
             , spellcheck False
             , attribute "autocomplete" "off"
             , onInput FieldChanged
             ]
             []
+        , sortMenu (currentSort model)
         ]
+
+
+{-| A plain `select`, so it is a real form control: keyboard-operable, and rendered by the
+platform rather than reimplemented.
+-}
+sortMenu : Sort -> Html Msg
+sortMenu selected =
+    Html.select
+        [ class "sort"
+        , attribute "aria-label" "Sort results"
+        , onInput SortChanged
+        ]
+        (List.map
+            (\sort ->
+                Html.option
+                    [ value (Sort.toParam sort)
+                    , Html.Attributes.selected (sort == selected)
+                    ]
+                    [ text (Sort.label sort) ]
+            )
+            Sort.all
+        )
 
 
 viewRoute : Model -> Html Msg

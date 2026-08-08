@@ -10,6 +10,7 @@ import Graphql.OptionalArgument as Opt exposing (OptionalArgument(..))
 import Graphql.SelectionSet as SelectionSet exposing (SelectionSet)
 import Magnes.Api.Enum.ContentType exposing (ContentType)
 import Magnes.Api.Enum.FilesStatus exposing (FilesStatus)
+import Magnes.Api.Enum.TorrentContentOrderByField as OrderByField
 import Magnes.Api.InputObject as InputObject
 import Magnes.Api.Object
 import Magnes.Api.Object.Torrent as Torrent
@@ -21,6 +22,7 @@ import Magnes.Api.Object.TorrentFilesQueryResult as FilesResult
 import Magnes.Api.Object.TorrentQuery as TorrentQuery
 import Magnes.Api.Query as Query
 import Magnes.Api.Scalar as Scalar
+import Sort exposing (Sort)
 import Time
 
 
@@ -75,17 +77,23 @@ type alias Page =
 type alias SearchArgs =
     { queryString : Maybe String
     , infoHashes : List String
+    , sort : Sort
     , limit : Int
     , offset : Int
     }
 
 
 {-| There is no get-torrent-by-hash query in the schema, so the `/torrent/<hash>` route is
-a search filtered to one hash.
+a search filtered to one hash. Ordering one result is moot.
 -}
 byInfoHash : String -> SearchArgs
 byInfoHash infoHash =
-    { queryString = Nothing, infoHashes = [ infoHash ], limit = 1, offset = 0 }
+    { queryString = Nothing
+    , infoHashes = [ infoHash ]
+    , sort = Sort.default
+    , limit = 1
+    , offset = 0
+    }
 
 
 search : SearchArgs -> SelectionSet Page RootQuery
@@ -111,12 +119,50 @@ searchInput args =
 
                         hashes ->
                             Present (List.map Scalar.Hash20 hashes)
+                , orderBy = Present (orderBy args.sort)
                 , limit = Present args.limit
                 , offset = Present args.offset
                 , totalCount = Present True
                 , hasNextPage = Present True
             }
         )
+
+
+{-| `orderBy` is a list, so sorts compose — but each menu entry is deliberately one field.
+
+Every field below was exercised against a live instance. `seeders` is nullable and sorts
+the torrents that have a count ahead of the ones that don't, which is the useful direction;
+`relevance` with no query string is accepted rather than rejected, and simply means
+nothing in particular.
+
+-}
+orderBy : Sort -> List InputObject.TorrentContentOrderByInput
+orderBy sort =
+    let
+        by field descending =
+            [ { field = field, descending = Present descending } ]
+    in
+    case sort of
+        Sort.Relevance ->
+            by OrderByField.Relevance True
+
+        Sort.Newest ->
+            by OrderByField.Published_at True
+
+        Sort.Oldest ->
+            by OrderByField.Published_at False
+
+        Sort.Largest ->
+            by OrderByField.Size True
+
+        Sort.Smallest ->
+            by OrderByField.Size False
+
+        Sort.MostSeeders ->
+            by OrderByField.Seeders True
+
+        Sort.ByName ->
+            by OrderByField.Name False
 
 
 pageSelection : SelectionSet Page Magnes.Api.Object.TorrentContentSearchResult

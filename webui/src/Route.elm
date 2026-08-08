@@ -7,6 +7,7 @@ variant breaks it at compile time rather than producing a dead link.
 
 -}
 
+import Sort exposing (Sort)
 import Url exposing (Url)
 import Url.Builder as Builder
 import Url.Parser as Parser exposing ((</>), (<?>), Parser, oneOf, s, top)
@@ -20,22 +21,24 @@ type Route
 
 
 {-| Everything the URL says about a search. The model derives from this, never the
-reverse, so a search is always a link.
+reverse, so a search is always a link — the ordering included.
 -}
 type alias SearchParams =
-    { q : Maybe String }
+    { q : Maybe String
+    , sort : Sort
+    }
 
 
 emptySearch : SearchParams
 emptySearch =
-    { q = Nothing }
+    { q = Nothing, sort = Sort.default }
 
 
 parser : Parser (Route -> a) a
 parser =
     oneOf
-        [ Parser.map (searchWith Nothing) top
-        , Parser.map searchWith (s "search" <?> Query.string "q")
+        [ Parser.map (searchWith Nothing Nothing) top
+        , Parser.map searchWith (s "search" <?> Query.string "q" <?> Query.string "sort")
         , Parser.map Torrent (s "torrent" </> infoHash)
         ]
 
@@ -59,9 +62,12 @@ infoHash =
                 Nothing
 
 
-searchWith : Maybe String -> Route
-searchWith q =
-    Search { q = q |> Maybe.andThen nonBlank }
+searchWith : Maybe String -> Maybe String -> Route
+searchWith q sort =
+    Search
+        { q = q |> Maybe.andThen nonBlank
+        , sort = sort |> Maybe.map Sort.fromParam |> Maybe.withDefault Sort.default
+        }
 
 
 nonBlank : String -> Maybe String
@@ -83,13 +89,16 @@ toHref : Route -> String
 toHref route =
     case route of
         Search params ->
+            -- The default sort is left out, so an ordinary search is still a bare ?q=.
             Builder.absolute [ "search" ]
-                (case params.q of
-                    Just q ->
-                        [ Builder.string "q" q ]
+                (List.filterMap identity
+                    [ Maybe.map (Builder.string "q") params.q
+                    , if params.sort == Sort.default then
+                        Nothing
 
-                    Nothing ->
-                        []
+                      else
+                        Just (Builder.string "sort" (Sort.toParam params.sort))
+                    ]
                 )
 
         Torrent hash ->
