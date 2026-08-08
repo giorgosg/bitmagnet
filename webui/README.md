@@ -105,11 +105,16 @@ the code that decides *when to fetch more* both want to own the scroll handler.
 ### Rows expand in place
 
 A result row is one dense line with the name truncated. Expanding it reveals
-metadata; expanding further reveals the torrent's file list — where there is
-one. On a real index most torrents have no file information at all, so the
-second level is offered conditionally rather than always drawn and then found
-empty. Most torrents are also unclassified, so a row has to look right with
-nothing but a title, a size and a date.
+metadata; expanding further reveals the torrent's files — where there are any. On
+a real index most torrents have no file information at all, so the second level
+is offered conditionally rather than always drawn and then found empty. Most
+torrents are also unclassified, so a row has to look right with nothing but a
+title, a size and a date.
+
+The files are a directory tree, not a list of paths: the last line of an expanded
+row is the torrent's own folder, and opening it opens every folder beneath at
+once. Folders then close one at a time. bitmagnet returns flat paths, so the tree
+is reconstructed client-side.
 
 Detail is therefore progressive and doesn't interrupt scanning — no round trip
 to a detail page and back just to see a file list. Each state has a known

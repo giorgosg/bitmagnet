@@ -1,10 +1,11 @@
 module Main exposing (main)
 
-import Bitmagnet exposing (File, Page, Row)
+import Bitmagnet exposing (Page, Row)
 import Browser
 import Browser.Dom
 import Browser.Events
 import Browser.Navigation as Nav
+import FileTree
 import Format
 import Graphql.Http
 import Html exposing (Attribute, Html, a, button, div, form, h1, header, input, main_, p, span, text)
@@ -107,7 +108,17 @@ type Files
     = Unopened
     | Fetching
     | FilesFailed String
-    | Open Bitmagnet.FileList
+    | Open OpenFiles
+
+
+{-| The tree and the omission note are built once, when the files arrive, rather than on
+every render — the same reason the formatted date lives on `Item`.
+-}
+type alias OpenFiles =
+    { root : FileTree.Node
+    , collapsed : Set String
+    , omission : String
+    }
 
 
 pageSize : Int
@@ -220,6 +231,7 @@ type Msg
     | GotZone Time.Zone
     | ToggleExpanded String
     | ToggleFiles String
+    | ToggleFolder String String
     | GotFiles String (Result (Graphql.Http.Error Bitmagnet.FileList) Bitmagnet.FileList)
     | GotResults Int (Result (Graphql.Http.Error Page) Page)
     | Ignored
@@ -347,7 +359,48 @@ update msg model =
                     ( model, Cmd.none )
 
         GotFiles rowId (Ok fileList) ->
-            ( mapItem rowId (\item -> { item | files = Open fileList }) model, Cmd.none )
+            ( mapItem rowId
+                (\item ->
+                    { item
+                        | files =
+                            Open
+                                { root = FileTree.root item.row.name fileList.files
+
+                                -- Every folder open. Opening the root is one gesture that
+                                -- shows the whole shape; closing them again is per folder.
+                                , collapsed = Set.empty
+                                , omission = omissions fileList
+                                }
+                    }
+                )
+                model
+            , Cmd.none
+            )
+
+        ToggleFolder rowId key ->
+            ( mapItem rowId
+                (\item ->
+                    case item.files of
+                        Open open ->
+                            { item
+                                | files =
+                                    Open
+                                        { open
+                                            | collapsed =
+                                                if Set.member key open.collapsed then
+                                                    Set.remove key open.collapsed
+
+                                                else
+                                                    Set.insert key open.collapsed
+                                        }
+                            }
+
+                        _ ->
+                            item
+                )
+                model
+            , Cmd.none
+            )
 
         GotFiles rowId (Err error) ->
             ( mapItem rowId (\item -> { item | files = FilesFailed (Bitmagnet.errorToString error) }) model
@@ -779,47 +832,62 @@ listConfig model =
 itemHeight : Item -> Int
 itemHeight item =
     if item.expanded then
-        rowHeight + metaHeight item + filesAffordanceHeight item + filesHeight item
+        rowHeight + metaHeight item + filesHeight item
 
     else
         rowHeight
 
 
-{-| The one line under the metadata: either the toggle, or the reason there isn't one.
+{-| Counted off `viewFiles`'s own list, so the two cannot disagree.
 -}
-filesAffordanceHeight : Item -> Int
-filesAffordanceHeight item =
+filesHeight : Item -> Int
+filesHeight item =
     case item.row.filesStatus of
-        Multi ->
-            noticeHeight
-
         Over_threshold ->
             noticeHeight
+
+        Multi ->
+            (fileHeight * List.length (fileEntries item))
+                + (case item.files of
+                    Fetching ->
+                        noticeHeight
+
+                    FilesFailed _ ->
+                        noticeHeight
+
+                    Open open ->
+                        if open.omission == "" then
+                            0
+
+                        else
+                            noticeHeight
+
+                    Unopened ->
+                        0
+                  )
 
         _ ->
             0
 
 
-filesHeight : Item -> Int
-filesHeight item =
+{-| The tree's rows. Before the files arrive there is still one: the torrent's own folder,
+closed, which is what you click to fetch them.
+-}
+fileEntries : Item -> List FileTree.Entry
+fileEntries item =
     case item.files of
-        Unopened ->
-            0
+        Open open ->
+            FileTree.flatten open.collapsed open.root
 
-        Fetching ->
-            noticeHeight
-
-        FilesFailed _ ->
-            noticeHeight
-
-        Open fileList ->
-            (fileHeight * List.length fileList.files)
-                + (if omissions fileList == "" then
-                    0
-
-                   else
-                    noticeHeight
-                  )
+        _ ->
+            [ { depth = 0
+              , key = item.row.name
+              , name = item.row.name
+              , size = item.row.size
+              , isFolder = True
+              , collapsed = True
+              }
+            ]
 
 
 {-| The count is an estimate on broad queries and exact on narrow ones, and the response
@@ -985,18 +1053,8 @@ viewFiles item =
             ]
 
         Multi ->
-            button
-                [ class "files-toggle", type_ "button", onClick (ToggleFiles item.row.id) ]
-                [ text
-                    (case item.files of
-                        Unopened ->
-                            "show files"
-
-                        _ ->
-                            "hide files"
-                    )
-                ]
-                :: (case item.files of
+            List.map (viewEntry item) (fileEntries item)
+                ++ (case item.files of
                         Unopened ->
                             []
 
@@ -1006,19 +1064,67 @@ viewFiles item =
                         FilesFailed message ->
                             [ div [ class "files-notice error" ] [ text message ] ]
 
-                        Open fileList ->
-                            List.map viewFile fileList.files
-                                ++ (case omissions fileList of
-                                        "" ->
-                                            []
+                        Open open ->
+                            if open.omission == "" then
+                                []
 
-                                        note ->
-                                            [ div [ class "files-notice" ] [ text note ] ]
-                                   )
+                            else
+                                [ div [ class "files-notice" ] [ text open.omission ] ]
                    )
 
         _ ->
             []
+
+
+{-| One line of the tree. Folders carry a twist and are clickable; files are inert.
+
+Clicking the root while the files have not been fetched is what fetches them; after that
+the same row just opens and closes like any other folder.
+
+-}
+viewEntry : Item -> FileTree.Entry -> Html Msg
+viewEntry item entry =
+    let
+        indent =
+            -- Matches the stylesheet's own left padding for the panel, plus a step per
+            -- level. Horizontal only, so it cannot disturb the row height.
+            Html.Attributes.style "padding-left"
+                (String.fromFloat (2.6 + toFloat entry.depth * 1.05) ++ "rem")
+
+        opens =
+            case item.files of
+                Unopened ->
+                    ToggleFiles item.row.id
+
+                _ ->
+                    ToggleFolder item.row.id entry.key
+    in
+    if entry.isFolder then
+        div
+            [ class "file folder"
+            , classList [ ( "open", not entry.collapsed ) ]
+            , indent
+            , attribute "role" "button"
+            , attribute "aria-expanded"
+                (if entry.collapsed then
+                    "false"
+
+                 else
+                    "true"
+                )
+            , onClick opens
+            ]
+            [ span [ class "branch" ] [ chevronIcon ]
+            , span [ class "path" ] [ text entry.name ]
+            , span [ class "size" ] [ text (Format.bytes entry.size) ]
+            ]
+
+    else
+        div [ class "file", indent ]
+            [ span [ class "branch" ] []
+            , span [ class "path" ] [ text entry.name ]
+            , span [ class "size" ] [ text (Format.bytes entry.size) ]
+            ]
 
 
 {-| What the list isn't showing, if anything. Returning the sentence itself keeps the
@@ -1048,14 +1154,6 @@ omissions fileList =
 
         notes ->
             String.join " · " notes
-
-
-viewFile : File -> Html Msg
-viewFile file =
-    div [ class "file" ]
-        [ span [ class "path" ] [ text file.path ]
-        , span [ class "size" ] [ text (Format.bytes file.size) ]
-        ]
 
 
 chevronIcon : Html msg

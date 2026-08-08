@@ -178,6 +178,29 @@ header until `scrollbar-gutter: stable both-edges` made it symmetric; and a row'
 0.5rem of hover padding is subtracted from the wrapper, so row text lands on the same
 column as the header while only the hover highlight bleeds past it.
 
+**The file list is a directory tree, and it is hand-rolled.** bitmagnet returns flat
+`/`-separated paths relative to the torrent's root directory, so the tree has to be
+reconstructed — and no Elm package does that part, which is the actual work. Three tree
+*views* exist on the registry; `dosarf/elm-tree-view` is the credible one and can render
+custom rows, but it brings its own model, messages, `<table>` markup, CSS classes,
+selection and keyboard machinery, of which roughly none is wanted here. `FileTree` is
+about 150 lines and owes nothing.
+
+The last line of an expanded row is the torrent's own folder, closed. Opening it fetches
+the files and opens every folder at once — one gesture that shows the whole shape — after
+which folders close individually and stay closed while the root is shut and reopened,
+because the state is a `Set` of full paths rather than anything positional. Folders sort
+before files at each level; within each group the torrent's own order is kept, since for
+anything episodic that is the running order. A folder shows the total size of everything
+beneath it.
+
+`FileTree.flatten` is the only way to read a tree: it returns the rows to draw, already
+indented and already resolved as open or closed. The view maps over that list and the
+height multiplies its length, so the rows drawn and the rows the virtualizer was promised
+cannot drift apart. Verified in the running list — 30 tree rows measured 742px against a
+computed 742, a mixed open/closed state measured 544 against 544, and the five rows below
+an expanded item stacked with zero gap.
+
 **Padding files are dropped from expanded file lists.** They are alignment filler, not
 content, and they can outnumber the real files — a ten-episode season came back as 19
 entries, 9 of them padding. Two conventions are matched: BEP-47's `.pad/<size>` directory,
