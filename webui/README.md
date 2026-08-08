@@ -124,6 +124,11 @@ and "open in new tab" work, and a torrent can be shared without sharing the
 search that found it. It renders the same expanded row the list does, standalone,
 fetching that one torrent when opened cold.
 
+A plain left-click on that link does *not* follow it: it expands the row where it
+is. Browsing an index means opening many rows in passing, and a page load for
+each one is the wrong default — so the ordinary click is the cheap thing and the
+address is what the deliberate gestures reach.
+
 Expansion itself is *not* in the URL. Scanning means expanding several rows in
 passing, and if each one pushed a history entry the back button would fill with
 them — the same problem `replaceUrl` solves for filter churn. So expansion is

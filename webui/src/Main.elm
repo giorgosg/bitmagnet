@@ -7,9 +7,9 @@ import Browser.Events
 import Browser.Navigation as Nav
 import Format
 import Graphql.Http
-import Html exposing (Html, a, button, div, form, h1, header, input, main_, p, span, text)
+import Html exposing (Attribute, Html, a, button, div, form, h1, header, input, main_, p, span, text)
 import Html.Attributes exposing (attribute, class, classList, href, id, placeholder, spellcheck, type_, value)
-import Html.Events exposing (on, onClick, onInput, onSubmit)
+import Html.Events exposing (on, onClick, onInput, onSubmit, stopPropagationOn)
 import InfiniteList
 import Json.Decode as Decode exposing (Value)
 import Magnes.Api.Enum.ContentType as ContentType
@@ -232,7 +232,27 @@ update msg model =
             ( model, Cmd.none )
 
         LinkClicked (Browser.Internal url) ->
-            ( model, Nav.pushUrl model.key (Url.toString url) )
+            case ( Route.fromUrl url, model.route ) of
+                -- A row's name links to the torrent's own page, which is what makes
+                -- middle-click and "open in new tab" work. But an ordinary click on a
+                -- result should open it where it already is, so the navigation is turned
+                -- back into an expansion. Only from a list: on the torrent page itself the
+                -- link is to the page you are on.
+                ( Route.Torrent hash, Route.Search _ ) ->
+                    ( mapItems
+                        (\item ->
+                            if item.row.infoHash == hash then
+                                { item | expanded = not item.expanded }
+
+                            else
+                                item
+                        )
+                        model
+                    , Cmd.none
+                    )
+
+                _ ->
+                    ( model, Nav.pushUrl model.key (Url.toString url) )
 
         LinkClicked (Browser.External url) ->
             ( model, Nav.load url )
@@ -845,7 +865,7 @@ real index most rows have no metadata, so a column of it is a column of blanks.
 -}
 viewRow : Item -> Html Msg
 viewRow item =
-    div [ class "row" ]
+    div [ class "row", onRowClick item.row.id ]
         [ button
             [ class "twist"
             , classList [ ( "open", item.expanded ) ]
@@ -858,10 +878,23 @@ viewRow item =
                 )
             , attribute "aria-label" ("Details for " ++ item.row.title)
             , type_ "button"
-            , onClick (ToggleExpanded item.row.id)
+
+            -- The row already toggles; without stopping here the click would be counted
+            -- twice and cancel itself out. The button stays for the keyboard, and as the
+            -- thing that shows the state.
+            , stopPropagationOn "click" (Decode.succeed ( ToggleExpanded item.row.id, True ))
             ]
             [ chevronIcon ]
-        , a [ class "name", href (Route.toHref (Route.Torrent item.row.infoHash)) ]
+        , a
+            [ class "name"
+            , href (Route.toHref (Route.Torrent item.row.infoHash))
+
+            -- Elm installs its own click listener on every anchor, and it runs before
+            -- anything on an ancestor — so the row's handler would fire *as well*, toggling
+            -- twice and appearing to do nothing. The anchor's click is handled entirely by
+            -- `LinkClicked`; this only keeps it from reaching the row.
+            , stopPropagationOn "click" (Decode.succeed ( Ignored, True ))
+            ]
             [ text item.row.title ]
         , span [ class "size" ] [ text (Format.bytes item.row.size) ]
         , a
@@ -869,9 +902,44 @@ viewRow item =
             , href item.row.magnetUri
             , attribute "aria-label" ("Magnet link for " ++ item.row.title)
             , attribute "title" "magnet link"
+
+            -- The one thing in the row that is not "expand": let the click reach the
+            -- browser as an ordinary link, but keep it away from the row's handler.
+            , stopPropagationOn "click" (Decode.succeed ( Ignored, True ))
             ]
             [ magnetIcon ]
         ]
+
+
+{-| A plain click anywhere on the line expands it, including on the name — which is still
+a real link, so the ways of opening a link elsewhere all keep working.
+
+Those are the cases deliberately left alone. A modified click (ctrl, cmd, shift, alt) is
+the browser's "open this somewhere else" and falls through to `Browser.application`, which
+skips modified clicks itself and lets the browser have them. Middle click fires `auxclick`
+rather than `click` and so never arrives here at all.
+
+`stopPropagation` matters as much as `preventDefault`: `Browser.application` listens for
+clicks on the document, and preventing the default alone would not stop it from turning
+this into a navigation.
+
+-}
+onRowClick : String -> Attribute Msg
+onRowClick rowId =
+    Html.Events.custom "click"
+        (Decode.map4
+            (\ctrl meta shift alt ->
+                if ctrl || meta || shift || alt then
+                    { message = Ignored, stopPropagation = False, preventDefault = False }
+
+                else
+                    { message = ToggleExpanded rowId, stopPropagation = True, preventDefault = True }
+            )
+            (Decode.field "ctrlKey" Decode.bool)
+            (Decode.field "metaKey" Decode.bool)
+            (Decode.field "shiftKey" Decode.bool)
+            (Decode.field "altKey" Decode.bool)
+        )
 
 
 viewMeta : Item -> List (Html Msg)

@@ -45,11 +45,17 @@ of it. The magnet is an icon at the end — an `<a href="magnet:…">`, a real l
 opens a client on click and can be copied by right-click. No checkboxes, no per-row
 buttons; there are no bulk operations without mutations.
 
-A disclosure chevron sits to the left of the name and is the only thing that expands the
-row. The name stays a plain link to `/torrent/<hash>`, so clicking it navigates and
-nothing about the row is ambiguous — the alternative, making the whole line a toggle,
-would have made a left-click on the name mean something different from a middle-click on
-it. The chevron costs about 26px of name width.
+A plain click anywhere on the line expands it — the name included. The name is still an
+anchor pointing at `/torrent/<hash>`, so middle-click, ctrl/cmd-click and "open in new
+tab" all still reach the torrent's own page; only the plain click is reinterpreted. The
+chevron on the left stays as the state indicator and as the keyboard-operable control, and
+costs about 26px of name width. The magnet icon is the one part of the row that is not
+"expand".
+
+Left-click and middle-click therefore mean different things on the same anchor. That is
+the deliberate trade: browsing an index means opening a lot of rows in passing, and making
+each one a page load was the wrong default. The row shows `cursor: pointer` and the name
+no longer underlines on hover, so nothing promises a navigation that does not happen.
 
 Everything else — dates, seeders, content type, file list — lives in the expansion, not
 the line. This is tighter than the README's "one dense line with the name truncated"
@@ -130,6 +136,24 @@ as an estimate (2.87M, `true`); a narrow query came back exact (2715, `false`). 
 having no indexed files. Trusting the count draws an expander that opens onto nothing.
 Confirmed in the running UI: a 222-file `over_threshold` row draws metadata and no file
 expander, while a 23-file `multi` row beside it draws both.
+
+**Expanding on click is done in `onUrlRequest`, not with `preventDefault` on the row.**
+The obvious implementation — a click handler on the row that cancels the event — does not
+work, and fails in a way that looks like the handler is simply not firing. Elm installs
+its own click listener **on every anchor it renders**, not on the document, so that
+listener has already run and already sent `onUrlRequest` by the time the event reaches any
+ancestor. `stopPropagation` from the row cannot unwind it.
+
+So the interception happens where Elm hands the click over: `LinkClicked (Internal url)`
+turns a `/torrent/<hash>` request into an expansion when the current route is a search,
+and navigates otherwise. This also inherits exactly the right exclusions for free —
+Elm diverts a click only when `!ctrlKey && !metaKey && !shiftKey && button < 1`, and
+middle click fires `auxclick`, which nothing in the app listens to. Every "open it
+elsewhere" gesture reaches the browser untouched without a single modifier check of ours.
+
+The row still needs its own handler for the parts that are not the anchor — the size, the
+empty space — and the anchor needs `stopPropagation` so that a click on the name is not
+counted by both paths, which would toggle twice and appear to do nothing.
 
 **Sorting is a menu of single orderings, not a sort builder.** bitmagnet's `orderBy` is a
 list of field/direction pairs and composes arbitrarily, but a UI for composing them is one

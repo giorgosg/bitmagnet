@@ -202,6 +202,9 @@ main {
   height: var(--row-height);
   padding: 0 0.5rem;
   border-radius: 4px;
+
+  /* The whole line is the expander, so the whole line looks clickable. */
+  cursor: pointer;
 }
 
 .row:hover {
@@ -248,11 +251,9 @@ main {
   text-decoration: none;
 }
 
-.row:hover .name {
-  text-decoration: underline;
-  text-decoration-color: var(--dim);
-  text-underline-offset: 3px;
-}
+/* No underline on hover. The name is still an anchor, so middle-click and "open in new
+   tab" reach the torrent's own page — but a plain click expands, and underlining it would
+   promise a navigation that no longer happens. */
 
 .row .size {
   flex: none;
