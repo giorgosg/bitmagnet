@@ -1,6 +1,13 @@
 /* One accent, one typeface, no borders between rows. The list is the page. */
 
 :root {
+  /* Declares that both schemes are supported, which is what makes the browser render
+     *native* UI to match: the scrollbar, the sort dropdown's list, focus rings, and the
+     search field's clear button. Swapping the custom properties below only repaints what
+     this stylesheet draws — without this line the chrome stays in its light default on a
+     dark page, and the scrollbar in particular looks like it belongs to another site. */
+  color-scheme: light dark;
+
   --bg: #fbfbfa;
   --fg: #1b1b1a;
   --dim: #6f6f6a;
