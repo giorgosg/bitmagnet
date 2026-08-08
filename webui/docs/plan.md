@@ -63,13 +63,21 @@ implies, and it is deliberate: 88% of rows on a real index have no content metad
 any column of metadata is a column of blanks.
 
 Clean look: one typeface, a single accent colour, generous line height, no borders
-between rows (hover shading instead), no chrome around the list. The search field is the
-only thing above the results.
+between rows (hover shading instead), no chrome around the list. Above the results sit
+only the search field, a sort menu, and a `filters` disclosure — the facet chips stay
+folded away until asked for, and unfold themselves when a link arrives with filters
+already applied, so a shared search shows what is narrowing it.
+
+A `?` beside the field carries bitmagnet's query syntax as a native tooltip. Everything
+the upstream guide documents fits in six lines — `"exact phrase"`, `a | b`, `!term`,
+`appl*`, `( )`, `a . b` — and most of it is what people already expect from a search box,
+so it is a reminder rather than a manual, and the browser places it instead of a popover
+this code would have to manage.
 
 ## Steps
 
-Each step ends somewhere the app still compiles and runs. Steps 1–8 are built and were
-driven against the live instance; 9 is not started.
+Each step ends somewhere the app still compiles and runs. All nine are built, each
+driven against the live instance.
 
 **1. Toolchain and codegen.** ✅ `elm`, `elm-format`, `@dillonkearns/elm-graphql` as dev
 dependencies; `elm init`; generate `src/Magnes/Api` from the live schema. Map `DateTime`
@@ -88,7 +96,7 @@ needs unmatched-path fallback or a deep link 404s on refresh.
 **4. The row and the look.** ✅ As above, plus byte and date formatting. Fixed row height,
 because virtualization depends on it.
 
-**5. Search state in the URL.** ✅ for `q` and `sort` — facets join them at step 9. The model
+**5. Search state in the URL.** ✅ `q`, `sort` and the facet filters. The model
 derives from the URL rather than the reverse: typing writes the URL after a 300ms quiet
 period with `replaceUrl`, and the resulting `onUrlChange` is what issues the query. Enter
 uses `pushUrl`, so the back button walks searches you committed to rather than every
@@ -108,8 +116,8 @@ known height.
 **8. `/torrent/<hash>`.** ✅ There is no get-by-hash query; call `search` with
 `infoHashes: [hash]` and take the one item. Renders the same expanded row, standalone.
 
-**9. Facets.** `contentType` with counts. Everything else as a filter without counts —
-see the caveat below.
+**9. Facets.** ✅ `contentType` with counts, `fileType` as a filter without them — see the
+caveat below, and `Facet` for why seven of bitmagnet's nine facets are not drawn.
 
 ## Decisions taken here
 
@@ -120,12 +128,35 @@ truncation story, and heights are expressed through its own layout algebra rathe
 the pixel numbers `InfiniteList` needs. A stylesheet is also how "clean" gets achieved
 cheaply. This was flagged in the package survey as expensive to reverse; it is settled.
 
-**Facet counts come from `contentType` only.** On the live instance, `torrentFileType`
-aggregation returned ~1918 for every bucket on a query whose `totalCount` was 673, and
-the numbers drifted between identical calls. The counts are not query-scoped and cannot
-be shown. The *filter* works correctly, so file type remains a filter with no number next
-to it. `contentType` aggregates correctly, including a `null` "Unknown" bucket that is
-usually the largest one.
+**Two facets are drawn, out of the nine bitmagnet offers.** All nine were checked against
+the live instance by comparing each aggregation's bucket sum to the query's own
+`totalCount`. Only `torrentFileType` is broken: its buckets summed to 18,832 on a query
+totalling 4,703, roughly four times over, and drifted between identical calls. The other
+eight are query-scoped and sane.
+
+The reason the other seven are not drawn is data, not correctness. `genre` and
+`torrentTag` returned no buckets at all, and `language`, `videoResolution` and
+`videoSource` returned buckets totalling *four*, *two* and *six* rows out of 4,703 — a DHT
+index simply does not know that much about what it has crawled. Content type is the
+obvious axis, and file type is the one that still means something for the ~88% of rows
+that were never classified. The rest are worth adding when an index exists that can fill
+them.
+
+So `contentType` is aggregated and its chips carry counts; `fileType` is never aggregated
+at all. Its counts are the broken ones, and its values are a fixed eight-member enum the
+UI can draw for itself — asking would be both misleading and pointless.
+
+**`Unclassified` is a value, not the absence of one.** `ContentTypeFacetInput.filter` is
+`[ContentType]` with *nullable* elements, and sending `[null]` returns exactly the rows
+bitmagnet never classified — 4,210 of 4,703 on a live "ubuntu" search. Since that is the
+largest bucket by far on any real index, being able to filter to it matters more than the
+named types do.
+
+**Only the first page of a search asks for aggregation.** Facet counts do not change as
+you page through, so recomputing them over millions of rows on every scroll would be paid
+for nothing. `Page.contentTypes` is therefore a `Maybe`, and appending a later page leaves
+the existing buckets alone rather than replacing them with the nothing it asked for.
+Verified: pulling all 195 rows of a filtered search left the chips and their counts intact.
 
 **`totalCountIsEstimate` is read per query, not assumed.** A whole-index count came back
 as an estimate (2.87M, `true`); a narrow query came back exact (2715, `false`). Render

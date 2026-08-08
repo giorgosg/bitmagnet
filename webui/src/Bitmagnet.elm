@@ -4,6 +4,7 @@ module Bitmagnet exposing (File, FileList, Page, Row, SearchArgs, byInfoHash, er
 `Magnes.Api.Mutation` is never imported here or anywhere else.
 -}
 
+import Facet
 import Graphql.Http
 import Graphql.Operation exposing (RootQuery)
 import Graphql.OptionalArgument as Opt exposing (OptionalArgument(..))
@@ -13,8 +14,10 @@ import Magnes.Api.Enum.FilesStatus exposing (FilesStatus)
 import Magnes.Api.Enum.TorrentContentOrderByField as OrderByField
 import Magnes.Api.InputObject as InputObject
 import Magnes.Api.Object
+import Magnes.Api.Object.ContentTypeAgg as ContentTypeAgg
 import Magnes.Api.Object.Torrent as Torrent
 import Magnes.Api.Object.TorrentContent as TorrentContent
+import Magnes.Api.Object.TorrentContentAggregations as Aggregations
 import Magnes.Api.Object.TorrentContentQuery as TorrentContentQuery
 import Magnes.Api.Object.TorrentContentSearchResult as SearchResult
 import Magnes.Api.Object.TorrentFile as TorrentFile
@@ -71,6 +74,7 @@ type alias Page =
     , totalCountIsEstimate : Bool
     , hasNextPage : Bool
     , items : List Row
+    , contentTypes : Maybe (List ( Facet.ContentFilter, Int ))
     }
 
 
@@ -78,6 +82,8 @@ type alias SearchArgs =
     { queryString : Maybe String
     , infoHashes : List String
     , sort : Sort
+    , filters : Facet.Filters
+    , aggregate : Bool
     , limit : Int
     , offset : Int
     }
@@ -91,6 +97,8 @@ byInfoHash infoHash =
     { queryString = Nothing
     , infoHashes = [ infoHash ]
     , sort = Sort.default
+    , filters = Facet.empty
+    , aggregate = False
     , limit = 1
     , offset = 0
     }
@@ -119,6 +127,7 @@ searchInput args =
 
                         hashes ->
                             Present (List.map Scalar.Hash20 hashes)
+                , facets = Present (facets args)
                 , orderBy = Present (orderBy args.sort)
                 , limit = Present args.limit
                 , offset = Present args.offset
@@ -126,6 +135,56 @@ searchInput args =
                 , hasNextPage = Present True
             }
         )
+
+
+{-| Content type is aggregated so its chips can carry counts; file type never is. Its
+counts are wrong on this instance — every bucket came back ~1918 on a query totalling 673 —
+and the set of file types is a fixed enum the UI can draw for itself, so asking is both
+misleading and pointless.
+-}
+facets : SearchArgs -> InputObject.TorrentContentFacetsInput
+facets args =
+    InputObject.buildTorrentContentFacetsInput
+        (\opts ->
+            { opts
+                | contentType =
+                    Present
+                        (InputObject.buildContentTypeFacetInput
+                            (\facet ->
+                                { facet
+                                    | aggregate = Present args.aggregate
+                                    , filter = optionalList (List.map toContentType args.filters.content)
+                                }
+                            )
+                        )
+                , torrentFileType =
+                    Present
+                        (InputObject.buildTorrentFileTypeFacetInput
+                            (\facet -> { facet | filter = optionalList args.filters.files })
+                        )
+            }
+        )
+
+
+toContentType : Facet.ContentFilter -> Maybe ContentType
+toContentType filter =
+    case filter of
+        Facet.Known contentType ->
+            Just contentType
+
+        Facet.Unclassified ->
+            Nothing
+
+
+{-| An empty filter list is not the same as no filter: sending `[]` would match nothing.
+-}
+optionalList : List a -> Opt.OptionalArgument (List a)
+optionalList values =
+    if List.isEmpty values then
+        Absent
+
+    else
+        Present values
 
 
 {-| `orderBy` is a list, so sorts compose — but each menu entry is deliberately one field.
@@ -167,11 +226,28 @@ orderBy sort =
 
 pageSelection : SelectionSet Page Magnes.Api.Object.TorrentContentSearchResult
 pageSelection =
-    SelectionSet.map4 Page
+    SelectionSet.map5 Page
         SearchResult.totalCount
         SearchResult.totalCountIsEstimate
         (SearchResult.hasNextPage |> SelectionSet.map (Maybe.withDefault False))
         (SearchResult.items rowSelection)
+        (SearchResult.aggregations contentTypeBuckets)
+
+
+{-| `Nothing` when the request did not ask for aggregation, which is every request but the
+first page of a search — recomputing facets over millions of rows on each scroll would be
+paid for nothing, since the buckets do not change as you page through.
+-}
+contentTypeBuckets : SelectionSet (Maybe (List ( Facet.ContentFilter, Int ))) Magnes.Api.Object.TorrentContentAggregations
+contentTypeBuckets =
+    Aggregations.contentType
+        (SelectionSet.map2
+            (\value bucketCount ->
+                ( Maybe.map Facet.Known value |> Maybe.withDefault Facet.Unclassified, bucketCount )
+            )
+            ContentTypeAgg.value
+            ContentTypeAgg.count
+        )
 
 
 rowSelection : SelectionSet Row Magnes.Api.Object.TorrentContent

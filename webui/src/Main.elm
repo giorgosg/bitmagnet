@@ -5,6 +5,7 @@ import Browser
 import Browser.Dom
 import Browser.Events
 import Browser.Navigation as Nav
+import Facet
 import FileTree
 import Format
 import Graphql.Http
@@ -55,6 +56,10 @@ type alias Model =
     , viewportHeight : Int
     , zone : Time.Zone
 
+    -- Purely presentational, so it is not in the URL. It opens itself when a link arrives
+    -- with filters already applied, so a shared search shows what is narrowing it.
+    , filtersOpen : Bool
+
     -- Bumped when the searched-for query actually changes. Responses carry the epoch they
     -- were asked under, so a page that arrives after the query moved on is dropped rather
     -- than appended to the wrong list.
@@ -84,6 +89,10 @@ type alias FeedState =
     , totalIsEstimate : Bool
     , hasNextPage : Bool
     , fetching : Bool
+
+    -- Counts for the content-type chips, from the first page only. Later pages leave them
+    -- alone rather than replacing them with the nothing they asked for.
+    , contentTypes : List ( Facet.ContentFilter, Int )
     }
 
 
@@ -193,6 +202,7 @@ init flags url key =
       , infiniteList = InfiniteList.init
       , viewportHeight = 800
       , zone = Time.utc
+      , filtersOpen = not (Facet.isEmpty (filtersFor route))
       , epoch = 0
       , typing = 0
       }
@@ -202,6 +212,16 @@ init flags url key =
         , Task.perform GotZone Time.here
         ]
     )
+
+
+filtersFor : Route -> Facet.Filters
+filtersFor route =
+    case route of
+        Route.Search params ->
+            params.filters
+
+        _ ->
+            Facet.empty
 
 
 fieldFor : Route -> String
@@ -226,6 +246,8 @@ type Msg
     | DebounceElapsed Int
     | Submitted
     | SortChanged String
+    | FiltersToggled
+    | FilterChanged Facet.Filters
     | Scrolled Value
     | Resized Int
     | GotZone Time.Zone
@@ -312,17 +334,27 @@ update msg model =
 
             else
                 ( model
-                , Nav.replaceUrl model.key (Route.toHref (searchRoute model (currentSort model)))
+                , Nav.replaceUrl model.key (Route.toHref (currentSearch model))
                 )
 
         Submitted ->
-            ( model, Nav.pushUrl model.key (Route.toHref (searchRoute model (currentSort model))) )
+            ( model, Nav.pushUrl model.key (Route.toHref (currentSearch model)) )
 
         SortChanged raw ->
             -- Choosing an ordering is a deliberate act, so it earns a history entry —
             -- unlike the keystrokes that `replaceUrl` collapses.
             ( model
-            , Nav.pushUrl model.key (Route.toHref (searchRoute model (Sort.fromParam raw)))
+            , Nav.pushUrl model.key
+                (Route.toHref (searchRoute model (Sort.fromParam raw) (currentFilters model)))
+            )
+
+        FiltersToggled ->
+            ( { model | filtersOpen = not model.filtersOpen }, Cmd.none )
+
+        FilterChanged filters ->
+            ( model
+            , Nav.pushUrl model.key
+                (Route.toHref (searchRoute model (currentSort model) filters))
             )
 
         Resized height ->
@@ -464,9 +496,9 @@ syncField model route =
 {-| The search the box and the menu currently describe. Both the field and the ordering
 travel together, so changing one never silently drops the other.
 -}
-searchRoute : Model -> Sort -> Route
-searchRoute model sort =
-    Route.Search { q = trimToMaybe model.field, sort = sort }
+searchRoute : Model -> Sort -> Facet.Filters -> Route
+searchRoute model sort filters =
+    Route.Search { q = trimToMaybe model.field, sort = sort, filters = filters }
 
 
 currentSort : Model -> Sort
@@ -477,6 +509,19 @@ currentSort model =
 
         _ ->
             Sort.default
+
+
+currentFilters : Model -> Facet.Filters
+currentFilters model =
+    filtersFor model.route
+
+
+{-| The search as the box, the menu and the chips currently describe it. All three travel
+together, so changing one never silently drops the others.
+-}
+currentSearch : Model -> Route
+currentSearch model =
+    searchRoute model (currentSort model) (currentFilters model)
 
 
 trimToMaybe : String -> Maybe String
@@ -553,6 +598,11 @@ searchArgs params offset =
     { queryString = params.q
     , infoHashes = []
     , sort = params.sort
+    , filters = params.filters
+
+    -- Only the first page asks for facet counts; they do not change as you page through,
+    -- and recomputing them over millions of rows on every scroll would be paid for nothing.
+    , aggregate = offset == 0
     , limit = pageSize
     , offset = offset
     }
@@ -622,7 +672,7 @@ append zone page results =
                     feed
 
                 _ ->
-                    { items = [], ids = Set.empty, total = 0, totalIsEstimate = False, hasNextPage = False, fetching = False }
+                    { items = [], ids = Set.empty, total = 0, totalIsEstimate = False, hasNextPage = False, fetching = False, contentTypes = [] }
 
         fresh =
             page.items
@@ -644,6 +694,7 @@ append zone page results =
             , totalIsEstimate = page.totalCountIsEstimate
             , hasNextPage = page.hasNextPage
             , fetching = False
+            , contentTypes = Maybe.withDefault base.contentTypes page.contentTypes
         }
 
 
@@ -683,9 +734,12 @@ view model =
     { title = documentTitle model
     , body =
         [ header []
-            [ a [ class "wordmark", href (Route.toHref (Route.Search Route.emptySearch)) ]
-                [ h1 [] [ text "magnes" ] ]
-            , searchBox model
+            [ div [ class "bar" ]
+                [ a [ class "wordmark", href (Route.toHref (Route.Search Route.emptySearch)) ]
+                    [ h1 [] [ text "magnes" ] ]
+                , searchBox model
+                ]
+            , viewFilters model
             ]
         , main_ [] [ viewRoute model ]
         ]
@@ -727,8 +781,173 @@ searchBox model =
             , onInput FieldChanged
             ]
             []
+        , syntaxHint
         , sortMenu (currentSort model)
+        , filtersButton model
         ]
+
+
+{-| bitmagnet's query language, as a native tooltip. Everything it documents fits in six
+lines, and most of it is the syntax people already expect from a search box — so it is a
+reminder, not a manual, and it stays out of the way until pointed at.
+-}
+syntaxHint : Html Msg
+syntaxHint =
+    span
+        [ class "hint"
+        , attribute "title" syntaxSummary
+        , attribute "aria-label" syntaxSummary
+        , attribute "tabindex" "0"
+        ]
+        [ text "?" ]
+
+
+syntaxSummary : String
+syntaxSummary =
+    String.join "\n"
+        [ "Search syntax"
+        , ""
+        , "\"exact phrase\"   these words, in this order"
+        , "linux | bsd     either term"
+        , "!term           exclude the term"
+        , "appl*           starts with (suffix only)"
+        , "( )             group, to control precedence"
+        , "a . b           b immediately after a"
+        , ""
+        , "Case and punctuation are ignored."
+        ]
+
+
+filtersButton : Model -> Html Msg
+filtersButton model =
+    let
+        active =
+            Facet.count (currentFilters model)
+    in
+    button
+        [ class "filters-toggle"
+        , classList [ ( "open", model.filtersOpen ), ( "active", active > 0 ) ]
+        , type_ "button"
+        , attribute "aria-expanded"
+            (if model.filtersOpen then
+                "true"
+
+             else
+                "false"
+            )
+        , onClick FiltersToggled
+        ]
+        [ text
+            (if active == 0 then
+                "filters"
+
+             else
+                "filters (" ++ String.fromInt active ++ ")"
+            )
+        ]
+
+
+{-| Two facets out of the nine bitmagnet offers — see `Facet` for why the other seven are
+not drawn. Content type comes from the aggregation, so it lists only what this search
+actually contains and carries counts; file type is the fixed enum, drawn in full and
+without counts.
+
+A selected value is always shown even when the aggregation stops returning it, which it
+does as soon as it is the only thing selected — otherwise the chip you just clicked would
+vanish and leave no way to unclick it.
+
+-}
+viewFilters : Model -> Html Msg
+viewFilters model =
+    let
+        filters =
+            currentFilters model
+
+        buckets =
+            case model.results of
+                Feed feed ->
+                    feed.contentTypes
+
+                _ ->
+                    []
+
+        listed =
+            List.map Tuple.first buckets
+
+        contentValues =
+            buckets ++ List.map (\value -> ( value, 0 )) (List.filter (\v -> not (List.member v listed)) filters.content)
+    in
+    if not model.filtersOpen then
+        text ""
+
+    else
+        div [ class "facets" ]
+            [ viewFacet "kind"
+                (List.map
+                    (\( value, n ) ->
+                        chip (Facet.contentLabel value)
+                            (Just n)
+                            (List.member value filters.content)
+                            (FilterChanged (Facet.toggleContent value filters))
+                    )
+                    contentValues
+                )
+            , viewFacet "files"
+                (List.map
+                    (\value ->
+                        chip (Facet.fileLabel value)
+                            Nothing
+                            (List.member value filters.files)
+                            (FilterChanged (Facet.toggleFile value filters))
+                    )
+                    Facet.fileTypes
+                )
+            , if Facet.isEmpty filters then
+                text ""
+
+              else
+                button
+                    [ class "clear", type_ "button", onClick (FilterChanged Facet.empty) ]
+                    [ text "clear filters" ]
+            ]
+
+
+viewFacet : String -> List (Html Msg) -> Html Msg
+viewFacet label chips =
+    if List.isEmpty chips then
+        text ""
+
+    else
+        div [ class "facet" ]
+            [ span [ class "facet-label" ] [ text label ]
+            , div [ class "chips" ] chips
+            ]
+
+
+chip : String -> Maybe Int -> Bool -> Msg -> Html Msg
+chip label maybeCount selected msg =
+    button
+        [ class "chip"
+        , classList [ ( "on", selected ) ]
+        , type_ "button"
+        , attribute "aria-pressed"
+            (if selected then
+                "true"
+
+             else
+                "false"
+            )
+        , onClick msg
+        ]
+        (text label
+            :: (case maybeCount of
+                    Just n ->
+                        [ span [ class "chip-count" ] [ text (Format.count n) ] ]
+
+                    Nothing ->
+                        []
+               )
+        )
 
 
 {-| A plain `select`, so it is a real form control: keyboard-operable, and rendered by the

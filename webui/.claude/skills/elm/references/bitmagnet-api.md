@@ -143,9 +143,19 @@ Each aggregation bucket is `{ value, label, count, isEstimate }`. `contentType` 
 same `"ubuntu"` search (`totalCount: 673`) every file-type bucket returned ~1918, and the
 values drifted between two identical calls. They are not scoped to the query. The
 *filter* side works correctly (`filter: [video]` returns sensible rows), so file type is
-usable as a filter with no count beside it. `contentType` aggregates correctly. The other
-facets are unchecked — verify a facet's counts against its own `totalCount` before
-rendering them.
+usable as a filter with no count beside it.
+
+**All nine facets have since been checked** [verified] by comparing each aggregation's
+bucket sum against the query's own `totalCount`. `torrentFileType` is the only broken one
+— 18,832 across its buckets on a query totalling 4,703. The other eight are query-scoped
+and sane, but most have nearly no data on a DHT index: on that same 4,703-row search,
+`genre` and `torrentTag` returned no buckets at all, and `language`, `videoResolution` and
+`videoSource` returned buckets totalling 4, 2 and 6 rows.
+
+**`contentType` can be filtered to null.** [verified] `ContentTypeFacetInput.filter` is
+`[ContentType]` with nullable elements, and `filter: [null]` returns exactly the
+unclassified rows — 4,210 of 4,703. Since unclassified is the largest bucket on any real
+index, this is the most useful value in the facet.
 
 ## Row model
 

@@ -7,6 +7,7 @@ variant breaks it at compile time rather than producing a dead link.
 
 -}
 
+import Facet exposing (Filters)
 import Sort exposing (Sort)
 import Url exposing (Url)
 import Url.Builder as Builder
@@ -26,19 +27,26 @@ reverse, so a search is always a link — the ordering included.
 type alias SearchParams =
     { q : Maybe String
     , sort : Sort
+    , filters : Filters
     }
 
 
 emptySearch : SearchParams
 emptySearch =
-    { q = Nothing, sort = Sort.default }
+    { q = Nothing, sort = Sort.default, filters = Facet.empty }
 
 
 parser : Parser (Route -> a) a
 parser =
     oneOf
-        [ Parser.map (searchWith Nothing Nothing) top
-        , Parser.map searchWith (s "search" <?> Query.string "q" <?> Query.string "sort")
+        [ Parser.map (searchWith Nothing Nothing [] []) top
+        , Parser.map searchWith
+            (s "search"
+                <?> Query.string "q"
+                <?> Query.string "sort"
+                <?> Query.custom Facet.contentParam identity
+                <?> Query.custom Facet.fileParam identity
+            )
         , Parser.map Torrent (s "torrent" </> infoHash)
         ]
 
@@ -62,11 +70,12 @@ infoHash =
                 Nothing
 
 
-searchWith : Maybe String -> Maybe String -> Route
-searchWith q sort =
+searchWith : Maybe String -> Maybe String -> List String -> List String -> Route
+searchWith q sort contentValues fileValues =
     Search
         { q = q |> Maybe.andThen nonBlank
         , sort = sort |> Maybe.map Sort.fromParam |> Maybe.withDefault Sort.default
+        , filters = Facet.fromQuery contentValues fileValues
         }
 
 
@@ -99,6 +108,7 @@ toHref route =
                       else
                         Just (Builder.string "sort" (Sort.toParam params.sort))
                     ]
+                    ++ Facet.toQueryParams params.filters
                 )
 
         Torrent hash ->
