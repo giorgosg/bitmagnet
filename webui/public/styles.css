@@ -1,0 +1,309 @@
+/* One accent, one typeface, no borders between rows. The list is the page. */
+
+:root {
+  --bg: #fbfbfa;
+  --fg: #1b1b1a;
+  --dim: #6f6f6a;
+  --faint: #ebebe7;
+  --accent: #a8442a;
+  --row-height: 34px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17171a;
+    --fg: #e8e8e4;
+    --dim: #8d8d88;
+    --faint: #232327;
+    --accent: #e0785a;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* The list is the only scrolling element on the page. It stretches to the bottom of the
+   window, so its scrollbar sits where the browser's own would — the document itself never
+   scrolls, which is what keeps a second bar from appearing beside it.
+
+   Sizing is done here rather than in Elm: the virtualizer is told the window height, an
+   overestimate it tolerates, instead of a copy of this arithmetic that could go stale. */
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Everything that isn't the scroll container lines up on this column. */
+header,
+.tally,
+.notice,
+.single,
+.list > div {
+  width: 100%;
+  max-width: 62rem;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
+}
+
+header {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 1.5rem;
+  padding-top: 2rem;
+  padding-bottom: 1.5rem;
+}
+
+main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.results {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.wordmark {
+  color: inherit;
+  text-decoration: none;
+}
+
+.wordmark h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  color: var(--accent);
+}
+
+.search {
+  flex: 1;
+}
+
+.search input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--faint);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.search input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.search input::placeholder {
+  color: var(--dim);
+}
+
+.tally {
+  flex: none;
+  margin-top: 0;
+  margin-bottom: 0.75rem;
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+.notice {
+  color: var(--dim);
+}
+
+.notice.error {
+  color: var(--accent);
+}
+
+/* Rows -------------------------------------------------------------------- */
+
+.list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: 2rem;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  height: var(--row-height);
+  padding: 0 0.5rem;
+  border-radius: 4px;
+}
+
+.row:hover {
+  background: var(--faint);
+}
+
+/* The disclosure. Its width is part of the indent every expanded panel lines up with. */
+.twist {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.twist svg {
+  transition: transform 100ms ease-out;
+}
+
+.twist.open svg {
+  transform: rotate(90deg);
+}
+
+.twist:hover {
+  color: var(--accent);
+}
+
+/* min-width:0 is what lets a flex child actually shrink far enough to ellipsis. */
+.row .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: inherit;
+  text-decoration: none;
+}
+
+.row:hover .name {
+  text-decoration: underline;
+  text-decoration-color: var(--dim);
+  text-underline-offset: 3px;
+}
+
+.row .size {
+  flex: none;
+  width: 5.5rem;
+  text-align: right;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8125rem;
+}
+
+.row .magnet {
+  flex: none;
+  display: flex;
+  align-items: center;
+  color: var(--dim);
+}
+
+.row .magnet:hover {
+  color: var(--accent);
+}
+
+/* Expansion ---------------------------------------------------------------
+   Every height here is also a constant in Main.elm: the virtualizer positions
+   rows from those numbers, so the two must agree exactly. Nothing in an
+   expanded panel may size itself to its content. */
+
+.meta {
+  height: 48px;
+  padding: 6px 0.5rem 6px 2.6rem;
+  color: var(--dim);
+  font-size: 0.8125rem;
+  line-height: 18px;
+}
+
+/* One more line, drawn only when the raw torrent name differs from the parsed title. */
+.meta.with-name {
+  height: 66px;
+}
+
+.meta .hash,
+.meta .rawname {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.meta .hash {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+}
+
+.files-toggle {
+  display: block;
+  height: 26px;
+  margin: 0 0 0 2.6rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.8125rem;
+  line-height: 26px;
+  cursor: pointer;
+}
+
+.files-notice {
+  height: 26px;
+  padding-left: 2.6rem;
+  color: var(--dim);
+  font-size: 0.8125rem;
+  line-height: 26px;
+}
+
+.files-notice.error {
+  color: var(--accent);
+}
+
+.file {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  height: 22px;
+  padding: 0 0.5rem 0 2.6rem;
+  font-size: 0.8125rem;
+}
+
+.file .path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--dim);
+}
+
+.file .size {
+  flex: none;
+  width: 5.5rem;
+  text-align: right;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}

@@ -1,0 +1,19 @@
+{
+  "name": "magnes",
+  "version": "0.1.0",
+  "description": "An alternative web UI for bitmagnet",
+  "scripts": {
+    "build": "elm make src/Main.elm --output=public/main.js",
+    "build:optimize": "elm make src/Main.elm --optimize --output=public/main.js",
+    "dev": "npm run build && node dev.js",
+    "format": "elm-format --yes src/Main.elm src/Route.elm src/Format.elm src/Bitmagnet.elm src/Magnes/Api/ScalarCodecs.elm",
+    "codegen": "elm-graphql ${BITMAGNET_URL:-http://localhost:3333}/graphql --base Magnes.Api --output src"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@dillonkearns/elm-graphql": "^4.3.2",
+    "elm": "^0.19.2-0",
+    "elm-format": "^0.8.8"
+  },
+  "private": true
+}

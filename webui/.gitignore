@@ -1,0 +1,6 @@
+node_modules/
+elm-stuff/
+public/main.js
+
+# Local instance address; see public/config.example.js
+public/config.js

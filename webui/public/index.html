@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>magnes</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <!-- Optional, gitignored, and absent by default: see config.example.js. -->
+    <script src="/config.js"></script>
+    <script src="/main.js"></script>
+    <script>
+      // bitmagnet's address is runtime configuration, not a build input: the same
+      // bundle works against any instance, and against the proxy when there is one.
+      Elm.Main.init({
+        flags: {
+          apiUrl: window.MAGNES_API_URL || "http://localhost:3333/graphql",
+        },
+      });
+    </script>
+  </body>
+</html>
