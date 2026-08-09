@@ -13,6 +13,11 @@
   --dim: #6f6f6a;
   --faint: #ebebe7;
   --accent: #a8442a;
+
+  /* The accent at low opacity, spelled out per scheme rather than mixed at use sites, so
+     there is one place to adjust and no dependency on color-mix support. */
+  --accent-soft: rgba(168, 68, 42, 0.13);
+
   --row-height: 34px;
 }
 
@@ -23,6 +28,7 @@
     --dim: #8d8d88;
     --faint: #232327;
     --accent: #e0785a;
+    --accent-soft: rgba(224, 120, 90, 0.18);
   }
 }
 
@@ -366,15 +372,37 @@ main {
   font-size: 0.8125rem;
 }
 
+/* The magnet is the row's actual payload, and the only thing on the line that leaves the
+   page — so it carries the accent, the same one the wordmark uses. */
 .row .magnet {
   flex: none;
   display: flex;
   align-items: center;
-  color: var(--dim);
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: var(--accent);
+  transition:
+    transform 120ms ease-out,
+    background-color 120ms ease-out;
 }
 
+/* It is already the accent colour at rest, so hovering has to say something else. The
+   magnet tips and is drawn up out of the line, into a faint field of its own. */
 .row .magnet:hover {
-  color: var(--accent);
+  transform: scale(1.25) rotate(-10deg);
+  background: var(--accent-soft);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row .magnet {
+    transition: none;
+  }
+
+  .row .magnet:hover {
+    transform: none;
+  }
 }
 
 /* Expansion ---------------------------------------------------------------

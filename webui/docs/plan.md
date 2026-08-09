@@ -45,6 +45,16 @@ of it. The magnet is an icon at the end — an `<a href="magnet:…">`, a real l
 opens a client on click and can be copied by right-click. No checkboxes, no per-row
 buttons; there are no bulk operations without mutations.
 
+The magnet carries the accent, from the same `--accent` variable the wordmark uses so the
+two cannot drift. It is the row's actual payload and the only thing on the line that
+leaves the page, so it is the one place colour is spent. Being accented at rest means
+hovering has to say something other than "turn red": the magnet scales up and tips, inside
+a faint field of `--accent-soft`. `prefers-reduced-motion` drops both.
+
+There is no logo to take the colour from — Magnes's mark is the wordmark, which is text,
+and bitmagnet publishes only a 32×32 PNG favicon, no SVG. The horseshoe is drawn in the
+source as a single path.
+
 A plain click anywhere on the line expands it — the name included. The name is still an
 anchor pointing at `/torrent/<hash>`, so middle-click, ctrl/cmd-click and "open in new
 tab" all still reach the torrent's own page; only the plain click is reinterpreted. The
