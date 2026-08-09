@@ -20,8 +20,12 @@ http
   .createServer((req, res) => {
     const requested = decodeURIComponent(new URL(req.url, "http://x").pathname);
     const candidate = path.join(root, requested);
-    const exists =
-      candidate.startsWith(root) && fs.existsSync(candidate) && fs.statSync(candidate).isFile();
+    // Compare against root + separator, not root: a bare prefix test also accepts a
+    // sibling directory whose name merely starts with "public". Decoding happens after
+    // the URL parser has normalized the path, so %2e%2e%2f survives to reach path.join
+    // and dot segments are a live input here rather than a theoretical one.
+    const inside = candidate === root || candidate.startsWith(root + path.sep);
+    const exists = inside && fs.existsSync(candidate) && fs.statSync(candidate).isFile();
 
     // A missing path with an extension is a missing asset, and must 404 — serving the
     // app for it would hand back HTML to a <script> tag. Only extensionless paths are

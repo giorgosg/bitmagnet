@@ -10,9 +10,11 @@ its own UI; Magnes is a second one, built against the same GraphQL API.
 
 Runs. The first milestone is the UI alone — no server, no accounts, no mutations — which
 works because bitmagnet allows cross-origin requests, so the browser can query it
-directly. Search, infinite scroll, row expansion and `/torrent/<hash>` are built; facets
-are not. See [docs/plan.md](docs/plan.md). The design decisions below describe where
-Magnes is going, not everything that runs today.
+directly. Search, sort, facet filters, infinite scroll, row expansion down to a file tree
+and `/torrent/<hash>` are all built — that is the whole of the first milestone. What is
+not built is everything the milestone deliberately left out: the proxy server, accounts,
+and any mutation at all. See [docs/plan.md](docs/plan.md). The design decisions below
+describe where Magnes is going, not everything that runs today.
 
 ## Running it
 
