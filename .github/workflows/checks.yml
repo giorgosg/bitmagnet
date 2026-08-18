@@ -33,6 +33,23 @@ jobs:
   test:
     # The Ubuntu image has been downgraded and pinned for the `test` and `generated` jobs as they are broken on 24.04
     runs-on: ubuntu-22.04
+    services:
+      # Integration tests provision their own throwaway databases on this
+      # server; see internal/database/dbtest. Without TEST_POSTGRES_DSN they
+      # skip, so the suite still runs offline.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          PGUSER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -44,7 +61,9 @@ jobs:
           nix develop --ignore-environment --command task install-webui
       - name: Run tests
         run: |
-          nix develop --ignore-environment --keep HOME . --command task test
+          nix develop --ignore-environment --keep HOME --keep TEST_POSTGRES_DSN . --command task test
+        env:
+          TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/postgres
 
   # This job runs all code generations and builds the WebUI, to check that everything is correctly committed
   generated:

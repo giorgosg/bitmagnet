@@ -20,12 +20,12 @@ type Result struct {
 func New(p Params) Result {
 	return Result{
 		Client: lazy.New(func() (Client, error) {
-			return client{
+			return newCachedClient(client{
 				requester: &requesterLazy{
 					config: p.Config,
 					logger: p.Logger,
 				},
-			}, nil
+			}), nil
 		}),
 	}
 }

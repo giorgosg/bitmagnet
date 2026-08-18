@@ -1,6 +1,5 @@
-// the listener connection code has been disabled:
-// it would rarely be used anyway since a delay is now added to crawler jobs;
-// if re-enabled in the future, some work is needed to gracefully handle disconnection
+// Hybrid LISTEN/NOTIFY + polling: the listener wakes the handler immediately
+// for new jobs; polling runs as a safety net at the configured CheckInterval.
 
 package server
 
@@ -8,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
@@ -15,6 +15,7 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/queue"
 	"github.com/bitmagnet-io/bitmagnet/internal/queue/handler"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 	"golang.org/x/sync/semaphore"
 	"gorm.io/gen"
@@ -23,9 +24,9 @@ import (
 )
 
 type server struct {
-	stopped chan struct{}
-	query   *dao.Query
-	// pool       *pgxpool.Pool
+	stopped    chan struct{}
+	query      *dao.Query
+	pool       *pgxpool.Pool
 	handlers   []handler.Handler
 	gcInterval time.Duration
 	logger     *zap.SugaredLogger
@@ -39,31 +40,22 @@ func (s *server) Start(ctx context.Context) (err error) {
 			cancel()
 		}
 	}()
-	// pListenerConn, listenerConnErr := s.newListenerConn(ctx)
-	// if listenerConnErr != nil {
-	// 	err = listenerConnErr
-	// 	return
-	// }
-	// listenerConn := pListenerConn.Conn()
+
 	handlers := make([]serverHandler, len(s.handlers))
 	listenerChans := make(map[string]chan pgconn.Notification)
 
 	for i, h := range s.handlers {
-		listenerChan := make(chan pgconn.Notification)
+		listenerChan := make(chan pgconn.Notification, h.Concurrency)
 		sh := serverHandler{
-			Handler: h,
-			sem:     semaphore.NewWeighted(int64(h.Concurrency)),
-			query:   s.query,
-			// listenerConn: listenerConn,
+			Handler:      h,
+			sem:          semaphore.NewWeighted(int64(h.Concurrency)),
+			query:        s.query,
 			listenerChan: listenerChan,
 			logger:       s.logger.With("queue", h.Queue),
 		}
 		handlers[i] = sh
 		listenerChans[h.Queue] = listenerChan
-		// if _, listenErr := listenerConn.Exec(ctx, fmt.Sprintf(`LISTEN %q`, h.Queue)); listenErr != nil {
-		//	err = listenErr
-		//	return
-		//}
+
 		go sh.start(ctx)
 	}
 
@@ -73,74 +65,147 @@ func (s *server) Start(ctx context.Context) (err error) {
 			case <-s.stopped:
 				cancel()
 			case <-ctx.Done():
-				// pListenerConn.Release()
 				return
 			}
 		}
 	}()
-	// go func() {
-	// 	for {
-	// 		select {
-	// 		case <-ctx.Done():
-	// 			return
-	// 		default:
-	// 			notification, waitErr := listenerConn.WaitForNotification(ctx)
-	// 			if waitErr != nil {
-	// 				if !errors.Is(waitErr, context.Canceled) {
-	// 					s.logger.Errorf("Error waiting for notification: %s", waitErr)
-	// 				}
-	// 				continue
-	// 			}
-	// 			ch, ok := listenerChans[notification.Channel]
-	// 			if !ok {
-	// 				s.logger.Errorf("Received notification for unknown channel: %s", notification.Channel)
-	// 				continue
-	// 			}
-	// 			select {
-	// 			case <-ctx.Done():
-	// 				return
-	// 			case ch <- *notification:
-	// 				continue
-	// 			}
-	// 		}
-	// 	}
-	// }()
+
+	// Start LISTEN/NOTIFY listener for instant job wakeup.
+	go s.runListener(ctx, listenerChans)
+
 	go s.runGarbageCollection(ctx)
 
 	return
 }
 
-// func (s *server) newListenerConn(ctx context.Context) (*pgxpool.Conn, error) {
-//	conn, err := s.pool.Acquire(ctx)
-//	if err != nil {
-//		return nil, err
-//	}
-//	_, err = conn.Exec(ctx, "SET idle_in_transaction_session_timeout = 0")
-//	if err != nil {
-//		return nil, err
-//	}
-//	return conn, nil
-//}
+func (s *server) runListener(ctx context.Context, listenerChans map[string]chan pgconn.Notification) {
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+
+		if err := s.listenLoop(ctx, listenerChans); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+
+			s.logger.Warnw("listener disconnected, reconnecting in 5s", "error", err)
+
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+			}
+		}
+	}
+}
+
+func (s *server) listenLoop(ctx context.Context, listenerChans map[string]chan pgconn.Notification) error {
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+
+	pgConn := conn.Conn()
+
+	// pgxpool does not reset session state on release, so a connection handed
+	// back while still subscribed would deliver notifications to whatever uses
+	// it next. Drop the subscriptions before returning it to the pool.
+	defer func() {
+		unlistenCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		defer cancel()
+
+		if _, unlistenErr := pgConn.Exec(unlistenCtx, "UNLISTEN *"); unlistenErr != nil {
+			// Likely already broken. Take it out of the pool and close it rather
+			// than returning a possibly-still-subscribed connection.
+			_ = conn.Hijack().Close(unlistenCtx)
+			return
+		}
+
+		conn.Release()
+	}()
+
+	for ch := range listenerChans {
+		if _, execErr := pgConn.Exec(ctx, fmt.Sprintf("LISTEN %q", ch)); execErr != nil {
+			return execErr
+		}
+	}
+
+	for {
+		notification, waitErr := pgConn.WaitForNotification(ctx)
+		if waitErr != nil {
+			return waitErr
+		}
+
+		ch, ok := listenerChans[notification.Channel]
+		if !ok {
+			continue
+		}
+
+		// A full channel means the handler is already saturated; the polling
+		// fallback will pick the job up.
+		select {
+		case ch <- *notification:
+		default:
+		}
+	}
+}
+
+const gcBatchSize = 1000
+
+// gcBatchPredicate bounds a delete to one batch of expired jobs. The LIMIT lives
+// in a subquery because Postgres does not accept LIMIT directly on DELETE.
+const gcBatchPredicate = "queue_jobs.id IN (" +
+	"SELECT id FROM queue_jobs " +
+	"WHERE status IN (?, ?) AND ran_at + archival_duration < ?::timestamptz " +
+	"LIMIT ?)"
 
 func (s *server) runGarbageCollection(ctx context.Context) {
 	for {
-		tx := s.query.QueueJob.WithContext(ctx).Where(
-			s.query.QueueJob.Status.In(string(model.QueueJobStatusProcessed), string(model.QueueJobStatusFailed)),
-		).
-			UnderlyingDB().Where(
-			"queue_jobs.ran_at + queue_jobs.archival_duration < ?::timestamptz",
-			time.Now(),
-		).Delete(&model.QueueJob{})
-		if tx.Error != nil {
-			s.logger.Errorw("error deleting old queue jobs", "error", tx.Error)
-		} else if tx.RowsAffected > 0 {
-			s.logger.Debugw("deleted old queue jobs", "count", tx.RowsAffected)
-		}
+		s.runGCBatch(ctx)
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(s.gcInterval):
 			continue
+		}
+	}
+}
+
+// runGCBatch deletes expired jobs in batches to avoid long-held locks and
+// excessive WAL generation that could happen with unbounded DELETEs.
+func (s *server) runGCBatch(ctx context.Context) {
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+
+		// The subquery already carries the full predicate; repeating it in the
+		// outer WHERE only makes the plan harder to read.
+		tx := s.query.QueueJob.WithContext(ctx).UnderlyingDB().Where(
+			gcBatchPredicate,
+			string(model.QueueJobStatusProcessed),
+			string(model.QueueJobStatusFailed),
+			time.Now(),
+			gcBatchSize,
+		).Delete(&model.QueueJob{})
+
+		if tx.Error != nil {
+			// A cancelled context during shutdown is expected, not an error.
+			if !errors.Is(tx.Error, context.Canceled) {
+				s.logger.Errorw("error deleting old queue jobs", "error", tx.Error)
+			}
+
+			return
+		}
+
+		if tx.RowsAffected > 0 {
+			s.logger.Debugw("deleted old queue jobs", "count", tx.RowsAffected)
+		}
+
+		// If we deleted fewer than the batch size, we're done for this cycle.
+		if tx.RowsAffected < gcBatchSize {
+			return
 		}
 	}
 }
