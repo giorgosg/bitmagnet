@@ -12,14 +12,15 @@ and at [bitmagnet.io](https://bitmagnet.io).
 
 ## Start here
 
-| Doc                                      | What's in it                                                          |
-| ---------------------------------------- | --------------------------------------------------------------------- |
-| [hacking.md](hacking.md)                 | Making your first change: toolchain, generated code, adding a feature |
-| [architecture.md](architecture.md)       | How the Go application is wired together                              |
-| [upstream-status.md](upstream-status.md) | State of upstream `main`, the `next` rewrite, and the PR queue        |
-| [forks/](forks/README.md)                | What the community forks contain, and which parts are worth taking    |
-| [auth.md](auth.md)                       | bitmagnet has no authentication — the three available implementations |
-| [git-workflow.md](git-workflow.md)       | Reviewing forks and PRs without drowning in generated diffs           |
+| Doc                                            | What's in it                                                          |
+| ---------------------------------------------- | --------------------------------------------------------------------- |
+| [hacking.md](hacking.md)                       | Making your first change: toolchain, generated code, adding a feature |
+| [architecture.md](architecture.md)             | How the Go application is wired together                              |
+| [upstream-status.md](upstream-status.md)       | State of upstream `main`, the `next` rewrite, and the PR queue        |
+| [forks/](forks/README.md)                      | What the community forks contain, and which parts are worth taking    |
+| [integration-status.md](integration-status.md) | What has reached `trunk`, what is next, and what was deferred         |
+| [auth.md](auth.md)                             | bitmagnet has no authentication — the three available implementations |
+| [git-workflow.md](git-workflow.md)             | Reviewing forks and PRs without drowning in generated diffs           |
 
 ## If you're using an LLM assistant
 
