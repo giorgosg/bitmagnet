@@ -42,6 +42,40 @@ which will pass locally and fail CI:
 **5. Migration numbers collide across forks.** Upstream is at `00020`; forks in
 circulation add `00023` and `00033`. Renumber anything you cherry-pick.
 
+## Every change lands with a test
+
+Cherry-picked patches and new code alike: **if a change has observable behaviour, it
+ships with a test that fails without it.** This is not ceremony — the fork patches taken
+so far have compiled, passed `go vet`, and passed the whole suite while containing a
+shutdown deadlock and a cache that returned answers to the wrong question. Neither was
+caught by review alone.
+
+The bar is a test you have _seen fail_. Write it, watch it go red against the unfixed
+code, then fix. A test written after the fix, never observed failing, proves nothing.
+
+Large parts of the tree still have no coverage — `dhtcrawler`, `importer`, `processor`,
+`blocking`. Anything touching them is where this matters most.
+
+### Tests that need a database
+
+`internal/database/dbtest` provisions an isolated, fully migrated PostgreSQL database
+per test and drops it afterwards:
+
+```go
+db := dbtest.New(t)   // db.Gorm, db.Query, db.Pool, db.DSN, db.Name
+```
+
+It is opt-in via `TEST_POSTGRES_DSN` and **skips** when unset, so the default
+`go test ./...` stays offline and fast:
+
+```bash
+TEST_POSTGRES_DSN='postgres://postgres:postgres@localhost:5432/postgres' go test ./...
+```
+
+CI runs a `postgres:16-alpine` service for the `test` job and sets the variable, so
+integration tests do run there. Any Postgres you may freely create and drop databases
+on will do locally — a package install is enough, no container runtime needed.
+
 ## Commands
 
 ```bash
