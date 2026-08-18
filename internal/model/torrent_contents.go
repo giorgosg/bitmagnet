@@ -95,6 +95,25 @@ func (tc *TorrentContent) UpdateTsv() {
 		tsv.AddText(tc.ReleaseGroup.String, fts.TsvectorWeightC)
 	}
 
+	// Adapted from niklas2233/bitmagnet@fbbcd4388: index separate season and episode
+	// lexemes so queries such as "Title 01" can match a name containing "S02E01".
+	if len(tc.Episodes) > 0 {
+		var parts []string
+
+		for _, season := range tc.Episodes.SeasonEntries() {
+			parts = append(parts, fmt.Sprintf("s%d", season.Season))
+			if season.Season < 10 {
+				parts = append(parts, fmt.Sprintf("s%02d", season.Season))
+			}
+
+			for _, episode := range season.Episodes {
+				parts = append(parts, fmt.Sprintf("e%02d", episode), fmt.Sprintf("%02d", episode))
+			}
+		}
+
+		tsv.AddText(strings.Join(parts, " "), fts.TsvectorWeightC)
+	}
+
 	tsv.AddText(tc.InfoHash.String(), fts.TsvectorWeightA)
 	tsv.AddText(tc.Torrent.Name, fts.TsvectorWeightA)
 
