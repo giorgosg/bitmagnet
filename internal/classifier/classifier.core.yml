@@ -82,6 +82,10 @@ workflows:
           or:
             - "result.contentType in [contentType.movie, contentType.tv_show]"
             - "torrent.files.map(f, f.extension in extensions.video ? f.size : - f.size).sum() > 100*mb"
+            # Adapted from niklas2233/bitmagnet@dca622876. RSS torrents can have
+            # no stored files or an unknown size; let the name parser decide then.
+            - "torrent.files.size() == 0"
+            - "torrent.size == 0"
         if_action:
           find_match:
             # parse video-related attributes from the torrent name;

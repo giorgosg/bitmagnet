@@ -12,6 +12,7 @@ import (
 	tmdb_mocks "github.com/bitmagnet-io/bitmagnet/internal/tmdb/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 func TestClassifier(t *testing.T) {
@@ -225,6 +226,68 @@ func TestClassifier(t *testing.T) {
 			} else {
 				assert.Equal(t, tc.expected, result)
 			}
+		})
+	}
+}
+
+func TestClassifierParsesVideoNameWithoutUsableFileMetadata(t *testing.T) {
+	t.Parallel()
+
+	mocks := newTestClassifierMocks(t)
+	source, err := (yamlSourceProvider{rawSourceProvider: coreSourceProvider{}}).source()
+	require.NoError(t, err)
+
+	workflow, err := mocks.compiler.Compile(source)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name     string
+		torrent  model.Torrent
+		expected classification.ContentAttributes
+	}{
+		{
+			name: "no file records",
+			torrent: model.Torrent{
+				Name:        "Title Only Movie (2000)",
+				FilesStatus: model.FilesStatusNoInfo,
+				Size:        1_000_000_000,
+			},
+			expected: classification.ContentAttributes{
+				ContentType: model.NewNullContentType(model.ContentTypeMovie),
+				BaseTitle:   model.NewNullString("Title Only Movie"),
+				Date:        model.Date{Year: 2000},
+			},
+		},
+		{
+			name: "unknown torrent size",
+			torrent: model.Torrent{
+				Name:        "Unknown Size Movie (2000).mkv",
+				FilesStatus: model.FilesStatusSingle,
+				Extension:   model.NewNullString("mkv"),
+			},
+			expected: classification.ContentAttributes{
+				ContentType: model.NewNullContentType(model.ContentTypeMovie),
+				BaseTitle:   model.NewNullString("Unknown Size Movie"),
+				Date:        model.Date{Year: 2000},
+			},
+		},
+		{
+			name: "unrecognised title remains unclassified",
+			torrent: model.Torrent{
+				Name:        "README",
+				FilesStatus: model.FilesStatusNoInfo,
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, runErr := workflow.Run(context.Background(), "default", Flags{
+				"local_search_enabled": false,
+				"apis_enabled":         false,
+			}, tc.torrent)
+			require.NoError(t, runErr)
+			assert.Equal(t, tc.expected, result.ContentAttributes)
 		})
 	}
 }
