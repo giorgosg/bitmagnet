@@ -133,12 +133,16 @@ func searchRequestToQueryOptions(r torznab.SearchRequest) ([]query.Option, error
 			catCriteria = append(catCriteria, search.TorrentContentTypeCriteria(model.ContentTypeMusic))
 		case torznab.CategoryBooksComics.Has(cat):
 			catCriteria = append(catCriteria, search.TorrentContentTypeCriteria(model.ContentTypeComic))
+		// Adapted from niklas2233/bitmagnet@77b7920f4b8fad49540287e8825de9016a55c722:
+		// parent book categories belong in the selected-category disjunction.
+		case torznab.CategoryBooksEBook.Has(cat):
+			catCriteria = append(catCriteria, search.TorrentContentTypeCriteria(model.ContentTypeEbook))
 		case torznab.CategoryBooks.Has(cat):
-			options = append(options, query.Where(search.TorrentContentTypeCriteria(
+			catCriteria = append(catCriteria, search.TorrentContentTypeCriteria(
 				model.ContentTypeEbook,
 				model.ContentTypeComic,
 				model.ContentTypeAudiobook,
-			)))
+			))
 		}
 
 		if len(catCriteria) > 0 {
