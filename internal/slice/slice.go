@@ -20,6 +20,18 @@ func MapWithArg[I any, O any, A any](t []I, arg A, mapFunc func(A, I) O) []O {
 	})
 }
 
+// FlatMap maps each element to a slice and concatenates the results. The total
+// length is not known ahead of time, so the result cannot be preallocated.
+func FlatMap[T any, R any](t []T, mapFunc func(T) []R) []R {
+	var result []R
+
+	for _, e := range t {
+		result = append(result, mapFunc(e)...)
+	}
+
+	return result
+}
+
 func Group[T any, K comparable](s []T, keyFunc func(T) K) map[K][]T {
 	m := map[K][]T{}
 
