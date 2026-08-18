@@ -41,6 +41,14 @@ test-first review described in [git-workflow.md](git-workflow.md).
   present behavior.
 - lodestone `2e31cae01` fixes a slice-index map lookup in a later triage refactor.
   `trunk` already iterates the keyed hash map correctly, so this candidate is obsolete.
+- lodestone `e8dd5f02a` wraps the single triage SELECT in a transaction for a "consistent
+  snapshot". Under READ COMMITTED — the server default here, and what GORM's `Transaction`
+  inherits when called without `*sql.TxOptions` — one statement already snapshots at
+  statement start, so the wrapper gains no consistency. Nor could any isolation level
+  deliver its stated goal of not missing recently persisted torrents: a transaction's
+  snapshot is only ever the same age or older, never fresher. It does add a BEGIN/COMMIT
+  round trip per batch and pins a pooled connection for the query. Rejected; revisit only
+  for a multi-statement query or an explicit isolation change.
 - niklas2233 `a6f69bf23` raises the aggregation budget tenfold. It needs a representative
   PostgreSQL accuracy/performance measurement before becoming a code change.
 - o51r15 `9e564ff9e` claims a ticker-reset data race but has no failing reproduction. Fold
