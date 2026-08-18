@@ -125,6 +125,21 @@ func (c processor) Process(ctx context.Context, params MessageParams) error {
 				}
 			}
 
+			// Adapted from kawaii-not-kawaii/bitmagnet@68bcddf43. A type inferred
+			// by a rule has no content source, so the sourced-match reuse above
+			// cannot carry it forward. When there is no stored file list, rules
+			// cannot re-evaluate that evidence; retain the type only, even for a
+			// rematch, rather than clearing it to unknown.
+			if !foundMatch && torrent.Hint.IsNil() && !torrent.FilesStatus.HasStoredFileList() {
+				for _, tc := range torrent.Contents {
+					if tc.ContentType.Valid && !tc.ContentSource.Valid {
+						torrent.Hint.ContentType = tc.ContentType.ContentType
+
+						break
+					}
+				}
+			}
+
 			cl, classifyErr := c.runner.Run(ctx, workflowName, params.ClassifierFlags, torrent)
 
 			mtx.Lock()
