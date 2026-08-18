@@ -21,6 +21,7 @@ func MovieDetailsToMovieModel(details MovieDetailsResponse) (movie model.Content
 		releaseDate = parsedDate
 	}
 
+	//nolint:prealloc
 	var collections []model.ContentCollection
 
 	if details.BelongsToCollection.ID != 0 {
