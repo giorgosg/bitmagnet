@@ -173,6 +173,14 @@ func torrentContentResultItemToTorznabResultItem(item search.TorrentContentResul
 		})
 	}
 
+	if tvdbID, ok := item.Content.Identifier("tvdb"); ok {
+		// The tvdbid attribute is part of the same niklas2233/bitmagnet@eb843dacc adaptation.
+		attrs = append(attrs, torznab.SearchResultItemTorznabAttr{
+			AttrName:  torznab.AttrTvdb,
+			AttrValue: tvdbID,
+		})
+	}
+
 	return torznab.SearchResultItem{
 		Title:    item.Torrent.Name,
 		Size:     item.Torrent.Size,

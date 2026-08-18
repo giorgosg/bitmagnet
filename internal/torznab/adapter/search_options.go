@@ -45,7 +45,9 @@ func searchRequestToQueryOptions(r torznab.SearchRequest) ([]query.Option, error
 		}
 	}
 
-	if r.Query != "" {
+	// Adapted from niklas2233/bitmagnet@eb843dacc: canonical IDs are more precise
+	// than a concurrent free-text filter, which can otherwise discard the match.
+	if r.Query != "" && !r.IMDBID.Valid && !r.TMDBID.Valid {
 		order := search.TorrentContentOrderByRelevance
 		if r.Profile.DisableOrderByRelevance {
 			order = search.TorrentContentOrderByPublishedAt
