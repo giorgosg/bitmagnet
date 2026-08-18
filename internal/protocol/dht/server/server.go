@@ -12,12 +12,17 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol/dht"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol/dht/responder"
 	"go.uber.org/zap"
+	"golang.org/x/sync/semaphore"
 )
 
 type Server interface {
 	start() error
 	stop()
 	Query(ctx context.Context, addr netip.AddrPort, q string, args dht.MsgArgs) (dht.RecvMsg, error)
+}
+
+func newQuerySemaphore(config Config) *semaphore.Weighted {
+	return semaphore.NewWeighted(config.queryConcurrencyLimit())
 }
 
 type server struct {
@@ -31,6 +36,7 @@ type server struct {
 	responderTimeout time.Duration
 	idIssuer         IDIssuer
 	logger           *zap.SugaredLogger
+	querySem         *semaphore.Weighted
 }
 
 func (s *server) start() error {
@@ -161,6 +167,14 @@ func (s *server) Query(
 	q string,
 	args dht.MsgArgs,
 ) (r dht.RecvMsg, err error) {
+	// Adapted from o51r15/bitmagnet@727328128. Bound all in-flight queries,
+	// regardless of their destination, so raising crawler concurrency cannot
+	// create an unbounded number of UDP send/receive waiters.
+	if semErr := s.querySem.Acquire(ctx, 1); semErr != nil {
+		return r, semErr
+	}
+	defer s.querySem.Release(1)
+
 	transactionID := s.idIssuer.Issue()
 	ch := make(chan dht.RecvMsg, 1)
 
