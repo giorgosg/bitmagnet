@@ -45,22 +45,44 @@ API key, or JWT, with Casbin RBAC for authorization.
 
 ### Measured dependency surface
 
-Surveyed 2026-08-18 by extracting every import across all 59 files. This corrects an
-earlier claim in this document that the package could not be extracted without taking
-`next` wholesale — at import level, it very nearly can.
+Surveyed 2026-08-18 by extracting every import across all 59 files, then walking the
+closure — descending only into packages the `main` lineage does not already provide, since
+the port uses `trunk`'s copy of the rest. This corrects an earlier claim in this document
+that the package could not be extracted without taking `next` wholesale.
 
-| Dependency              | Refs | Status on `main` lineage      |
-| ----------------------- | ---- | ----------------------------- |
-| `internal/model`        | 19   | present — and see below       |
-| `internal/slice`        | 9    | present                       |
-| `internal/database/dao` | 7    | present (generated)           |
-| `internal/database`     | 3    | present                       |
-| `internal/config/param` | 3    | **`next`-only — 1,428 lines** |
-| `internal/atomic`       | 2    | **`next`-only — 201 lines**   |
+`internal/auth` imports just six bitmagnet packages directly:
 
-There are **no imports of `internal/plugin`, `internal/gql`, `internal/wasm`,
-`internal/workers` or `internal/search`** — the plugin and GraphQL entanglement previously
-recorded here does not exist in the import graph.
+| Direct dependency       | Refs | Status on `main` lineage |
+| ----------------------- | ---- | ------------------------ |
+| `internal/model`        | 19   | present — and see below  |
+| `internal/slice`        | 9    | present                  |
+| `internal/database/dao` | 7    | present (generated)      |
+| `internal/database`     | 3    | present                  |
+| `internal/config/param` | 3    | **`next`-only**          |
+| `internal/atomic`       | 2    | **`next`-only**          |
+
+Closing over those, the full set of packages that must be ported alongside auth is five,
+not two — `internal/config/param` pulls in three more:
+
+| Support package          |     Lines |
+| ------------------------ | --------: |
+| `internal/config/param`  |     1,428 |
+| `pkg/json_schema`        |       915 |
+| `internal/logging/level` |       266 |
+| `internal/ecma262`       |       234 |
+| `internal/atomic`        |       201 |
+| **Total**                | **3,044** |
+
+So the port is roughly **7,100 lines**: 4,069 of auth plus 3,044 of support.
+
+Critically, the closure **terminates there**. It reaches nothing in `internal/plugin`,
+`internal/gql`, `internal/wasm`, `internal/workers`, `internal/search` or `proto/` — the
+plugin and GraphQL entanglement previously recorded here is not in the import graph.
+
+(Walking `next`'s own copies of `internal/database` and `internal/model` instead of
+`trunk`'s does drag in `wasm`, `proto` and the plugin registry. That is an artefact of
+measuring the wrong thing: those packages already exist on `main`, and the port uses the
+`main` versions.)
 
 Third-party dependencies are nearly as clean. `gorm`, `bcrypt`, `testify` and
 `x/time/rate` are already in `main`, and so is **`gin` v1.10.0**, which is all
@@ -88,15 +110,41 @@ Note that `next` also carries a `0022_tags.sql` with a four-digit typo; do not i
 - ➕ Aligns with upstream if `next` ever lands
 - ➕ Import-decoupled from `next`'s plugin and GraphQL rewrites
 - ➕ Model types and dao come from the generator, given the migration
+- ➕ The five support packages **compile unmodified against `trunk`** — verified on the port
+  branch, so the signature-drift risk is settled for that layer at least
 - ➖ Adds Casbin and golang-jwt as dependencies
-- ➖ Pulls in two `next`-only support packages, and `internal/config/param` has a **failing
-  test on `next`** (`TestUint32`) that must be fixed rather than carried in red
-- ➖ Import-level decoupling is not compile-level proof: `next` also changed the internals
-  of `internal/model` and `internal/database`, so signature drift is still possible
+- ➖ Pulls in five `next`-only support packages (3,044 lines), and `internal/config/param`
+  has a **failing test on `next`** (`TestUint32`) that must be fixed rather than carried in
+  red — see [the port branch](#port-status) for the cause
+- ➖ Import-level decoupling is not compile-level proof for the auth packages themselves:
+  `next` also changed the internals of `internal/model` and `internal/database`, so
+  signature drift is still possible there
 - ➖ Brings no GraphQL wiring — `next`'s gql is a rewrite, so the resolver surface must be
   built fresh against `trunk`'s gqlgen setup
+- ➖ **`next` relaxed the lint config for this code**: `var-naming` with
+  `skipPackageNameChecks`, `wsl` → `wsl_v5`, and the `if-return` and `nested-structs` revive
+  rules dropped. Porting means either adopting those relaxations or fixing the code to
+  `trunk`'s stricter config
 - ➖ Still a draft: `next` HEAD is 2026-01-31 and `internal/auth/` was last touched
   2026-01-24 (`93dd4c623`)
+
+### Port status
+
+Tracked on `codex/auth-port`, cut from `trunk`.
+
+**Done —** the five support packages, compiling and green on `trunk` with no source changes
+beyond lint fixes. `TestUint32` is fixed at its cause: `json_schema.NewValue` returned the
+`DocumentNode` that `yaml.Unmarshal` always wraps around a value, annotated with its parse
+position, while the `param` encoder emits the value node directly, so two constructions of
+the same value compared unequal. `NewValue` and `UnmarshalYAML` now unwrap and clear
+position; new tests in `pkg/json_schema` cover it.
+
+**Next —** the renumbered migration and `task gen-gorm`, then `internal/auth` itself.
+
+**Open —** `pkg/json_schema` trips `revive`'s `var-naming` under `trunk`'s config. Either
+rename the package to `jsonschema` (diverges from `next`, noisier future re-syncs) or adopt
+`next`'s `skipPackageNameChecks` relaxation. This is a repo-wide lint policy decision, not a
+port detail.
 
 ## Option 2 — `gabriel20xx` (`internal/auth`, 5 files)
 
@@ -175,8 +223,9 @@ frontend.
 
 The initial port should include, in dependency order:
 
-1. `internal/atomic` and `internal/config/param`, the two `next`-only support packages —
-   fixing `TestUint32` rather than carrying it red.
+1. The five `next`-only support packages — `internal/config/param`, `pkg/json_schema`,
+   `internal/logging/level`, `internal/ecma262`, `internal/atomic` — fixing `TestUint32`
+   rather than carrying it red.
 2. The migration, renumbered to `00022`, then `task gen-gorm` for the model and dao types.
 3. The `identity` authenticator chain and anonymous, API-key, and user identities.
 4. Revocable, encoded machine API keys using the `next` repository/service split.
