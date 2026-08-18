@@ -40,13 +40,15 @@ func torrentContentResultItemToTorznabResultItem(item search.TorrentContentResul
 	if item.ContentType.Valid {
 		switch item.ContentType.ContentType {
 		case model.ContentTypeMovie:
-			categoryID = torznab.CategoryMovies.ID
+			// Adapted from niklas2233/bitmagnet@1ae29df84:
+			// return the resolution-specific category advertised to Servarr clients.
+			categoryID = movieCategory(item.VideoResolution)
 		case model.ContentTypeTvShow:
-			categoryID = torznab.CategoryTV.ID
+			categoryID = tvCategory(item.VideoResolution)
 		case model.ContentTypeMusic:
 			categoryID = torznab.CategoryAudio.ID
 		case model.ContentTypeEbook:
-			categoryID = torznab.CategoryBooks.ID
+			categoryID = torznab.CategoryBooksEBook.ID
 		case model.ContentTypeComic:
 			categoryID = torznab.CategoryBooksComics.ID
 		case model.ContentTypeAudiobook:
@@ -184,4 +186,40 @@ func torrentContentResultItemToTorznabResultItem(item search.TorrentContentResul
 		},
 		TorznabAttrs: attrs,
 	}
+}
+
+func tvCategory(resolution model.NullVideoResolution) int {
+	if resolution.Valid {
+		switch resolution.VideoResolution {
+		case model.VideoResolutionV2160p, model.VideoResolutionV4320p:
+			return torznab.CategoryTVUHD.ID
+		case model.VideoResolutionV720p, model.VideoResolutionV1080p, model.VideoResolutionV1440p:
+			return torznab.CategoryTVHD.ID
+		case model.VideoResolutionV360p,
+			model.VideoResolutionV480p,
+			model.VideoResolutionV540p,
+			model.VideoResolutionV576p:
+			return torznab.CategoryTVSD.ID
+		}
+	}
+
+	return torznab.CategoryTV.ID
+}
+
+func movieCategory(resolution model.NullVideoResolution) int {
+	if resolution.Valid {
+		switch resolution.VideoResolution {
+		case model.VideoResolutionV2160p, model.VideoResolutionV4320p:
+			return torznab.CategoryMoviesUHD.ID
+		case model.VideoResolutionV720p, model.VideoResolutionV1080p, model.VideoResolutionV1440p:
+			return torznab.CategoryMoviesHD.ID
+		case model.VideoResolutionV360p,
+			model.VideoResolutionV480p,
+			model.VideoResolutionV540p,
+			model.VideoResolutionV576p:
+			return torznab.CategoryMoviesSD.ID
+		}
+	}
+
+	return torznab.CategoryMovies.ID
 }
