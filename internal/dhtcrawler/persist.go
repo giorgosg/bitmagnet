@@ -170,8 +170,17 @@ func createTorrentModel(
 
 	files := make([]model.TorrentFile, 0, min(int(saveFilesThreshold), len(info.Files)))
 
+	// Adapted from o51r15/bitmagnet@5efcbd1c5: count only persisted files;
+	// BEP-47 padding entries are synthetic and do not belong in the database.
+	savedCount := 0
+
 	for i, file := range info.Files {
-		if i >= int(saveFilesThreshold) {
+		displayPath := file.DisplayPath(&info)
+		if len(displayPath) >= 5 && displayPath[:5] == ".pad/" {
+			continue
+		}
+
+		if savedCount >= int(saveFilesThreshold) {
 			filesStatus = model.FilesStatusOverThreshold
 			break
 		}
@@ -179,9 +188,10 @@ func createTorrentModel(
 		files = append(files, model.TorrentFile{
 			InfoHash: hash,
 			Index:    uint(i),
-			Path:     file.DisplayPath(&info),
+			Path:     displayPath,
 			Size:     uint(file.Length),
 		})
+		savedCount++
 	}
 
 	var pieces model.TorrentPieces
