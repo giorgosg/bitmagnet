@@ -39,8 +39,8 @@ regenerate.
 | `internal/protobuf/bitmagnet.pb.go`        | `internal/protobuf/bitmagnet.proto`                 | `task gen-protoc`            |
 | `internal/**/mocks/*.go`                   | interfaces + `.mockery.yml`                         | `task gen-mockery`           |
 | `bitmagnet.io/schemas/classifier-0.1.json` | classifier types                                    | `task gen-classifier-schema` |
-| `webui/src/graphql/generated/*`            | the GraphQL schema                                  | `task gen-webui-graphql`     |
-| `webui/src/assets/i18n/*.json`             | `i18n` markup in templates                          | `task i18n-extract`          |
+| `webui/src/app/graphql/generated/**`       | the GraphQL schema                                  | `task gen-webui-graphql`     |
+| `webui/src/app/i18n/translations/*.json`   | `i18n` markup in templates                          | `task i18n-extract`          |
 | `webui/dist/**` — **committed to git**     | `webui/src`                                         | `task build-webui`           |
 
 `task gen` runs all of the code generators in the right order.

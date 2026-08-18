@@ -19,6 +19,21 @@ Two new top-level packages that don't exist upstream:
 Plus substantial changes to `internal/classifier` (34 files) and `internal/gql` (31 files)
 to wire LLM classification into the existing workflow engine and expose it over GraphQL.
 
+## Authentication
+
+The later `auth-v2` work is a third implementation worth studying alongside
+`upstream/next` and gabriel20xx; see [../auth.md](../auth.md). It adds:
+
+- username/password setup and login with signed browser sessions;
+- a machine API key accepted by GraphQL and Torznab (`apikey` or `X-Api-Key`);
+- trusted-network bypass with an explicit trusted-proxy list;
+- HTTP, middleware, session, and Torznab authorization tests.
+
+It is not an isolated module. Credentials are persisted through this fork's live config
+writer, the implementation lives under `internal/gql/auth`, and the browser flow is tied
+to its Angular UI. Treat it as a design and test source for a focused backend port, not a
+standalone cherry-pick.
+
 ## Themes
 
 ### LLM classification
@@ -59,5 +74,6 @@ If you're replacing the frontend, the Angular 21 upgrade is irrelevant and their
 backend/GraphQL changes are the only portable part — but those are entangled with the
 LLM feature.
 
-**Defer.** Revisit once the performance and reliability work from
-[lodestone](lodestone.md) and [o51r15](o51r15.md) is in and the base is stable.
+**Defer the LLM and Angular work.** Revisit it once the base is stable. Evaluate the auth
+backend separately because it covers the Torznab API-key gap left by gabriel20xx's smaller
+session implementation.

@@ -14,7 +14,7 @@ Guidance for AI assistants and new contributors. The long form lives in
 
 `internal/gql/gql.gen.go` (~24k lines), `internal/database/dao/*.gen.go`,
 `internal/protobuf/bitmagnet.pb.go`, `internal/**/mocks/*.go`, `webui/dist/**`, and
-`webui/src/assets/i18n/*.json` are all build output. Change the source and run the
+`webui/src/app/i18n/translations/*.json` are all build output. Change the source and run the
 generator — `task gen` for all of it, or the individual targets in
 [docs/hacking.md](docs/hacking.md#the-single-most-important-thing-generated-code).
 

@@ -31,6 +31,29 @@ test-first review described in [git-workflow.md](git-workflow.md).
 | [#17](https://github.com/giorgosg/bitmagnet/pull/17) | Pause DHT classification at queue capacity                                  | o51r15 `f7cb97d4b`, adapted                      | PostgreSQL threshold, drain-and-resume tests observed red  |
 | [#19](https://github.com/giorgosg/bitmagnet/pull/19) | Allow concurrent local classifier searches                                  | lodestone `4785219e4`, adapted                   | Configured-capacity and invalid-value tests observed red   |
 
+## Next candidates
+
+In suggested evaluation order:
+
+1. Upstream [#510](https://github.com/bitmagnet-io/bitmagnet/pull/510) — normalize
+   IPv4-mapped IPv6 addresses before sending on the crawler's IPv4 UDP socket. It is a
+   small correctness fix with a focused upstream test; observe that test fail on `trunk`
+   before porting it.
+2. lodestone `751a09607` / integration candidate `f32ebd2f0` — race metadata requests
+   across a bounded number of peers. Keep the idea, but redesign the implementation: the
+   candidate delays result consumption while filling semaphore slots and its cancellation
+   branch does not exit the enclosing loop. Cover prompt first-success return, the global
+   concurrency bound, cancellation, all-failure behavior, and banned metadata.
+3. Map and port the `upstream/next` auth architecture onto the `main` lineage. Preserve
+   its identity, user, API-key, JWT, and RBAC boundaries; add a focused Torznab API-key
+   adapter because `next` does not currently wire auth into that surface. Use the two
+   main-lineage implementations as integration-test references, not as the design basis;
+   see [auth.md](auth.md).
+4. Upstream [#500](https://github.com/bitmagnet-io/bitmagnet/pull/500) — support alternative
+   `S4 - 02` episode syntax, preserving its classifier regression.
+5. Upstream [#515](https://github.com/bitmagnet-io/bitmagnet/pull/515) — add AV1 codec
+   support with a parsing regression and regenerated GraphQL clients.
+
 ## Deferred or already resolved
 
 - niklas2233 `0b3f1480b` edits only `categories.gen.go`; its generator was removed from
@@ -58,3 +81,16 @@ test-first review described in [git-workflow.md](git-workflow.md).
 - Upstream [#514](https://github.com/bitmagnet-io/bitmagnet/pull/514) makes the per-IP DHT
   limiter configurable and remains open. Avoid carrying a duplicate unless upstream
   stalls or the global concurrency work establishes a combined configuration design.
+- lodestone `81970ec13` resets the crawler's in-memory stable Bloom filter after a fixed
+  insertion count. The existing `StableBloomFilter` already continuously evicts stale
+  entries and converges on a bounded false-positive rate; a full reset would instead
+  forget every recently seen hash at once. Rejected unless a reproducible failure shows
+  the library's stable-point behavior is insufficient.
+- lodestone `73d9f5223` sums seeder and leecher counts across sources. DHT scrapes,
+  trackers, and imports can observe overlapping peer populations, so independence cannot
+  be assumed and the sum can inflate rankings. Keep the conservative maximum unless a
+  deduplication model or representative measurement supports another aggregation.
+- lodestone `279f9731f` changes the fixed Levenshtein threshold to a proportional one.
+  This is a classification-policy change, not merely a performance optimization. Compare
+  it against the authoritative classifier corpus and inspect every changed result before
+  deciding.

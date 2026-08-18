@@ -72,14 +72,14 @@ For everything including the UI, exclude the committed build output:
 
 ```bash
 git diff -w --ignore-cr-at-eol --stat upstream/main FORK/main -- \
-  . ':(exclude)webui/dist' ':(exclude)webui/src/assets/i18n' \
+  . ':(exclude)webui/dist' ':(exclude)webui/src/app/i18n/translations' \
     ':(exclude)go.sum' ':(exclude)*package-lock.json'
 ```
 
 Suggested alias:
 
 ```bash
-git config alias.forkdiff '!f() { git diff -w --ignore-cr-at-eol "${2:-upstream/main}" "$1" -- . ":(exclude)webui/dist" ":(exclude)webui/src/assets/i18n" ":(exclude)go.sum" ":(exclude)*package-lock.json"; }; f'
+git config alias.forkdiff '!f() { git diff -w --ignore-cr-at-eol "${2:-upstream/main}" "$1" -- . ":(exclude)webui/dist" ":(exclude)webui/src/app/i18n/translations" ":(exclude)go.sum" ":(exclude)*package-lock.json"; }; f'
 # git forkdiff lodestone/main
 ```
 

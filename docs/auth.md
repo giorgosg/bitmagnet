@@ -13,8 +13,9 @@ so any web page in any browser can query a reachable bitmagnet instance directly
 combination — no auth, `*` CORS — is why bitmagnet is normally run on a trusted network
 only, and why a third-party browser UI can talk to it with no server in between.
 
-Three implementations of auth exist. This matters at the GraphQL/HTTP layer regardless
-of which frontend you use, so it's relevant even if you replace the web UI entirely.
+Three implementations of auth exist, plus the option to build a focused fourth design.
+This matters at the GraphQL/HTTP layer regardless of which frontend you use, so it is
+relevant even if you replace the web UI entirely.
 
 ## Option 1 — `upstream/next` (`internal/auth`, 60 files)
 
@@ -62,10 +63,35 @@ Single-user session auth: `auth_users` (bcrypt, singleton unique index) and
 - ➖ Migration numbered `00033`; renumber to `00021`
 - ➖ Arrives from a fork with poor commit hygiene — review the diff, not the log
 
-## Option 3 — roll your own
+## Option 3 — `kawaii-not-kawaii` (`internal/gql/auth`)
 
-If you're replacing the web UI, the frontend half of both options above is discarded
-regardless, which lowers the cost of this option considerably.
+An independent implementation on the `main` lineage, added after the original fork
+survey. It combines:
+
+- first-run username/password setup persisted through the fork's config writer;
+- signed browser sessions derived from the password hash and a private persisted salt;
+- a machine API key accepted by GraphQL and by Torznab as `apikey` or `X-Api-Key`;
+- trusted-network bypass with an explicit trusted-proxy list;
+- HTTP, middleware, session, and Torznab authorization tests.
+
+- ➕ Covers both browser and \*arr clients, including the Torznab decision left open by
+  gabriel20xx
+- ➕ Has substantially more boundary and failure-path coverage than the smaller module
+- ➕ Remains on the upstream `main` architecture rather than depending on `next`
+- ➖ Is coupled to the fork's live config reader/writer and privileged `auth` config update
+  path
+- ➖ Stores the password hash and API key in the application config rather than dedicated
+  database tables
+- ➖ Its browser flow is tied to the fork's Angular UI, which is not useful when replacing
+  the frontend
+
+This is a design and test source, not a clean cherry-pick. Extracting only the backend
+requires deciding which configuration machinery and persistence model to keep.
+
+## Option 4 — build a focused implementation
+
+If you're replacing the web UI, the frontend half of the fork implementations is
+discarded regardless, which lowers the cost of this option considerably.
 
 - ➕ Only the pieces actually needed
 - ➕ Can design the API-key story for Torznab from the start
@@ -75,31 +101,38 @@ regardless, which lowers the cost of this option considerably.
 ## Recommendation
 
 If you front bitmagnet with your own proxy or gateway, doing auth there and leaving
-bitmagnet bound to localhost is a legitimate fourth option, and the least work. It
+bitmagnet bound to localhost is a separate deployment option, and the least work. It
 leaves Torznab unauthenticated unless the proxy covers that too.
 
-Otherwise: **start from gabriel20xx's implementation, add API keys.**
+Otherwise: **base the implementation on the `upstream/next` auth architecture.** Its
+identity chain, user and invitation lifecycle, API-key encoding and repository, JWT
+handling, and Casbin authorization model are the source of truth. Port the smallest
+coherent backend slice to the `main` lineage rather than designing a competing session
+or permission model.
 
-It's the only option that applies to `main` without dragging in a rewrite, and it's
-small enough to audit properly. Its one real gap — API keys for Torznab — can be filled
-by borrowing the _design_ of `next`'s `internal/auth/api_key` (encoding + repository +
-service, without Casbin) rather than porting the whole stack.
+This is an adaptation, not a direct cherry-pick: `next` auth depends on its plugin,
+GraphQL, and database rewrites. Begin with a dependency and schema map, preserve the
+auth package boundaries and tests, and introduce explicit adapters where the `main`
+lineage differs. Gabriel20xx and kawaii-not-kawaii remain useful for main-lineage HTTP
+integration tests, first-run behavior, and Torznab compatibility, but not as the design
+basis. Do not import either frontend.
 
-Concretely:
+The initial port should include:
 
-1. Cherry-pick `internal/auth` + `graphql/schema/auth.graphqls` + the migration from
-   gabriel20xx, renumbered to `00021`.
-2. Skip everything under `webui/`.
-3. Read `upstream/next:internal/auth/api_key/` for reference, then add a minimal
-   API-key authenticator to the service.
-4. Apply the `@authenticated` directive to GraphQL fields; decide separately how
-   Torznab endpoints authenticate.
+1. The `identity` authenticator chain and anonymous, API-key, and user identities.
+2. Revocable, encoded machine API keys using the `next` repository/service split.
+3. User bootstrap/login and JWT handling, preserving `next`'s password and token tests.
+4. The RBAC permission boundary, including Casbin if it remains required by the extracted
+   object/action model.
+5. GraphQL middleware plus Torznab API-key enforcement. `next` does not currently wire its
+   auth stack into Torznab, so that integration still needs a focused adapter and tests.
 
-If `next` ever comes out of draft, expect to throw this away and adopt the upstream
-stack — that's an acceptable cost given `next` has been dormant for four months.
+If `next` comes out of draft, compare the port with the then-current upstream stack and
+replace adapters with upstream components where practical.
 
 ## Open question
 
-Whether authentication should also gate the **Torznab** endpoints, and how. Sonarr and
-Radarr pass an API key in the URL; none of the three options above documents a decision
-here. Worth resolving before implementing.
+The remaining decisions are extraction boundaries and compatibility: which parts of
+`next`'s plugin and database infrastructure must be adapted, whether loopback is trusted
+implicitly, how Torznab maps its conventional `apikey` query parameter to a `next` API-key
+identity, and how an existing open deployment enables auth without locking out clients.

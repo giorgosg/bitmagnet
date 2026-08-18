@@ -70,7 +70,7 @@ source of review noise:
 - `internal/protobuf/bitmagnet.pb.go` — protoc
 - `internal/**/mocks/*.go` — mockery (`.mockery.yml`)
 - `webui/dist/**` — **65 build artifacts are committed to git**
-- `webui/src/assets/i18n/*.json` — transloco extraction output
+- `webui/src/app/i18n/translations/*.json` — transloco extraction output
 
 Exclude the last two from every fork diff or they drown everything else. See
 [git-workflow.md](git-workflow.md).

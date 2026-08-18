@@ -34,9 +34,10 @@ runtime**, and a **full auth stack** (JWT, API keys, Casbin RBAC — see [auth.m
 ### Why this matters
 
 Anything merged into `main` today may be irrelevant if `next` lands. But `next` has
-been dormant for four months and is still a draft, and no fork has adopted it —
-o51r15, lodestone, niklas2233, kawaii-not-kawaii and gabriel20xx are all on the `main`
-lineage, none of them carry `internal/plugin`, `internal/wasm`, or `internal/auth`.
+been dormant for four months and is still a draft, and no fork has adopted its plugin,
+WASM, or auth architecture. The active forks remain on the `main` lineage. Gabriel20xx
+and kawaii-not-kawaii have independent auth implementations on that lineage; neither is
+the `next` stack. See [auth.md](auth.md).
 
 **Working assumption: build on `main`.** That's where the community is. Revisit if
 `next` comes out of draft.
