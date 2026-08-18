@@ -29,6 +29,7 @@ test-first review described in [git-workflow.md](git-workflow.md).
 | [#15](https://github.com/giorgosg/bitmagnet/pull/15) | Preserve rule-derived types without file evidence                           | kawaii-not-kawaii `68bcddf43`, adapted           | Processor integration regressions observed red             |
 | [#16](https://github.com/giorgosg/bitmagnet/pull/16) | Cap global in-flight DHT queries                                            | o51r15 `727328128`, redesigned                   | Deterministic concurrency and fallback tests observed red  |
 | [#17](https://github.com/giorgosg/bitmagnet/pull/17) | Pause DHT classification at queue capacity                                  | o51r15 `f7cb97d4b`, adapted                      | PostgreSQL threshold, drain-and-resume tests observed red  |
+| [#19](https://github.com/giorgosg/bitmagnet/pull/19) | Allow concurrent local classifier searches                                  | lodestone `4785219e4`, adapted                   | Configured-capacity and invalid-value tests observed red   |
 
 ## Deferred or already resolved
 
