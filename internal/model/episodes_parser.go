@@ -10,30 +10,44 @@ import (
 	"github.com/hedhyw/rex/pkg/rex"
 )
 
-func rangeToken(runes string, requirePrefix bool, startName, dashEndName, commaEndName string) dialect.Token {
-	var prefixToken dialect.Token
-	if requirePrefix {
-		prefixToken = rex.Group.NonCaptured(
-			rex.Chars.Runes(runes),
-			rex.Chars.Whitespace().Repeat().ZeroOrOne(),
-		)
+func rangeToken(
+	runes string,
+	requirePrefixAfterSpacedDash bool,
+	startName, dashEndName, commaEndName string,
+) dialect.Token {
+	var dashToken dialect.Token
+	if requirePrefixAfterSpacedDash {
+		dashToken = rex.Group.Composite(
+			rex.Group.Define(
+				rex.Chars.Single('-'),
+				rex.Group.Define(rex.Chars.Digits().Repeat().Between(1, 2)).WithName(dashEndName),
+			).NonCaptured(),
+			rex.Group.Define(
+				rex.Chars.Whitespace().Repeat().ZeroOrOne(),
+				rex.Chars.Single('-'),
+				rex.Chars.Whitespace().Repeat().ZeroOrOne(),
+				rex.Chars.Runes(runes),
+				rex.Chars.Whitespace().Repeat().ZeroOrOne(),
+				rex.Group.Define(rex.Chars.Digits().Repeat().Between(1, 2)).WithName(dashEndName),
+			).NonCaptured(),
+		).NonCaptured()
 	} else {
-		prefixToken = rex.Group.NonCaptured(
-			rex.Chars.Runes(runes).Repeat().ZeroOrOne(),
+		dashToken = rex.Group.Define(
 			rex.Chars.Whitespace().Repeat().ZeroOrOne(),
-		).Repeat().ZeroOrOne()
+			rex.Chars.Single('-'),
+			rex.Chars.Whitespace().Repeat().ZeroOrOne(),
+			rex.Group.NonCaptured(
+				rex.Chars.Runes(runes).Repeat().ZeroOrOne(),
+				rex.Chars.Whitespace().Repeat().ZeroOrOne(),
+			).Repeat().ZeroOrOne(),
+			rex.Group.Define(rex.Chars.Digits().Repeat().Between(1, 2)).WithName(dashEndName),
+		).NonCaptured()
 	}
 
 	return rex.Group.Define(
 		rex.Group.Define(rex.Chars.Digits().Repeat().Between(1, 2)).WithName(startName),
 		rex.Group.Composite(
-			rex.Group.Define(
-				rex.Chars.Whitespace().Repeat().ZeroOrOne(),
-				rex.Chars.Single('-'),
-				rex.Chars.Whitespace().Repeat().ZeroOrOne(),
-				prefixToken,
-				rex.Group.Define(rex.Chars.Digits().Repeat().Between(1, 2)).WithName(dashEndName),
-			).NonCaptured(),
+			dashToken,
 			rex.Group.Define(
 				rex.Chars.Whitespace().Repeat().ZeroOrOne(),
 				rex.Chars.Single(','),

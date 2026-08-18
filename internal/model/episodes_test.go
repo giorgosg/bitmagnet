@@ -89,3 +89,38 @@ func TestParseEpisodesAlternativeSeasonEpisode(t *testing.T) {
 		t.Fatalf("ParseEpisodes() = %v, want %v", got, want)
 	}
 }
+
+func TestParseEpisodesSeasonRange(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "compact unpadded range",
+			input: "S1-4",
+			want:  "S01-04",
+		},
+		{
+			name:  "compact padded range",
+			input: "S01-03",
+			want:  "S01-03",
+		},
+		{
+			name:  "prefixed range end",
+			input: "S01-S03",
+			want:  "S01-03",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := ParseEpisodes(tt.input).String(); got != tt.want {
+				t.Fatalf("ParseEpisodes(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
