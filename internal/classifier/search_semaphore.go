@@ -11,6 +11,19 @@ type localSearchSemaphore struct {
 	semaphore chan struct{}
 }
 
+// newLocalSearchSemaphore is adapted from ghobs91/lodestone@4785219e4.
+// Retain the former single-search behavior for non-positive configuration.
+func newLocalSearchSemaphore(search LocalSearch, concurrency int) localSearchSemaphore {
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+
+	return localSearchSemaphore{
+		search:    search,
+		semaphore: make(chan struct{}, concurrency),
+	}
+}
+
 func (s localSearchSemaphore) ContentByID(ctx context.Context, ref model.ContentRef) (model.Content, error) {
 	select {
 	case <-ctx.Done():

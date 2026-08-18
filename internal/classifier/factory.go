@@ -42,10 +42,7 @@ func New(params Params) Result {
 				celEnvOption,
 			},
 			dependencies: dependencies{
-				search: localSearchSemaphore{
-					search:    localSearch{s},
-					semaphore: make(chan struct{}, 1),
-				},
+				search:     newLocalSearchSemaphore(localSearch{s}, params.Config.SearchConcurrency),
 				tmdbClient: tmdbClient,
 			},
 		}, nil
