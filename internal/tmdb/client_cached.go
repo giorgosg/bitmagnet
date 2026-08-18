@@ -2,9 +2,10 @@ package tmdb
 
 import (
 	"context"
-	"fmt"
+	"strings"
 	"time"
 
+	"github.com/bitmagnet-io/bitmagnet/internal/model"
 	lru "github.com/hashicorp/golang-lru/v2/expirable"
 )
 
@@ -13,26 +14,50 @@ const (
 	cacheTTL  = time.Hour
 )
 
+// detailsKey identifies a details request. MovieDetailsRequest and
+// TvDetailsRequest carry a []string and so cannot be map keys themselves;
+// AppendToResponse is joined with the same separator the client uses to build
+// the query parameter, so two requests share an entry exactly when they would
+// produce the same call to TMDB.
+type detailsKey struct {
+	id               int64
+	appendToResponse string
+	language         model.NullString
+}
+
+func newDetailsKey(id int64, appendToResponse []string, language model.NullString) detailsKey {
+	return detailsKey{
+		id:               id,
+		appendToResponse: strings.Join(appendToResponse, ","),
+		language:         language,
+	}
+}
+
 // clientCached wraps a Client with an in-process LRU cache for detail and search
 // requests. This avoids redundant TMDB API calls when many torrents in the same
 // classification batch reference the same movie or TV show.
+//
+// Cache keys are whole requests. Every field of a request changes the response —
+// Language and Region select a localisation, AppendToResponse selects which
+// sub-resources are returned at all — so keying on a subset would serve one
+// request the answer to a different one.
 type clientCached struct {
 	inner        Client
-	movieDetails *lru.LRU[int64, MovieDetailsResponse]
-	tvDetails    *lru.LRU[int64, TvDetailsResponse]
-	searchMovie  *lru.LRU[string, SearchMovieResponse]
-	searchTv     *lru.LRU[string, SearchTvResponse]
-	findByID     *lru.LRU[string, FindByIDResponse]
+	movieDetails *lru.LRU[detailsKey, MovieDetailsResponse]
+	tvDetails    *lru.LRU[detailsKey, TvDetailsResponse]
+	searchMovie  *lru.LRU[SearchMovieRequest, SearchMovieResponse]
+	searchTv     *lru.LRU[SearchTvRequest, SearchTvResponse]
+	findByID     *lru.LRU[FindByIDRequest, FindByIDResponse]
 }
 
 func newCachedClient(inner Client) Client {
 	return &clientCached{
 		inner:        inner,
-		movieDetails: lru.NewLRU[int64, MovieDetailsResponse](cacheSize, nil, cacheTTL),
-		tvDetails:    lru.NewLRU[int64, TvDetailsResponse](cacheSize, nil, cacheTTL),
-		searchMovie:  lru.NewLRU[string, SearchMovieResponse](cacheSize, nil, cacheTTL),
-		searchTv:     lru.NewLRU[string, SearchTvResponse](cacheSize, nil, cacheTTL),
-		findByID:     lru.NewLRU[string, FindByIDResponse](cacheSize, nil, cacheTTL),
+		movieDetails: lru.NewLRU[detailsKey, MovieDetailsResponse](cacheSize, nil, cacheTTL),
+		tvDetails:    lru.NewLRU[detailsKey, TvDetailsResponse](cacheSize, nil, cacheTTL),
+		searchMovie:  lru.NewLRU[SearchMovieRequest, SearchMovieResponse](cacheSize, nil, cacheTTL),
+		searchTv:     lru.NewLRU[SearchTvRequest, SearchTvResponse](cacheSize, nil, cacheTTL),
+		findByID:     lru.NewLRU[FindByIDRequest, FindByIDResponse](cacheSize, nil, cacheTTL),
 	}
 }
 
@@ -41,8 +66,7 @@ func (c *clientCached) ValidateAPIKey(ctx context.Context) error {
 }
 
 func (c *clientCached) SearchMovie(ctx context.Context, req SearchMovieRequest) (SearchMovieResponse, error) {
-	key := fmt.Sprintf("%s|%v|%s|%s", req.Query, req.IncludeAdult, req.Year, req.PrimaryReleaseYear)
-	if v, ok := c.searchMovie.Get(key); ok {
+	if v, ok := c.searchMovie.Get(req); ok {
 		return v, nil
 	}
 
@@ -51,13 +75,14 @@ func (c *clientCached) SearchMovie(ctx context.Context, req SearchMovieRequest) 
 		return resp, err
 	}
 
-	c.searchMovie.Add(key, resp)
+	c.searchMovie.Add(req, resp)
 
 	return resp, nil
 }
 
 func (c *clientCached) MovieDetails(ctx context.Context, req MovieDetailsRequest) (MovieDetailsResponse, error) {
-	if v, ok := c.movieDetails.Get(req.ID); ok {
+	key := newDetailsKey(req.ID, req.AppendToResponse, req.Language)
+	if v, ok := c.movieDetails.Get(key); ok {
 		return v, nil
 	}
 
@@ -66,14 +91,13 @@ func (c *clientCached) MovieDetails(ctx context.Context, req MovieDetailsRequest
 		return resp, err
 	}
 
-	c.movieDetails.Add(req.ID, resp)
+	c.movieDetails.Add(key, resp)
 
 	return resp, nil
 }
 
 func (c *clientCached) SearchTv(ctx context.Context, req SearchTvRequest) (SearchTvResponse, error) {
-	key := fmt.Sprintf("%s|%v|%s|%s", req.Query, req.IncludeAdult, req.Year, req.FirstAirDateYear)
-	if v, ok := c.searchTv.Get(key); ok {
+	if v, ok := c.searchTv.Get(req); ok {
 		return v, nil
 	}
 
@@ -82,13 +106,14 @@ func (c *clientCached) SearchTv(ctx context.Context, req SearchTvRequest) (Searc
 		return resp, err
 	}
 
-	c.searchTv.Add(key, resp)
+	c.searchTv.Add(req, resp)
 
 	return resp, nil
 }
 
 func (c *clientCached) TvDetails(ctx context.Context, req TvDetailsRequest) (TvDetailsResponse, error) {
-	if v, ok := c.tvDetails.Get(req.SeriesID); ok {
+	key := newDetailsKey(req.SeriesID, req.AppendToResponse, req.Language)
+	if v, ok := c.tvDetails.Get(key); ok {
 		return v, nil
 	}
 
@@ -97,14 +122,13 @@ func (c *clientCached) TvDetails(ctx context.Context, req TvDetailsRequest) (TvD
 		return resp, err
 	}
 
-	c.tvDetails.Add(req.SeriesID, resp)
+	c.tvDetails.Add(key, resp)
 
 	return resp, nil
 }
 
 func (c *clientCached) FindByID(ctx context.Context, req FindByIDRequest) (FindByIDResponse, error) {
-	key := fmt.Sprintf("%s|%s", req.ExternalSource, req.ExternalID)
-	if v, ok := c.findByID.Get(key); ok {
+	if v, ok := c.findByID.Get(req); ok {
 		return v, nil
 	}
 
@@ -113,7 +137,7 @@ func (c *clientCached) FindByID(ctx context.Context, req FindByIDRequest) (FindB
 		return resp, err
 	}
 
-	c.findByID.Add(key, resp)
+	c.findByID.Add(req, resp)
 
 	return resp, nil
 }
