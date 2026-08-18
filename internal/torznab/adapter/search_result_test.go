@@ -47,6 +47,24 @@ func TestTorrentContentResultUsesResolutionCategory(t *testing.T) {
 	}
 }
 
+func TestTorrentContentResultIncludesTVDBID(t *testing.T) {
+	t.Parallel()
+
+	item := torrentContentResultItemToTorznabResultItem(search.TorrentContentResultItem{
+		TorrentContent: model.TorrentContent{
+			Content: model.Content{
+				Attributes: []model.ContentAttribute{{
+					Source: "tvdb",
+					Key:    "id",
+					Value:  "12345",
+				}},
+			},
+		},
+	})
+
+	require.Equal(t, "12345", torznabAttribute(item, torznab.AttrTvdb))
+}
+
 func torznabAttribute(item torznab.SearchResultItem, name string) string {
 	for _, attr := range item.TorznabAttrs {
 		if attr.AttrName == name {
