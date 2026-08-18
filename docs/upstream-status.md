@@ -51,16 +51,16 @@ Worth noting: **o51r15 has already cherry-picked several of them** (#446 bloom f
 nil panic, #454 bootstrap nodes, #458 BEP-47 padding files), which is a useful
 shortcut — see [forks/o51r15.md](forks/o51r15.md).
 
-Notable open PRs not yet absorbed by any fork:
+Notable upstream PRs and their integration status:
 
 | PR                                                         | Title                                                           | State                                         |
 | ---------------------------------------------------------- | --------------------------------------------------------------- | --------------------------------------------- |
 | [#516](https://github.com/bitmagnet-io/bitmagnet/pull/516) | bulk-delete acts on all matching results, not just current page | mergeable                                     |
-| [#515](https://github.com/bitmagnet-io/bitmagnet/pull/515) | AV1 codec                                                       | mergeable, 9 lines                            |
+| [#515](https://github.com/bitmagnet-io/bitmagnet/pull/515) | AV1 codec                                                       | integrated into `trunk` as #23                |
 | [#514](https://github.com/bitmagnet-io/bitmagnet/pull/514) | Configurable DHT rate limit                                     | mergeable — overlaps lodestone's rate limiter |
-| [#513](https://github.com/bitmagnet-io/bitmagnet/pull/513) | Docker layer caching for Go modules                             | mergeable, 6 lines                            |
-| [#510](https://github.com/bitmagnet-io/bitmagnet/pull/510) | fix(dht): unmap IPv4-in-IPv6 to prevent EAFNOSUPPORT            | mergeable                                     |
-| [#500](https://github.com/bitmagnet-io/bitmagnet/pull/500) | Named regex capture groups in ParseVideoContent                 | mergeable                                     |
+| [#513](https://github.com/bitmagnet-io/bitmagnet/pull/513) | Docker layer caching for Go modules                             | integrated into `trunk` as #24                |
+| [#510](https://github.com/bitmagnet-io/bitmagnet/pull/510) | fix(dht): unmap IPv4-in-IPv6 to prevent EAFNOSUPPORT            | integrated into `trunk` as #21                |
+| [#500](https://github.com/bitmagnet-io/bitmagnet/pull/500) | Named regex capture groups in ParseVideoContent                 | integrated into `trunk` as #22, adapted       |
 | [#482](https://github.com/bitmagnet-io/bitmagnet/pull/482) | Updated classifier banned terms                                 | mergeable                                     |
 | [#467](https://github.com/bitmagnet-io/bitmagnet/pull/467) | Verbose mode on classifier                                      | mergeable                                     |
 
