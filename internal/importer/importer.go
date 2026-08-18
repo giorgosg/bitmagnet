@@ -250,7 +250,9 @@ func (i *activeImport) persistItems(items ...Item) error {
 			return createTorrentsTorrentSourcesErr
 		}
 
-		return tx.QueueJob.Create(&job)
+		// Adapted from o51r15/bitmagnet@dd314bf47: an existing pending job has the
+		// same work, so a fingerprint collision must not roll back the import batch.
+		return tx.QueueJob.Clauses(clause.OnConflict{DoNothing: true}).Create(&job)
 	})
 }
 
