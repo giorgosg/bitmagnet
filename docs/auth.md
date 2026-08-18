@@ -35,7 +35,7 @@ internal/auth/http_auth/   middleware
 **Design:** a chain-of-responsibility authenticator resolving an identity from anonymous,
 API key, or JWT, with Casbin RBAC for authorization.
 
-- ➕ Comprehensive, tested, has mocks, API keys are a real requirement for *arr integrations
+- ➕ Comprehensive, tested, has mocks, API keys are a real requirement for \*arr integrations
 - ➕ Aligns with upstream if `next` ever lands
 - ➖ Adds Casbin as a dependency
 - ➖ **Cannot be extracted from `next` in isolation** — it is entangled with `next`'s
@@ -55,7 +55,7 @@ Single-user session auth: `auth_users` (bcrypt, singleton unique index) and
 - ➕ Applies cleanly to `main` — standard fx module, one line in `appfx/module.go`
 - ➕ Sensible schema decisions, documented in the migration itself; has a `service_test.go`
 - ➕ `setupRequired` first-run flow suits a self-hosted app
-- ➖ **No API key support** — so no authenticated Torznab for *arr clients. This is the
+- ➖ **No API key support** — so no authenticated Torznab for \*arr clients. This is the
   significant gap; sessions alone don't cover the integration surface.
 - ➖ Single user by design (deliberately, and reversible — the singleton index can be
   dropped without a schema change)

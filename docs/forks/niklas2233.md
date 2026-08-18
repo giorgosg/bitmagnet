@@ -11,7 +11,7 @@ lint fixed. If you want something that cherry-picks without a fight, this is it.
 
 ## Torznab fixes — take these regardless
 
-Small, isolated, clearly correct, and useful to anyone running *arr integrations:
+Small, isolated, clearly correct, and useful to anyone running \*arr integrations:
 
 - **`CategoryBooks` used `catCriteria` instead of `options`** — OR where it should have
   been AND. A real bug.

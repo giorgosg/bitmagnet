@@ -79,7 +79,7 @@ Exclude the last two from every fork diff or they drown everything else. See
 
 - **GraphQL** at `/graphql` — what the web UI uses. Schema in `graphql/schema/*.graphqls`,
   operations in `graphql/queries/` and `graphql/mutations/`.
-- **Torznab** — the *arr integration surface.
+- **Torznab** — the \*arr integration surface.
 - **Web UI** — Angular 18, embedded in the binary.
 
 There is **no authentication of any kind** on upstream `main`. Every interface is

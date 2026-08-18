@@ -25,8 +25,14 @@ silently reverted by the next `task gen`. CI runs the generators and fails on an
 which produces a huge and meaningless-looking diff. Exclude it when reading someone
 else's branch.
 
-**3. Markdown is linted.** `task lint` runs `prettier --check .` and `.prettierignore`
-does not exclude `*.md`. Run `npx --yes prettier@3 --write` on docs before committing.
+**3. Markdown is linted, by a pinned Prettier.** `task lint` runs `prettier --check .`
+and `.prettierignore` does not exclude `*.md`. Use the repo's own copy, not `npx
+prettier@3` — the pin is `^3.3.3` and later 3.x releases format markdown differently,
+which will pass locally and fail CI:
+
+```bash
+./webui/node_modules/.bin/prettier --write 'docs/**/*.md' CLAUDE.md
+```
 
 **4. Adding a subsystem means adding an fx module.** `internal/<feature>/` with
 `config.go`, `factory.go`, `<feature>fx/module.go`, then one line in
