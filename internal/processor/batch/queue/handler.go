@@ -42,24 +42,7 @@ func New(p Params) Result {
 					}
 					var scopes []func(gen.Dao) gen.Dao
 					if len(msg.ContentTypes) > 0 {
-						var contentTypes []string
-						var unknownContentType bool
-						for _, ct := range msg.ContentTypes {
-							if !ct.Valid {
-								unknownContentType = true
-							} else {
-								contentTypes = append(contentTypes, ct.ContentType.String())
-							}
-						}
-						scopes = append(scopes, func(tx gen.Dao) gen.Dao {
-							sq := d.TorrentContent.Where(
-								d.TorrentContent.InfoHash.EqCol(d.Torrent.InfoHash),
-							).Where(d.TorrentContent.ContentType.In(contentTypes...))
-							if unknownContentType {
-								sq = sq.Or(d.TorrentContent.ContentType.IsNull())
-							}
-							return tx.Where(gen.Exists(sq))
-						})
+						scopes = append(scopes, contentTypeScope(d, msg.ContentTypes))
 					}
 					if msg.Orphans {
 						scopes = append(scopes, func(tx gen.Dao) gen.Dao {
@@ -155,5 +138,46 @@ func New(p Params) Result {
 				handler.Concurrency(1),
 			), nil
 		}),
+	}
+}
+
+// contentTypeScope restricts a torrent query to content rows matching one of
+// the requested types. An invalid NullContentType means "unclassified".
+//
+// Adapted from kawaii-not-kawaii/bitmagnet@f5f027a45. The predicate must be
+// grouped with the info-hash correlation: applying Or to the whole subquery
+// makes an unclassified content row satisfy EXISTS for every torrent.
+func contentTypeScope(d *dao.Query, nullable []model.NullContentType) func(gen.Dao) gen.Dao {
+	var (
+		contentTypes []string
+		unknown      bool
+	)
+
+	for _, contentType := range nullable {
+		if contentType.Valid {
+			contentTypes = append(contentTypes, contentType.ContentType.String())
+		} else {
+			unknown = true
+		}
+	}
+
+	return func(tx gen.Dao) gen.Dao {
+		var condition gen.Condition
+
+		switch {
+		case len(contentTypes) > 0 && unknown:
+			condition = d.TorrentContent.Where(
+				d.TorrentContent.ContentType.In(contentTypes...),
+			).Or(d.TorrentContent.ContentType.IsNull())
+		case unknown:
+			condition = d.TorrentContent.ContentType.IsNull()
+		default:
+			condition = d.TorrentContent.ContentType.In(contentTypes...)
+		}
+
+		return tx.Where(gen.Exists(d.TorrentContent.Where(
+			d.TorrentContent.InfoHash.EqCol(d.Torrent.InfoHash),
+			condition,
+		)))
 	}
 }
