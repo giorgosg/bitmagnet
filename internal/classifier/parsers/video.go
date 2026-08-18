@@ -147,7 +147,7 @@ func parseTitleYearEpisodes(input string) (string, model.Year, model.Episodes, s
 			title = cleanTitle(title)
 		}
 
-		episodes := model.EpisodesMatchToEpisodes(match[2:])
+		episodes := model.EpisodesMatchToEpisodes(titleEpisodesRegex, match)
 
 		return title, year, episodes, input[len(match[0]):], nil
 	}

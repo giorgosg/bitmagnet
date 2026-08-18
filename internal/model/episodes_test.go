@@ -80,3 +80,12 @@ func TestEpisodesString(t *testing.T) {
 		})
 	}
 }
+
+func TestParseEpisodesAlternativeSeasonEpisode(t *testing.T) {
+	t.Parallel()
+
+	want := Episodes{4: {2: {}}}
+	if got := ParseEpisodes("S4 - 02"); got.String() != want.String() {
+		t.Fatalf("ParseEpisodes() = %v, want %v", got, want)
+	}
+}
