@@ -9,6 +9,7 @@ func TestInferVideoCodecAV1(t *testing.T) {
 	if !codec.Valid || codec.VideoCodec.String() != "AV1" {
 		t.Fatalf("codec = %#v, want AV1", codec)
 	}
+
 	if !releaseGroup.Valid || releaseGroup.String != "GROUP" {
 		t.Fatalf("release group = %#v, want GROUP", releaseGroup)
 	}
