@@ -1,6 +1,8 @@
 # Fork triage
 
 Surveyed 2026-08-18. Of 258 forks, all but a handful are unmodified mirrors.
+This is the survey snapshot; see [integration status](../integration-status.md) for the
+patches subsequently accepted into `trunk` and the current evaluation queue.
 
 ## Real divergence
 
