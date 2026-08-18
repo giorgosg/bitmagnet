@@ -57,6 +57,8 @@ type crawler struct {
 	stopped        chan struct{}
 	persistedTotal *prometheus.CounterVec
 	logger         *zap.SugaredLogger
+	maxQueueDepth  uint
+	queueDepth     *concurrency.AtomicValue[int64]
 }
 
 func (c *crawler) start() {
@@ -76,6 +78,7 @@ func (c *crawler) start() {
 	go c.runScrape(ctx)
 	go c.reseedBootstrapNodes(ctx)
 	go c.runKTableHealthMonitor(ctx)
+	go c.runQueueDepthMonitor(ctx)
 	go c.runPersistTorrents(ctx)
 	go c.runPersistSources(ctx)
 	go c.getOldNodes(ctx)
