@@ -74,6 +74,7 @@ func (x VideoCodec) IsValid() bool {
 
 var _VideoCodecValue = map[string]VideoCodec{
 	"AV1":   VideoCodecAV1,
+	"av1":   VideoCodecAV1,
 	"H264":  VideoCodecH264,
 	"h264":  VideoCodecH264,
 	"x264":  VideoCodecX264,
