@@ -28,6 +28,7 @@ type crawler struct {
 	banningChecker               banning.Checker
 	bootstrapNodes               []string
 	reseedBootstrapNodesInterval time.Duration
+	reseedRequests               chan struct{}
 	getOldestNodesInterval       time.Duration
 	oldPeerThreshold             time.Duration
 	discoveredNodes              concurrency.BatchingChannel[ktable.Node]
@@ -74,6 +75,7 @@ func (c *crawler) start() {
 	go c.runRequestMetaInfo(ctx)
 	go c.runScrape(ctx)
 	go c.reseedBootstrapNodes(ctx)
+	go c.runKTableHealthMonitor(ctx)
 	go c.runPersistTorrents(ctx)
 	go c.runPersistSources(ctx)
 	go c.getOldNodes(ctx)
