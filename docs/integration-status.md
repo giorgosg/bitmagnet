@@ -30,29 +30,25 @@ test-first review described in [git-workflow.md](git-workflow.md).
 | [#16](https://github.com/giorgosg/bitmagnet/pull/16) | Cap global in-flight DHT queries                                            | o51r15 `727328128`, redesigned                   | Deterministic concurrency and fallback tests observed red  |
 | [#17](https://github.com/giorgosg/bitmagnet/pull/17) | Pause DHT classification at queue capacity                                  | o51r15 `f7cb97d4b`, adapted                      | PostgreSQL threshold, drain-and-resume tests observed red  |
 | [#19](https://github.com/giorgosg/bitmagnet/pull/19) | Allow concurrent local classifier searches                                  | lodestone `4785219e4`, adapted                   | Configured-capacity and invalid-value tests observed red   |
+| [#21](https://github.com/giorgosg/bitmagnet/pull/21) | Normalize IPv4-mapped DHT socket addresses                                  | upstream #510 `20f99d59d`                        | Socket conversion regression observed red                  |
+| [#22](https://github.com/giorgosg/bitmagnet/pull/22) | Parse alternative `S4 - 02` episode syntax                                  | upstream #500 `da043e421`, adapted               | Parser regression observed red; omitted call site repaired |
+| [#23](https://github.com/giorgosg/bitmagnet/pull/23) | Add AV1 codec support                                                       | upstream #515 `605de43a3`                        | Inference regression observed red; generators verified     |
+| [#24](https://github.com/giorgosg/bitmagnet/pull/24) | Cache Go module downloads in the Docker build                               | upstream #513 `ba737ad25`                        | Equivalent build and full CI passed                        |
 
 ## Next candidates
 
 In suggested evaluation order:
 
-1. Upstream [#510](https://github.com/bitmagnet-io/bitmagnet/pull/510) — normalize
-   IPv4-mapped IPv6 addresses before sending on the crawler's IPv4 UDP socket. It is a
-   small correctness fix with a focused upstream test; observe that test fail on `trunk`
-   before porting it.
-2. lodestone `751a09607` / integration candidate `f32ebd2f0` — race metadata requests
+1. lodestone `751a09607` / integration candidate `f32ebd2f0` — race metadata requests
    across a bounded number of peers. Keep the idea, but redesign the implementation: the
    candidate delays result consumption while filling semaphore slots and its cancellation
    branch does not exit the enclosing loop. Cover prompt first-success return, the global
    concurrency bound, cancellation, all-failure behavior, and banned metadata.
-3. Map and port the `upstream/next` auth architecture onto the `main` lineage. Preserve
+2. Map and port the `upstream/next` auth architecture onto the `main` lineage. Preserve
    its identity, user, API-key, JWT, and RBAC boundaries; add a focused Torznab API-key
    adapter because `next` does not currently wire auth into that surface. Use the two
    main-lineage implementations as integration-test references, not as the design basis;
    see [auth.md](auth.md).
-4. Upstream [#500](https://github.com/bitmagnet-io/bitmagnet/pull/500) — support alternative
-   `S4 - 02` episode syntax, preserving its classifier regression.
-5. Upstream [#515](https://github.com/bitmagnet-io/bitmagnet/pull/515) — add AV1 codec
-   support with a parsing regression and regenerated GraphQL clients.
 
 ## Deferred or already resolved
 
