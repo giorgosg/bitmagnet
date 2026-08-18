@@ -55,6 +55,7 @@ func (s *server) Start(ctx context.Context) (err error) {
 		}
 		handlers[i] = sh
 		listenerChans[h.Queue] = listenerChan
+
 		go sh.start(ctx)
 	}
 
@@ -104,9 +105,25 @@ func (s *server) listenLoop(ctx context.Context, listenerChans map[string]chan p
 	if err != nil {
 		return err
 	}
-	defer conn.Release()
 
 	pgConn := conn.Conn()
+
+	// pgxpool does not reset session state on release, so a connection handed
+	// back while still subscribed would deliver notifications to whatever uses
+	// it next. Drop the subscriptions before returning it to the pool.
+	defer func() {
+		unlistenCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		defer cancel()
+
+		if _, unlistenErr := pgConn.Exec(unlistenCtx, "UNLISTEN *"); unlistenErr != nil {
+			// Likely already broken. Take it out of the pool and close it rather
+			// than returning a possibly-still-subscribed connection.
+			_ = conn.Hijack().Close(unlistenCtx)
+			return
+		}
+
+		conn.Release()
+	}()
 
 	for ch := range listenerChans {
 		if _, execErr := pgConn.Exec(ctx, fmt.Sprintf("LISTEN %q", ch)); execErr != nil {
@@ -125,15 +142,23 @@ func (s *server) listenLoop(ctx context.Context, listenerChans map[string]chan p
 			continue
 		}
 
+		// A full channel means the handler is already saturated; the polling
+		// fallback will pick the job up.
 		select {
 		case ch <- *notification:
 		default:
-			// Channel full; the polling fallback will pick up the job.
 		}
 	}
 }
 
 const gcBatchSize = 1000
+
+// gcBatchPredicate bounds a delete to one batch of expired jobs. The LIMIT lives
+// in a subquery because Postgres does not accept LIMIT directly on DELETE.
+const gcBatchPredicate = "queue_jobs.id IN (" +
+	"SELECT id FROM queue_jobs " +
+	"WHERE status IN (?, ?) AND ran_at + archival_duration < ?::timestamptz " +
+	"LIMIT ?)"
 
 func (s *server) runGarbageCollection(ctx context.Context) {
 	for {
@@ -151,23 +176,33 @@ func (s *server) runGarbageCollection(ctx context.Context) {
 // excessive WAL generation that could happen with unbounded DELETEs.
 func (s *server) runGCBatch(ctx context.Context) {
 	for {
-		tx := s.query.QueueJob.WithContext(ctx).Where(
-			s.query.QueueJob.Status.In(string(model.QueueJobStatusProcessed), string(model.QueueJobStatusFailed)),
-		).
-			UnderlyingDB().Where(
-			"queue_jobs.ran_at + queue_jobs.archival_duration < ?::timestamptz",
-			time.Now(),
-		).Where(
-			"queue_jobs.id IN (SELECT id FROM queue_jobs WHERE status IN (?, ?) AND ran_at + archival_duration < ?::timestamptz LIMIT ?)",
-			string(model.QueueJobStatusProcessed), string(model.QueueJobStatusFailed), time.Now(), gcBatchSize,
-		).Delete(&model.QueueJob{})
-		if tx.Error != nil {
-			s.logger.Errorw("error deleting old queue jobs", "error", tx.Error)
+		if ctx.Err() != nil {
 			return
 		}
+
+		// The subquery already carries the full predicate; repeating it in the
+		// outer WHERE only makes the plan harder to read.
+		tx := s.query.QueueJob.WithContext(ctx).UnderlyingDB().Where(
+			gcBatchPredicate,
+			string(model.QueueJobStatusProcessed),
+			string(model.QueueJobStatusFailed),
+			time.Now(),
+			gcBatchSize,
+		).Delete(&model.QueueJob{})
+
+		if tx.Error != nil {
+			// A cancelled context during shutdown is expected, not an error.
+			if !errors.Is(tx.Error, context.Canceled) {
+				s.logger.Errorw("error deleting old queue jobs", "error", tx.Error)
+			}
+
+			return
+		}
+
 		if tx.RowsAffected > 0 {
 			s.logger.Debugw("deleted old queue jobs", "count", tx.RowsAffected)
 		}
+
 		// If we deleted fewer than the batch size, we're done for this cycle.
 		if tx.RowsAffected < gcBatchSize {
 			return

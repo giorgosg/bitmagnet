@@ -17,12 +17,12 @@ const (
 // requests. This avoids redundant TMDB API calls when many torrents in the same
 // classification batch reference the same movie or TV show.
 type clientCached struct {
-	inner         Client
-	movieDetails  *lru.LRU[int64, MovieDetailsResponse]
-	tvDetails     *lru.LRU[int64, TvDetailsResponse]
-	searchMovie   *lru.LRU[string, SearchMovieResponse]
-	searchTv      *lru.LRU[string, SearchTvResponse]
-	findByID      *lru.LRU[string, FindByIDResponse]
+	inner        Client
+	movieDetails *lru.LRU[int64, MovieDetailsResponse]
+	tvDetails    *lru.LRU[int64, TvDetailsResponse]
+	searchMovie  *lru.LRU[string, SearchMovieResponse]
+	searchTv     *lru.LRU[string, SearchTvResponse]
+	findByID     *lru.LRU[string, FindByIDResponse]
 }
 
 func newCachedClient(inner Client) Client {

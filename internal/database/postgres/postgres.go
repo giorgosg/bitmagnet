@@ -34,6 +34,7 @@ func New(p Params) (Result, error) {
 	lazyPool := lazy.New(func() (*pgxpool.Pool, error) {
 		ctx, cancel := context.WithCancel(context.Background())
 		poolConfig, parseErr := pgxpool.ParseConfig(p.Config.CreateDSN())
+
 		if parseErr != nil {
 			cancel()
 			return nil, parseErr
