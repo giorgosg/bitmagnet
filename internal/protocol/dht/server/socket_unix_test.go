@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
 )
 
@@ -42,7 +43,7 @@ func TestAddrPortToSockaddr(t *testing.T) {
 			t.Parallel()
 
 			got, err := addrPortToSockaddr(tt.addr)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.IsType(t, tt.want, got)
 		})
 	}
