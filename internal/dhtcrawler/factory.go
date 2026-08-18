@@ -46,6 +46,7 @@ type Result struct {
 
 func New(params Params) Result {
 	active := &concurrency.AtomicValue[bool]{}
+	settings := crawlerSettingsFromConfig(params.Config)
 
 	var c crawler
 
@@ -81,7 +82,8 @@ func New(params Params) Result {
 						metainfoRequester:            params.MetainfoRequester,
 						banningChecker:               params.BanningChecker,
 						bootstrapNodes:               params.Config.BootstrapNodes,
-						reseedBootstrapNodesInterval: time.Minute * 10,
+						reseedBootstrapNodesInterval: settings.reseedBootstrapNodesInterval,
+						reseedRequests:               make(chan struct{}, 1),
 						getOldestNodesInterval:       time.Second * 10,
 						oldPeerThreshold:             time.Minute * 15,
 						discoveredNodes:              params.DiscoveredNodes,
