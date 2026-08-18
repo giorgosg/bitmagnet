@@ -24,38 +24,22 @@ test-first review described in [git-workflow.md](git-workflow.md).
 | [#9](https://github.com/giorgosg/bitmagnet/pull/9)   | Canonical-ID Torznab searches and `tvdbid`                                  | niklas2233 `eb843dacc`                           | Both behaviors observed red                                |
 | [#10](https://github.com/giorgosg/bitmagnet/pull/10) | Ignore duplicate importer queue jobs                                        | o51r15 `dd314bf47`                               | PostgreSQL regression observed red                         |
 | [#11](https://github.com/giorgosg/bitmagnet/pull/11) | Exclude BEP-47 padding from the file threshold                              | o51r15 `5efcbd1c5`, rewritten                    | Regression observed red and passed under the race detector |
-
-## Next batch
-
-The order favors demonstrated data loss and broad correctness before operational tuning.
-Each item should remain a focused PR.
-
-1. **Scope null-content reprocessing correctly** — port the Go portion of
-   kawaii-not-kawaii `f5f027a45`. The current `OR content_type IS NULL` can detach from
-   the correlated subquery and enqueue the whole database. Replace the source's SQL-shape
-   test with a PostgreSQL behavior test that proves only unclassified torrents are queued.
-2. **Classify title-only RSS torrents** — adapt niklas2233 `dca622876`. Let the video-name
-   parser run when file information is absent or total size is unknown, with workflow
-   fixtures proving a video-looking title is classified and a non-video title is not.
-3. **Preserve rule-derived types when file evidence is unavailable** — port the Go-only
-   portion of kawaii-not-kawaii `68bcddf43`. Reprocessing `no_info` and `over_threshold`
-   torrents can otherwise clear source-less classifications such as `xxx`. Exercise the
-   processor behavior, not only the extracted helper.
-4. **Make copy-magnet truthful on plain HTTP** — adapt kawaii-not-kawaii `236c129d7`.
-   Use the Angular CDK clipboard fallback at all three call sites, test failure feedback,
-   and rebuild committed `webui/dist`.
-5. **Cap global in-flight DHT queries** — redesign o51r15 `727328128` with validation for
-   non-positive configuration and deterministic concurrency/cancellation tests. This is
-   complementary to upstream PR #514, which only configures the existing per-IP limiter.
-6. **Add crawler queue backpressure** — reconstruct o51r15 `f7cb97d4b` plus the behavior
-   embedded in `5efcbd1c5`. First measure the queue-growth failure, then test threshold,
-   disabled, drain-and-resume, and persistence-without-classification behavior.
+| [#13](https://github.com/giorgosg/bitmagnet/pull/13) | Scope null-content reprocessing correctly                                   | kawaii-not-kawaii `f5f027a45`, adapted           | PostgreSQL behavior regression observed red                |
+| [#14](https://github.com/giorgosg/bitmagnet/pull/14) | Classify title-only video torrents                                          | niklas2233 `dca622876`, adapted                  | Video and non-video title-only fixtures observed red       |
+| [#15](https://github.com/giorgosg/bitmagnet/pull/15) | Preserve rule-derived types without file evidence                           | kawaii-not-kawaii `68bcddf43`, adapted           | Processor integration regressions observed red             |
+| [#16](https://github.com/giorgosg/bitmagnet/pull/16) | Cap global in-flight DHT queries                                            | o51r15 `727328128`, redesigned                   | Deterministic concurrency and fallback tests observed red  |
+| [#17](https://github.com/giorgosg/bitmagnet/pull/17) | Pause DHT classification at queue capacity                                  | o51r15 `f7cb97d4b`, adapted                      | PostgreSQL threshold, drain-and-resume tests observed red  |
 
 ## Deferred or already resolved
 
 - niklas2233 `0b3f1480b` edits only `categories.gen.go`; its generator was removed from
   the repository. Do not hand-edit the generated file. Revisit only with a maintained
   source-of-truth and reproducible generator.
+- kawaii-not-kawaii `236c129d7` assumes `copyMagnet` clipboard call sites that do not
+  exist on this UI baseline. Porting it would introduce a new feature, not repair a
+  present behavior.
+- lodestone `2e31cae01` fixes a slice-index map lookup in a later triage refactor.
+  `trunk` already iterates the keyed hash map correctly, so this candidate is obsolete.
 - niklas2233 `a6f69bf23` raises the aggregation budget tenfold. It needs a representative
   PostgreSQL accuracy/performance measurement before becoming a code change.
 - o51r15 `9e564ff9e` claims a ticker-reset data race but has no failing reproduction. Fold
