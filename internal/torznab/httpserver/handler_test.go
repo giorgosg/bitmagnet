@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/identity"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
 	"github.com/bitmagnet-io/bitmagnet/internal/torznab"
@@ -42,13 +43,21 @@ type testHarness struct {
 func newTestHarness(t *testing.T) *testHarness {
 	t.Helper()
 
+	// A nil authenticator means auth is not wired in, which leaves the endpoint
+	// open — the behaviour these tests were written against.
+	return newTestHarnessWithAuth(t, nil)
+}
+
+func newTestHarnessWithAuth(t *testing.T, authenticator identity.Authenticator) *testHarness {
+	t.Helper()
+
 	clientMock := torznab_mocks.NewClient(t)
 	lazyClient := lazy.New[torznab.Client](func() (torznab.Client, error) {
 		return clientMock, nil
 	})
 
 	engine := gin.New()
-	err := httpserver.New(lazyClient, testCfg).Apply(engine)
+	err := httpserver.New(lazyClient, testCfg, authenticator).Apply(engine)
 
 	require.NoError(t, err)
 

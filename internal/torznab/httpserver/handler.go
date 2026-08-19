@@ -7,17 +7,24 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/identity"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
 	"github.com/bitmagnet-io/bitmagnet/internal/torznab"
 	"github.com/gin-gonic/gin"
 )
 
 type handler struct {
-	config torznab.Config
-	client torznab.Client
+	config        torznab.Config
+	client        torznab.Client
+	authenticator identity.Authenticator
 }
 
 func (h handler) handleRequest(ctx *gin.Context) {
+	if !h.authorize(ctx) {
+		h.writeUnauthorized(ctx)
+		return
+	}
+
 	profile, err := h.getProfile(ctx)
 	if err != nil {
 		h.writeError(ctx, err)
@@ -114,13 +121,17 @@ func (h handler) handleSearch(ctx *gin.Context, profile torznab.Profile, tp stri
 }
 
 func (h handler) writeXML(ctx *gin.Context, obj torznab.XMLer) {
+	h.writeXMLStatus(ctx, http.StatusOK, obj)
+}
+
+func (h handler) writeXMLStatus(ctx *gin.Context, status int, obj torznab.XMLer) {
 	body, err := obj.XML()
 	if err != nil {
 		h.writeHTTPError(ctx, fmt.Errorf("failed to encode xml: %w", err))
 		return
 	}
 
-	ctx.Status(http.StatusOK)
+	ctx.Status(status)
 	ctx.Header("Content-Type", "application/xml; charset=utf-8")
 	_, _ = ctx.Writer.Write(body)
 }
