@@ -1,4 +1,16 @@
 {
+  "auth": {
+    "confirm_password": "__missing__",
+    "invitation_code": "__missing__",
+    "login": "__missing__",
+    "login_failed": "__missing__",
+    "password": "__missing__",
+    "password_has_insufficient_entropy": "__missing__",
+    "passwords_do_not_match": "__missing__",
+    "register": "__missing__",
+    "register_failed": "__missing__",
+    "username": "__missing__"
+  },
   "content_types": {
     "plural": {
       "all": "Tous",
@@ -110,6 +122,7 @@
   "general": {
     "all": "Tous",
     "dismiss": "Fermer",
+    "email": "__missing__",
     "error": "Erreur",
     "none": "Aucun",
     "page_not_found": "Page non trouvée",

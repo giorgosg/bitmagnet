@@ -1,4 +1,16 @@
 {
+  "auth": {
+    "confirm_password": "Confirm password",
+    "invitation_code": "Invitation code",
+    "login": "Login",
+    "login_failed": "Login failed",
+    "password": "Password",
+    "password_has_insufficient_entropy": "Password has insufficient entropy",
+    "passwords_do_not_match": "Passwords do not match",
+    "register": "Register",
+    "register_failed": "Register failed",
+    "username": "Username"
+  },
   "content_types": {
     "plural": {
       "all": "All",
@@ -107,6 +119,7 @@
   "general": {
     "all": "All",
     "dismiss": "Dismiss",
+    "email": "Email",
     "error": "Error",
     "none": "None",
     "page_not_found": "Page not found",

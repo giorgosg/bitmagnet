@@ -1123,11 +1123,25 @@ export type WorkersQuery = {
   listAll: WorkersListAllQueryResult;
 };
 
+export type ApiKeyFragment = { __typename?: 'APIKey', id: number, userId: number, name: string, expiresAt?: string | null, createdAt: string };
+
+export type AuthObjectActionFragment = { __typename?: 'AuthObjectAction', namespace: string, object: string, action: string };
+
 export type ContentFragment = { __typename?: 'Content', type: ContentType, source: string, id: string, title: string, releaseDate?: string | null, releaseYear?: number | null, overview?: string | null, runtime?: number | null, voteAverage?: number | null, voteCount?: number | null, createdAt: string, updatedAt: string, metadataSource: { __typename?: 'MetadataSource', key: string, name: string }, originalLanguage?: { __typename?: 'LanguageInfo', id: string, name: string } | null, attributes: Array<{ __typename?: 'ContentAttribute', source: string, key: string, value: string, createdAt: string, updatedAt: string, metadataSource: { __typename?: 'MetadataSource', key: string, name: string } }>, collections: Array<{ __typename?: 'ContentCollection', type: string, source: string, id: string, name: string, createdAt: string, updatedAt: string, metadataSource: { __typename?: 'MetadataSource', key: string, name: string } }>, externalLinks: Array<{ __typename?: 'ExternalLink', url: string, metadataSource: { __typename?: 'MetadataSource', key: string, name: string } }> };
+
+export type InvitationFragment = { __typename?: 'Invitation', code: string, role: string, email?: string | null, expiresAt?: string | null, createdAt: string, createdBy?: { __typename?: 'User', id: number, username: string, role: string, lastLoginAt?: string | null, createdAt: string, updatedAt: string } | null, claimedBy?: { __typename?: 'User', id: number, username: string, role: string, lastLoginAt?: string | null, createdAt: string, updatedAt: string } | null };
+
+export type PasswordEntropyResultFragment = { __typename?: 'PasswordEntropyResult', entropy: number, minEntropy: number, valid: boolean };
+
+export type PermissionFragment = { __typename?: 'Permission', core: boolean, subject: { __typename?: 'AuthSubject', type: AuthSubjectType, name: string }, objectAction: { __typename?: 'AuthObjectAction', namespace: string, object: string, action: string } };
 
 export type QueueJobFragment = { __typename?: 'QueueJob', id: string, queue: string, status: QueueJobStatus, payload: string, priority: number, retries: number, maxRetries: number, runAfter: string, ranAt?: string | null, error?: string | null, createdAt: string };
 
 export type QueueJobsQueryResultFragment = { __typename?: 'QueueJobsQueryResult', totalCount: number, hasNextPage?: boolean | null, items: Array<{ __typename?: 'QueueJob', id: string, queue: string, status: QueueJobStatus, payload: string, priority: number, retries: number, maxRetries: number, runAfter: string, ranAt?: string | null, error?: string | null, createdAt: string }>, aggregations: { __typename?: 'QueueJobsAggregations', queue?: Array<{ __typename?: 'QueueJobQueueAgg', value: string, label: string, count: number }> | null, status?: Array<{ __typename?: 'QueueJobStatusAgg', value: QueueJobStatus, label: string, count: number }> | null } };
+
+export type RoleFragment = { __typename?: 'Role', name: string, core: boolean, permissions: Array<{ __typename?: 'Permission', core: boolean, subject: { __typename?: 'AuthSubject', type: AuthSubjectType, name: string }, objectAction: { __typename?: 'AuthObjectAction', namespace: string, object: string, action: string } }> };
+
+export type SelfFragment = { __typename?: 'Self', user?: { __typename?: 'User', id: number, username: string, role: string, lastLoginAt?: string | null, createdAt: string, updatedAt: string } | null, apiKey?: { __typename?: 'APIKey', id: number, userId: number, name: string, expiresAt?: string | null, createdAt: string } | null, permissions: Array<{ __typename?: 'AuthObjectAction', namespace: string, object: string, action: string }> };
 
 export type TorrentFragment = { __typename?: 'Torrent', infoHash: string, name: string, size: number, filesStatus: FilesStatus, filesCount?: number | null, hasFilesInfo: boolean, singleFile?: boolean | null, fileType?: FileType | null, seeders?: number | null, leechers?: number | null, tagNames: Array<string>, magnetUri: string, createdAt: string, updatedAt: string, sources: Array<{ __typename?: 'TorrentSourceInfo', key: string, name: string }> };
 
@@ -1138,6 +1152,45 @@ export type TorrentContentSearchResultFragment = { __typename?: 'TorrentContentS
 export type TorrentFileFragment = { __typename?: 'TorrentFile', infoHash: string, index: number, path: string, size: number, fileType?: FileType | null, createdAt: string, updatedAt: string };
 
 export type TorrentFilesQueryResultFragment = { __typename?: 'TorrentFilesQueryResult', totalCount: number, hasNextPage?: boolean | null, items: Array<{ __typename?: 'TorrentFile', infoHash: string, index: number, path: string, size: number, fileType?: FileType | null, createdAt: string, updatedAt: string }> };
+
+export type UserFragment = { __typename?: 'User', id: number, username: string, role: string, lastLoginAt?: string | null, createdAt: string, updatedAt: string };
+
+export type CreateApiKeyMutationVariables = Exact<{
+  input: CreateApiKeyInput;
+}>;
+
+
+export type CreateApiKeyMutation = { __typename?: 'Mutation', self: { __typename?: 'SelfMutation', createAPIKey: { __typename?: 'CreateAPIKeyResult', id: number, apiKey: string, name: string, expiresAt?: string | null } } };
+
+export type InvitationDeleteMutationVariables = Exact<{
+  code: Scalars['String']['input'];
+}>;
+
+
+export type InvitationDeleteMutation = { __typename?: 'Mutation', auth: { __typename?: 'AuthMutation', deleteInvitation?: void | null } };
+
+export type InviteMutationVariables = Exact<{
+  input: InviteInput;
+}>;
+
+
+export type InviteMutation = { __typename?: 'Mutation', auth: { __typename?: 'AuthMutation', invite: { __typename?: 'Invitation', code: string, role: string, email?: string | null, expiresAt?: string | null, createdAt: string, createdBy?: { __typename?: 'User', id: number, username: string, role: string, lastLoginAt?: string | null, createdAt: string, updatedAt: string } | null, claimedBy?: { __typename?: 'User', id: number, username: string, role: string, lastLoginAt?: string | null, createdAt: string, updatedAt: string } | null } } };
+
+export type LoginMutationVariables = Exact<{
+  username: Scalars['String']['input'];
+  password: Scalars['String']['input'];
+}>;
+
+
+export type LoginMutation = { __typename?: 'Mutation', self: { __typename?: 'SelfMutation', login: { __typename?: 'LoginResult', token: string, user: { __typename?: 'User', id: number, username: string, role: string, lastLoginAt?: string | null, createdAt: string, updatedAt: string }, permissions: Array<{ __typename?: 'Permission', core: boolean, subject: { __typename?: 'AuthSubject', type: AuthSubjectType, name: string }, objectAction: { __typename?: 'AuthObjectAction', namespace: string, object: string, action: string } }> } } };
+
+export type PutRoleMutationVariables = Exact<{
+  role: Scalars['String']['input'];
+  objectActions: Array<AuthObjectActionInput> | AuthObjectActionInput;
+}>;
+
+
+export type PutRoleMutation = { __typename?: 'Mutation', auth: { __typename?: 'AuthMutation', putRole: { __typename?: 'Role', name: string, core: boolean, permissions: Array<{ __typename?: 'Permission', core: boolean, subject: { __typename?: 'AuthSubject', type: AuthSubjectType, name: string }, objectAction: { __typename?: 'AuthObjectAction', namespace: string, object: string, action: string } }> } } };
 
 export type QueueEnqueueReprocessTorrentsBatchMutationVariables = Exact<{
   input: QueueEnqueueReprocessTorrentsBatchInput;
@@ -1152,6 +1205,13 @@ export type QueuePurgeJobsMutationVariables = Exact<{
 
 
 export type QueuePurgeJobsMutation = { __typename?: 'Mutation', queue: { __typename?: 'QueueMutation', purgeJobs?: void | null } };
+
+export type RegisterMutationVariables = Exact<{
+  input: RegisterInput;
+}>;
+
+
+export type RegisterMutation = { __typename?: 'Mutation', self: { __typename?: 'SelfMutation', register: { __typename?: 'RegisterResult', user: { __typename?: 'User', id: number, username: string, role: string, lastLoginAt?: string | null, createdAt: string, updatedAt: string } } } };
 
 export type TorrentDeleteMutationVariables = Exact<{
   infoHashes: Array<Scalars['Hash20']['input']> | Scalars['Hash20']['input'];
@@ -1191,10 +1251,39 @@ export type TorrentSetTagsMutationVariables = Exact<{
 
 export type TorrentSetTagsMutation = { __typename?: 'Mutation', torrent: { __typename?: 'TorrentMutation', setTags?: void | null } };
 
+export type ApiKeysQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type ApiKeysQuery = { __typename?: 'Query', self: { __typename?: 'SelfQuery', apiKeys: Array<{ __typename?: 'APIKey', id: number, userId: number, name: string, expiresAt?: string | null, createdAt: string }> } };
+
+export type AuthObjectActionsQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type AuthObjectActionsQuery = { __typename?: 'Query', auth: { __typename?: 'AuthQuery', listObjectActions: Array<{ __typename?: 'AuthObjectAction', namespace: string, object: string, action: string }> } };
+
 export type HealthCheckQueryVariables = Exact<{ [key: string]: never; }>;
 
 
 export type HealthCheckQuery = { __typename?: 'Query', health: { __typename?: 'HealthQuery', status: HealthStatus, checks: Array<{ __typename?: 'HealthCheck', key: string, status: HealthStatus, timestamp: string, error?: string | null }> }, workers: { __typename?: 'WorkersQuery', listAll: { __typename?: 'WorkersListAllQueryResult', workers: Array<{ __typename?: 'Worker', key: string, started: boolean }> } } };
+
+export type IdentityQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type IdentityQuery = { __typename?: 'Query', self: { __typename?: 'SelfQuery', identity: { __typename?: 'Self', user?: { __typename?: 'User', id: number, username: string, role: string, lastLoginAt?: string | null, createdAt: string, updatedAt: string } | null, apiKey?: { __typename?: 'APIKey', id: number, userId: number, name: string, expiresAt?: string | null, createdAt: string } | null, permissions: Array<{ __typename?: 'AuthObjectAction', namespace: string, object: string, action: string }> } } };
+
+export type InvitationsQueryVariables = Exact<{
+  input?: InputMaybe<ListInvitationsInput>;
+}>;
+
+
+export type InvitationsQuery = { __typename?: 'Query', auth: { __typename?: 'AuthQuery', listInvitations: { __typename?: 'ListInvitationsResult', totalCount: number, invitations: Array<{ __typename?: 'Invitation', code: string, role: string, email?: string | null, expiresAt?: string | null, createdAt: string, createdBy?: { __typename?: 'User', id: number, username: string, role: string, lastLoginAt?: string | null, createdAt: string, updatedAt: string } | null, claimedBy?: { __typename?: 'User', id: number, username: string, role: string, lastLoginAt?: string | null, createdAt: string, updatedAt: string } | null }> } } };
+
+export type PasswordEntropyQueryVariables = Exact<{
+  password: Scalars['String']['input'];
+}>;
+
+
+export type PasswordEntropyQuery = { __typename?: 'Query', self: { __typename?: 'SelfQuery', passwordEntropy: { __typename?: 'PasswordEntropyResult', entropy: number, minEntropy: number, valid: boolean } } };
 
 export type QueueJobsQueryVariables = Exact<{
   input: QueueJobsQueryInput;
@@ -1209,6 +1298,11 @@ export type QueueMetricsQueryVariables = Exact<{
 
 
 export type QueueMetricsQuery = { __typename?: 'Query', queue: { __typename?: 'QueueQuery', metrics: { __typename?: 'QueueMetricsQueryResult', buckets: Array<{ __typename?: 'QueueMetricsBucket', queue: string, status: QueueJobStatus, createdAtBucket: string, ranAtBucket?: string | null, count: number, latency?: string | null }> } } };
+
+export type RolesQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type RolesQuery = { __typename?: 'Query', auth: { __typename?: 'AuthQuery', listRoles: Array<{ __typename?: 'Role', name: string, core: boolean, permissions: Array<{ __typename?: 'Permission', core: boolean, subject: { __typename?: 'AuthSubject', type: AuthSubjectType, name: string }, objectAction: { __typename?: 'AuthObjectAction', namespace: string, object: string, action: string } }> }> } };
 
 export type TorrentContentSearchQueryVariables = Exact<{
   input: TorrentContentSearchQueryInput;
@@ -1238,11 +1332,50 @@ export type TorrentSuggestTagsQueryVariables = Exact<{
 
 export type TorrentSuggestTagsQuery = { __typename?: 'Query', torrent: { __typename?: 'TorrentQuery', suggestTags: { __typename?: 'TorrentSuggestTagsResult', suggestions: Array<{ __typename?: 'SuggestedTag', name: string, count: number }> } } };
 
+export type UsersQueryVariables = Exact<{
+  input: ListUsersInput;
+}>;
+
+
+export type UsersQuery = { __typename?: 'Query', auth: { __typename?: 'AuthQuery', listUsers: { __typename?: 'ListUsersResult', totalCount: number, users: Array<{ __typename?: 'User', id: number, username: string, role: string, lastLoginAt?: string | null, createdAt: string, updatedAt: string }> } } };
+
 export type VersionQueryVariables = Exact<{ [key: string]: never; }>;
 
 
 export type VersionQuery = { __typename?: 'Query', version: string };
 
+export const UserFragmentDoc = gql`
+    fragment User on User {
+  id
+  username
+  role
+  lastLoginAt
+  createdAt
+  updatedAt
+}
+    `;
+export const InvitationFragmentDoc = gql`
+    fragment Invitation on Invitation {
+  code
+  role
+  email
+  createdBy {
+    ...User
+  }
+  claimedBy {
+    ...User
+  }
+  expiresAt
+  createdAt
+}
+    ${UserFragmentDoc}`;
+export const PasswordEntropyResultFragmentDoc = gql`
+    fragment PasswordEntropyResult on PasswordEntropyResult {
+  entropy
+  minEntropy
+  valid
+}
+    `;
 export const QueueJobFragmentDoc = gql`
     fragment QueueJob on QueueJob {
   id
@@ -1279,6 +1412,58 @@ export const QueueJobsQueryResultFragmentDoc = gql`
   }
 }
     ${QueueJobFragmentDoc}`;
+export const AuthObjectActionFragmentDoc = gql`
+    fragment AuthObjectAction on AuthObjectAction {
+  namespace
+  object
+  action
+}
+    `;
+export const PermissionFragmentDoc = gql`
+    fragment Permission on Permission {
+  subject {
+    type
+    name
+  }
+  objectAction {
+    ...AuthObjectAction
+  }
+  core
+}
+    ${AuthObjectActionFragmentDoc}`;
+export const RoleFragmentDoc = gql`
+    fragment Role on Role {
+  name
+  core
+  permissions {
+    ...Permission
+  }
+}
+    ${PermissionFragmentDoc}`;
+export const ApiKeyFragmentDoc = gql`
+    fragment APIKey on APIKey {
+  id
+  userId
+  name
+  expiresAt
+  createdAt
+}
+    `;
+export const SelfFragmentDoc = gql`
+    fragment Self on Self {
+  user {
+    ...User
+  }
+  apiKey {
+    ...APIKey
+  }
+  permissions {
+    ...AuthObjectAction
+  }
+}
+    ${UserFragmentDoc}
+${ApiKeyFragmentDoc}
+${AuthObjectActionFragmentDoc}`;
 export const TorrentFragmentDoc = gql`
     fragment Torrent on Torrent {
   infoHash
@@ -1477,6 +1662,114 @@ export const TorrentFilesQueryResultFragmentDoc = gql`
   hasNextPage
 }
     ${TorrentFileFragmentDoc}`;
+export const CreateApiKeyDocument = gql`
+    mutation CreateAPIKey($input: CreateAPIKeyInput!) {
+  self {
+    createAPIKey(input: $input) {
+      id
+      apiKey
+      name
+      expiresAt
+    }
+  }
+}
+    `;
+
+  @Injectable({
+    providedIn: 'root'
+  })
+  export class CreateApiKeyGQL extends Apollo.Mutation<CreateApiKeyMutation, CreateApiKeyMutationVariables> {
+    override document = CreateApiKeyDocument;
+    
+    constructor(apollo: Apollo.Apollo) {
+      super(apollo);
+    }
+  }
+export const InvitationDeleteDocument = gql`
+    mutation InvitationDelete($code: String!) {
+  auth {
+    deleteInvitation(code: $code)
+  }
+}
+    `;
+
+  @Injectable({
+    providedIn: 'root'
+  })
+  export class InvitationDeleteGQL extends Apollo.Mutation<InvitationDeleteMutation, InvitationDeleteMutationVariables> {
+    override document = InvitationDeleteDocument;
+    
+    constructor(apollo: Apollo.Apollo) {
+      super(apollo);
+    }
+  }
+export const InviteDocument = gql`
+    mutation Invite($input: InviteInput!) {
+  auth {
+    invite(input: $input) {
+      ...Invitation
+    }
+  }
+}
+    ${InvitationFragmentDoc}`;
+
+  @Injectable({
+    providedIn: 'root'
+  })
+  export class InviteGQL extends Apollo.Mutation<InviteMutation, InviteMutationVariables> {
+    override document = InviteDocument;
+    
+    constructor(apollo: Apollo.Apollo) {
+      super(apollo);
+    }
+  }
+export const LoginDocument = gql`
+    mutation Login($username: String!, $password: String!) {
+  self {
+    login(username: $username, password: $password) {
+      token
+      user {
+        ...User
+      }
+      permissions {
+        ...Permission
+      }
+    }
+  }
+}
+    ${UserFragmentDoc}
+${PermissionFragmentDoc}`;
+
+  @Injectable({
+    providedIn: 'root'
+  })
+  export class LoginGQL extends Apollo.Mutation<LoginMutation, LoginMutationVariables> {
+    override document = LoginDocument;
+    
+    constructor(apollo: Apollo.Apollo) {
+      super(apollo);
+    }
+  }
+export const PutRoleDocument = gql`
+    mutation PutRole($role: String!, $objectActions: [AuthObjectActionInput!]!) {
+  auth {
+    putRole(role: $role, objectActions: $objectActions) {
+      ...Role
+    }
+  }
+}
+    ${RoleFragmentDoc}`;
+
+  @Injectable({
+    providedIn: 'root'
+  })
+  export class PutRoleGQL extends Apollo.Mutation<PutRoleMutation, PutRoleMutationVariables> {
+    override document = PutRoleDocument;
+    
+    constructor(apollo: Apollo.Apollo) {
+      super(apollo);
+    }
+  }
 export const QueueEnqueueReprocessTorrentsBatchDocument = gql`
     mutation QueueEnqueueReprocessTorrentsBatch($input: QueueEnqueueReprocessTorrentsBatchInput!) {
   queue {
@@ -1508,6 +1801,28 @@ export const QueuePurgeJobsDocument = gql`
   })
   export class QueuePurgeJobsGQL extends Apollo.Mutation<QueuePurgeJobsMutation, QueuePurgeJobsMutationVariables> {
     override document = QueuePurgeJobsDocument;
+    
+    constructor(apollo: Apollo.Apollo) {
+      super(apollo);
+    }
+  }
+export const RegisterDocument = gql`
+    mutation Register($input: RegisterInput!) {
+  self {
+    register(input: $input) {
+      user {
+        ...User
+      }
+    }
+  }
+}
+    ${UserFragmentDoc}`;
+
+  @Injectable({
+    providedIn: 'root'
+  })
+  export class RegisterGQL extends Apollo.Mutation<RegisterMutation, RegisterMutationVariables> {
+    override document = RegisterDocument;
     
     constructor(apollo: Apollo.Apollo) {
       super(apollo);
@@ -1603,6 +1918,46 @@ export const TorrentSetTagsDocument = gql`
       super(apollo);
     }
   }
+export const ApiKeysDocument = gql`
+    query APIKeys {
+  self {
+    apiKeys {
+      ...APIKey
+    }
+  }
+}
+    ${ApiKeyFragmentDoc}`;
+
+  @Injectable({
+    providedIn: 'root'
+  })
+  export class ApiKeysGQL extends Apollo.Query<ApiKeysQuery, ApiKeysQueryVariables> {
+    override document = ApiKeysDocument;
+    
+    constructor(apollo: Apollo.Apollo) {
+      super(apollo);
+    }
+  }
+export const AuthObjectActionsDocument = gql`
+    query AuthObjectActions {
+  auth {
+    listObjectActions {
+      ...AuthObjectAction
+    }
+  }
+}
+    ${AuthObjectActionFragmentDoc}`;
+
+  @Injectable({
+    providedIn: 'root'
+  })
+  export class AuthObjectActionsGQL extends Apollo.Query<AuthObjectActionsQuery, AuthObjectActionsQueryVariables> {
+    override document = AuthObjectActionsDocument;
+    
+    constructor(apollo: Apollo.Apollo) {
+      super(apollo);
+    }
+  }
 export const HealthCheckDocument = gql`
     query HealthCheck {
   health {
@@ -1630,6 +1985,69 @@ export const HealthCheckDocument = gql`
   })
   export class HealthCheckGQL extends Apollo.Query<HealthCheckQuery, HealthCheckQueryVariables> {
     override document = HealthCheckDocument;
+    
+    constructor(apollo: Apollo.Apollo) {
+      super(apollo);
+    }
+  }
+export const IdentityDocument = gql`
+    query Identity {
+  self {
+    identity {
+      ...Self
+    }
+  }
+}
+    ${SelfFragmentDoc}`;
+
+  @Injectable({
+    providedIn: 'root'
+  })
+  export class IdentityGQL extends Apollo.Query<IdentityQuery, IdentityQueryVariables> {
+    override document = IdentityDocument;
+    
+    constructor(apollo: Apollo.Apollo) {
+      super(apollo);
+    }
+  }
+export const InvitationsDocument = gql`
+    query Invitations($input: ListInvitationsInput) {
+  auth {
+    listInvitations(input: $input) {
+      invitations {
+        ...Invitation
+      }
+      totalCount
+    }
+  }
+}
+    ${InvitationFragmentDoc}`;
+
+  @Injectable({
+    providedIn: 'root'
+  })
+  export class InvitationsGQL extends Apollo.Query<InvitationsQuery, InvitationsQueryVariables> {
+    override document = InvitationsDocument;
+    
+    constructor(apollo: Apollo.Apollo) {
+      super(apollo);
+    }
+  }
+export const PasswordEntropyDocument = gql`
+    query PasswordEntropy($password: String!) {
+  self {
+    passwordEntropy(password: $password) {
+      ...PasswordEntropyResult
+    }
+  }
+}
+    ${PasswordEntropyResultFragmentDoc}`;
+
+  @Injectable({
+    providedIn: 'root'
+  })
+  export class PasswordEntropyGQL extends Apollo.Query<PasswordEntropyQuery, PasswordEntropyQueryVariables> {
+    override document = PasswordEntropyDocument;
     
     constructor(apollo: Apollo.Apollo) {
       super(apollo);
@@ -1677,6 +2095,26 @@ export const QueueMetricsDocument = gql`
   })
   export class QueueMetricsGQL extends Apollo.Query<QueueMetricsQuery, QueueMetricsQueryVariables> {
     override document = QueueMetricsDocument;
+    
+    constructor(apollo: Apollo.Apollo) {
+      super(apollo);
+    }
+  }
+export const RolesDocument = gql`
+    query Roles {
+  auth {
+    listRoles {
+      ...Role
+    }
+  }
+}
+    ${RoleFragmentDoc}`;
+
+  @Injectable({
+    providedIn: 'root'
+  })
+  export class RolesGQL extends Apollo.Query<RolesQuery, RolesQueryVariables> {
+    override document = RolesDocument;
     
     constructor(apollo: Apollo.Apollo) {
       super(apollo);
@@ -1771,6 +2209,29 @@ export const TorrentSuggestTagsDocument = gql`
   })
   export class TorrentSuggestTagsGQL extends Apollo.Query<TorrentSuggestTagsQuery, TorrentSuggestTagsQueryVariables> {
     override document = TorrentSuggestTagsDocument;
+    
+    constructor(apollo: Apollo.Apollo) {
+      super(apollo);
+    }
+  }
+export const UsersDocument = gql`
+    query Users($input: ListUsersInput!) {
+  auth {
+    listUsers(input: $input) {
+      users {
+        ...User
+      }
+      totalCount
+    }
+  }
+}
+    ${UserFragmentDoc}`;
+
+  @Injectable({
+    providedIn: 'root'
+  })
+  export class UsersGQL extends Apollo.Query<UsersQuery, UsersQueryVariables> {
+    override document = UsersDocument;
     
     constructor(apollo: Apollo.Apollo) {
       super(apollo);
