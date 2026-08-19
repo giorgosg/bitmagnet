@@ -22,6 +22,22 @@ func (r *queryResolver) Version(ctx context.Context) (string, error) {
 	return version.GitTag, nil
 }
 
+// Self is the resolver for the self field.
+func (r *queryResolver) Self(ctx context.Context) (gqlmodel.SelfQuery, error) {
+	return gqlmodel.SelfQuery{
+		UserService:   r.UserService,
+		APIKeyService: r.APIKeyService,
+	}, nil
+}
+
+// Auth is the resolver for the auth field.
+func (r *queryResolver) Auth(ctx context.Context) (gqlmodel.AuthQuery, error) {
+	return gqlmodel.AuthQuery{
+		UserService: r.UserService,
+		RBACService: r.RBACService,
+	}, nil
+}
+
 // Workers is the resolver for the workers field.
 func (r *queryResolver) Workers(ctx context.Context) (gen.WorkersQuery, error) {
 	var workers []gen.Worker

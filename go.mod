@@ -12,12 +12,14 @@ require (
 	github.com/anacrolix/missinggo/v2 v2.8.0
 	github.com/anacrolix/torrent v1.58.0
 	github.com/bits-and-blooms/bloom/v3 v3.7.0
+	github.com/casbin/casbin/v2 v2.121.0
 	github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb
 	github.com/frankban/quicktest v1.14.6
 	github.com/gin-gonic/gin v1.10.0
 	github.com/go-playground/validator/v10 v10.24.0
 	github.com/go-resty/resty/v2 v2.17.2
 	github.com/go-viper/mapstructure/v2 v2.2.1
+	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/cel-go v0.23.2
 	github.com/grafana/pyroscope-go/godeltaprof v0.1.8
 	github.com/hashicorp/golang-lru/v2 v2.0.7
@@ -39,6 +41,7 @@ require (
 	github.com/urfave/cli/v2 v2.27.5
 	github.com/vektah/gqlparser/v2 v2.5.22
 	github.com/vektra/mockery/v2 v2.52.1
+	github.com/wagslane/go-password-validator v0.3.0
 	github.com/xeipuuv/gojsonschema v1.2.0
 	go.uber.org/fx v1.23.0
 	go.uber.org/zap v1.27.0
@@ -57,13 +60,10 @@ require (
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.6.1 // indirect
-	github.com/casbin/casbin/v2 v2.121.0 // indirect
 	github.com/casbin/govaluate v1.3.0 // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
-	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect
 	github.com/google/pprof v0.0.0-20241210010833-40e02aabc2ad // indirect
-	github.com/wagslane/go-password-validator v0.3.0 // indirect
 )
 
 require (
@@ -175,7 +175,7 @@ require (
 	go.uber.org/dig v1.18.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/arch v0.13.0 // indirect
-	golang.org/x/crypto v0.41.0 // indirect
+	golang.org/x/crypto v0.41.0
 	golang.org/x/exp v0.0.0-20250106191152-7588d65b2ba8 // indirect
 	golang.org/x/mod v0.26.0 // indirect
 	golang.org/x/net v0.43.0 // indirect

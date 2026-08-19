@@ -1,5 +1,7 @@
 type Query {
   version: String!
+  self: SelfQuery!
+  auth: AuthQuery!
   workers: WorkersQuery!
   health: HealthQuery!
   queue: QueueQuery!

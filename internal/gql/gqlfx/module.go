@@ -2,6 +2,9 @@ package gqlfx
 
 import (
 	"github.com/99designs/gqlgen/graphql"
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/api_key"
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/rbac"
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/user"
 	"github.com/bitmagnet-io/bitmagnet/internal/blocking"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/search"
@@ -83,6 +86,9 @@ func New() fx.Option {
 							TorrentMetricsClient: tm,
 							Processor:            pr,
 							BlockingManager:      bm,
+							UserService:          p.UserService,
+							APIKeyService:        p.APIKeyService,
+							RBACService:          p.RBACService,
 						}, nil
 					}),
 				}
@@ -111,6 +117,9 @@ type Params struct {
 	TorrentMetricsClient lazy.Lazy[torrentmetrics.Client]
 	Processor            lazy.Lazy[processor.Processor]
 	BlockingManager      lazy.Lazy[blocking.Manager]
+	UserService          user.Service
+	APIKeyService        api_key.Service
+	RBACService          rbac.Service
 }
 
 type Result struct {

@@ -25,6 +25,105 @@ export type Scalars = {
   Year: { input: number; output: number; }
 };
 
+export type ApiKey = {
+  __typename?: 'APIKey';
+  createdAt: Scalars['DateTime']['output'];
+  expiresAt?: Maybe<Scalars['DateTime']['output']>;
+  id: Scalars['Int']['output'];
+  name: Scalars['String']['output'];
+  user: User;
+  userId: Scalars['Int']['output'];
+};
+
+export type AuthMutation = {
+  __typename?: 'AuthMutation';
+  deleteInvitation?: Maybe<Scalars['Void']['output']>;
+  deleteRole?: Maybe<Scalars['Void']['output']>;
+  deleteUser?: Maybe<Scalars['Void']['output']>;
+  invite: Invitation;
+  putRole: Role;
+  setUserEnabled: User;
+  setUserRole: User;
+};
+
+
+export type AuthMutationDeleteInvitationArgs = {
+  code: Scalars['String']['input'];
+};
+
+
+export type AuthMutationDeleteRoleArgs = {
+  role: Scalars['String']['input'];
+};
+
+
+export type AuthMutationDeleteUserArgs = {
+  userId: Scalars['Int']['input'];
+};
+
+
+export type AuthMutationInviteArgs = {
+  input: InviteInput;
+};
+
+
+export type AuthMutationPutRoleArgs = {
+  objectActions: Array<AuthObjectActionInput>;
+  role: Scalars['String']['input'];
+};
+
+
+export type AuthMutationSetUserEnabledArgs = {
+  enabled: Scalars['Boolean']['input'];
+  userId: Scalars['Int']['input'];
+};
+
+
+export type AuthMutationSetUserRoleArgs = {
+  roleName: Scalars['String']['input'];
+  userId: Scalars['Int']['input'];
+};
+
+export type AuthObjectAction = {
+  __typename?: 'AuthObjectAction';
+  action: Scalars['String']['output'];
+  namespace: Scalars['String']['output'];
+  object: Scalars['String']['output'];
+};
+
+export type AuthObjectActionInput = {
+  action: Scalars['String']['input'];
+  namespace: Scalars['String']['input'];
+  object: Scalars['String']['input'];
+};
+
+export type AuthQuery = {
+  __typename?: 'AuthQuery';
+  listInvitations: ListInvitationsResult;
+  listObjectActions: Array<AuthObjectAction>;
+  listRoles: Array<Role>;
+  listUsers: ListUsersResult;
+};
+
+
+export type AuthQueryListInvitationsArgs = {
+  input?: InputMaybe<ListInvitationsInput>;
+};
+
+
+export type AuthQueryListUsersArgs = {
+  input?: InputMaybe<ListUsersInput>;
+};
+
+export type AuthSubject = {
+  __typename?: 'AuthSubject';
+  name: Scalars['String']['output'];
+  type: AuthSubjectType;
+};
+
+export type AuthSubjectType =
+  | 'role';
+
 export type Content = {
   __typename?: 'Content';
   adult?: Maybe<Scalars['Boolean']['output']>;
@@ -94,6 +193,20 @@ export type ContentTypeFacetInput = {
   filter?: InputMaybe<Array<InputMaybe<ContentType>>>;
 };
 
+export type CreateApiKeyInput = {
+  expiry?: InputMaybe<Scalars['Duration']['input']>;
+  name: Scalars['String']['input'];
+  permissions: Array<AuthObjectActionInput>;
+};
+
+export type CreateApiKeyResult = {
+  __typename?: 'CreateAPIKeyResult';
+  apiKey: Scalars['String']['output'];
+  expiresAt?: Maybe<Scalars['DateTime']['output']>;
+  id: Scalars['Int']['output'];
+  name: Scalars['String']['output'];
+};
+
 export type Episodes = {
   __typename?: 'Episodes';
   label: Scalars['String']['output'];
@@ -159,6 +272,23 @@ export type HealthStatus =
   | 'inactive'
   | 'unknown'
   | 'up';
+
+export type Invitation = {
+  __typename?: 'Invitation';
+  claimedBy?: Maybe<User>;
+  code: Scalars['String']['output'];
+  createdAt: Scalars['DateTime']['output'];
+  createdBy?: Maybe<User>;
+  email?: Maybe<Scalars['String']['output']>;
+  expiresAt?: Maybe<Scalars['DateTime']['output']>;
+  role: Scalars['String']['output'];
+};
+
+export type InviteInput = {
+  email?: InputMaybe<Scalars['String']['input']>;
+  expiry?: InputMaybe<Scalars['Duration']['input']>;
+  role?: InputMaybe<Scalars['String']['input']>;
+};
 
 export type Language =
   | 'af'
@@ -243,6 +373,34 @@ export type LanguageInfo = {
   name: Scalars['String']['output'];
 };
 
+export type ListInvitationsInput = {
+  pagination?: InputMaybe<PaginationInput>;
+};
+
+export type ListInvitationsResult = {
+  __typename?: 'ListInvitationsResult';
+  invitations: Array<Invitation>;
+  totalCount: Scalars['Int']['output'];
+};
+
+export type ListUsersInput = {
+  pagination?: InputMaybe<PaginationInput>;
+  usernameLike?: InputMaybe<Scalars['String']['input']>;
+};
+
+export type ListUsersResult = {
+  __typename?: 'ListUsersResult';
+  totalCount: Scalars['Int']['output'];
+  users: Array<User>;
+};
+
+export type LoginResult = {
+  __typename?: 'LoginResult';
+  permissions: Array<Permission>;
+  token: Scalars['String']['output'];
+  user: User;
+};
+
 export type MetadataSource = {
   __typename?: 'MetadataSource';
   key: Scalars['String']['output'];
@@ -256,14 +414,38 @@ export type MetricsBucketDuration =
 
 export type Mutation = {
   __typename?: 'Mutation';
+  auth: AuthMutation;
   queue: QueueMutation;
+  self: SelfMutation;
   torrent: TorrentMutation;
+};
+
+export type PaginationInput = {
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  offset?: InputMaybe<Scalars['Int']['input']>;
+  page?: InputMaybe<Scalars['Int']['input']>;
+};
+
+export type PasswordEntropyResult = {
+  __typename?: 'PasswordEntropyResult';
+  entropy: Scalars['Float']['output'];
+  minEntropy: Scalars['Float']['output'];
+  valid: Scalars['Boolean']['output'];
+};
+
+export type Permission = {
+  __typename?: 'Permission';
+  core: Scalars['Boolean']['output'];
+  objectAction: AuthObjectAction;
+  subject: AuthSubject;
 };
 
 export type Query = {
   __typename?: 'Query';
+  auth: AuthQuery;
   health: HealthQuery;
   queue: QueueQuery;
+  self: SelfQuery;
   torrent: TorrentQuery;
   torrentContent: TorrentContentQuery;
   version: Scalars['String']['output'];
@@ -428,6 +610,18 @@ export type QueueQueryMetricsArgs = {
   input: QueueMetricsQueryInput;
 };
 
+export type RegisterInput = {
+  email?: InputMaybe<Scalars['String']['input']>;
+  invitationCode?: InputMaybe<Scalars['String']['input']>;
+  password: Scalars['String']['input'];
+  username: Scalars['String']['input'];
+};
+
+export type RegisterResult = {
+  __typename?: 'RegisterResult';
+  user: User;
+};
+
 export type ReleaseYearAgg = {
   __typename?: 'ReleaseYearAgg';
   count: Scalars['Int']['output'];
@@ -441,10 +635,65 @@ export type ReleaseYearFacetInput = {
   filter?: InputMaybe<Array<InputMaybe<Scalars['Year']['input']>>>;
 };
 
+export type Role = {
+  __typename?: 'Role';
+  core: Scalars['Boolean']['output'];
+  name: Scalars['String']['output'];
+  permissions: Array<Permission>;
+};
+
 export type Season = {
   __typename?: 'Season';
   episodes?: Maybe<Array<Scalars['Int']['output']>>;
   season: Scalars['Int']['output'];
+};
+
+export type Self = {
+  __typename?: 'Self';
+  apiKey?: Maybe<ApiKey>;
+  permissions: Array<AuthObjectAction>;
+  user?: Maybe<User>;
+};
+
+export type SelfMutation = {
+  __typename?: 'SelfMutation';
+  createAPIKey: CreateApiKeyResult;
+  deleteAPIKey?: Maybe<Scalars['Void']['output']>;
+  login: LoginResult;
+  register: RegisterResult;
+};
+
+
+export type SelfMutationCreateApiKeyArgs = {
+  input: CreateApiKeyInput;
+};
+
+
+export type SelfMutationDeleteApiKeyArgs = {
+  id: Scalars['Int']['input'];
+};
+
+
+export type SelfMutationLoginArgs = {
+  password: Scalars['String']['input'];
+  username: Scalars['String']['input'];
+};
+
+
+export type SelfMutationRegisterArgs = {
+  input: RegisterInput;
+};
+
+export type SelfQuery = {
+  __typename?: 'SelfQuery';
+  apiKeys: Array<ApiKey>;
+  identity: Self;
+  passwordEntropy: PasswordEntropyResult;
+};
+
+
+export type SelfQueryPasswordEntropyArgs = {
+  password: Scalars['String']['input'];
 };
 
 export type SuggestTagsQueryInput = {
@@ -775,6 +1024,17 @@ export type TorrentTagFacetInput = {
   aggregate?: InputMaybe<Scalars['Boolean']['input']>;
   filter?: InputMaybe<Array<Scalars['String']['input']>>;
   logic?: InputMaybe<FacetLogic>;
+};
+
+export type User = {
+  __typename?: 'User';
+  createdAt: Scalars['DateTime']['output'];
+  email?: Maybe<Scalars['String']['output']>;
+  id: Scalars['Int']['output'];
+  lastLoginAt?: Maybe<Scalars['DateTime']['output']>;
+  role: Scalars['String']['output'];
+  updatedAt: Scalars['DateTime']['output'];
+  username: Scalars['String']['output'];
 };
 
 export type Video3D =

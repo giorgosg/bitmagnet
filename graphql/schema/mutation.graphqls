@@ -1,4 +1,6 @@
 type Mutation {
+  self: SelfMutation!
+  auth: AuthMutation!
   torrent: TorrentMutation!
   queue: QueueMutation!
 }

@@ -35,6 +35,9 @@ func (option) Key() string {
 }
 
 func (o option) Apply(g *gin.Engine) error {
+	// The identity is attached to the gin context, but resolvers and handlers
+	// downstream only see the request context, so bridge the two first.
+	g.Use(httpserver.GinContextToContextMiddleware())
 	g.Use(o.middleware.AttachAuth())
 
 	return nil
