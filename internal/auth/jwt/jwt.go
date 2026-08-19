@@ -9,6 +9,10 @@ import (
 
 var ErrTokenInvalidClaims = jwt.ErrTokenInvalidClaims
 
+// issuer names this application in the tokens it mints, and is required of the
+// tokens it accepts.
+const issuer = "bitmagnet"
+
 type Claims struct {
 	UserID   int    `json:"user_id"`
 	Username string `json:"username"`
@@ -35,7 +39,16 @@ func NewService(secretKey Secret, duration Duration) Service {
 		// Tokens are signed with the one symmetric method below, so accept only
 		// that one. Leaving the set open lets a token nominate its own algorithm,
 		// which is the shape of every algorithm-confusion attack on JWT.
-		parser:        jwt.NewParser(jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()})),
+		//
+		// The issuer is checked as well as emitted. A shared signing key proves
+		// only that some holder of that key minted the token, not that it was
+		// minted for this application — so where an operator reuses a secret
+		// across services, a token issued by one of them would otherwise be
+		// accepted here as whatever user ID it names.
+		parser: jwt.NewParser(
+			jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+			jwt.WithIssuer(issuer),
+		),
 		secretKey:     []byte(secretKey),
 		tokenDuration: time.Duration(duration),
 	}
@@ -49,7 +62,7 @@ func (j *service) Generate(userID int, username string) (string, error) {
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(j.tokenDuration)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			NotBefore: jwt.NewNumericDate(time.Now()),
-			Issuer:    "bitmagnet",
+			Issuer:    issuer,
 		},
 	}
 

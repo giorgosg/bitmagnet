@@ -20,19 +20,33 @@ type Config struct {
 	// bundled web UI keep working without credentials.
 	AnonymousAccess bool
 
-	JWTSecret   string
-	JWTDuration time.Duration
+	JWTSecret string
+	// A non-positive duration issues tokens that are already expired, which is
+	// a lockout rather than a strict setting.
+	JWTDuration time.Duration `validate:"gt=0"`
 
 	RBACCacheTTL time.Duration
 
-	InvitationRequired  bool
-	EmailRequired       bool
-	EmailVerification   bool
-	PasswordMinEntropy  float64
-	PasswordHashingCost int
+	InvitationRequired bool
+	EmailRequired      bool
+	// EmailVerification is inert: nothing reads it and no verification code is
+	// ever issued. It defaults to false so that the configuration does not
+	// advertise a check that is not performed. See docs/auth.md.
+	EmailVerification bool
+	// The constraints below are next's, which declares these parameters through
+	// its plugin config builder with the same bounds. Expressing them as an
+	// ordinary struct dropped the bounds along with the builder, and they are
+	// not decorative: a zero PasswordMinEntropy accepts any password, and a
+	// zero LoginRequestsPerMinute divides by zero when the limiter computes its
+	// rate, taking the process down from config alone.
+	PasswordMinEntropy float64 `validate:"min=50"`
+	// bcrypt.DefaultCost and bcrypt.MaxCost; a cost outside them is rejected by
+	// bcrypt itself, which breaks registration and the decoy comparison that
+	// makes a login miss cost what a hit costs.
+	PasswordHashingCost int `validate:"min=10,max=31"`
 
-	LoginRequestsPerMinute int
-	LoginRequestBurst      int
+	LoginRequestsPerMinute int `validate:"gt=0"`
+	LoginRequestBurst      int `validate:"gt=0"`
 }
 
 func NewDefaultConfig() Config {
@@ -41,7 +55,7 @@ func NewDefaultConfig() Config {
 		JWTDuration:            time.Hour * 24,
 		RBACCacheTTL:           time.Minute,
 		InvitationRequired:     true,
-		EmailVerification:      true,
+		EmailVerification:      false,
 		PasswordMinEntropy:     defaultPasswordMinEntropy,
 		PasswordHashingCost:    bcrypt.DefaultCost,
 		LoginRequestsPerMinute: defaultLoginRequestsPerMinute,
@@ -49,7 +63,9 @@ func NewDefaultConfig() Config {
 	}
 }
 
-// Defaults match the corresponding params on upstream/next.
+// Defaults match the corresponding params on upstream/next, with one deliberate
+// exception: next defaults EmailVerification to true, and this lineage defaults
+// it to false because neither lineage implements it.
 const (
 	defaultPasswordMinEntropy     = 70
 	defaultLoginRequestsPerMinute = 30

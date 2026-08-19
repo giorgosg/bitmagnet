@@ -46,6 +46,24 @@ func NewEngine(config Config) (*gin.Engine, error) {
 	return g, nil
 }
 
+// Middleware returns the stack every request passes through before it reaches a
+// handler. It is exported for the same reason NewEngine is: what it installs is
+// a security property, and a test that builds its own stack would only ever test
+// the stack it built.
+//
+// The recovery middleware is deliberately not gin.Recovery. That one dumps the
+// request line verbatim on its broken-pipe path — in release mode too — which
+// puts a Torznab apikey, a non-expiring credential that travels in the query
+// string, into a log the request logger takes care to keep it out of.
+func Middleware(logger *zap.Logger) []gin.HandlerFunc {
+	ginLogger := logger.Named("gin")
+
+	return []gin.HandlerFunc{
+		ginzap.Ginzap(ginLogger, time.RFC3339, true),
+		ginzap.RecoveryWithZap(ginLogger, true),
+	}
+}
+
 func New(p Params) Result {
 	var s *http.Server
 
@@ -61,7 +79,7 @@ func New(p Params) Result {
 						return engineErr
 					}
 
-					g.Use(ginzap.Ginzap(p.Logger.Named("gin"), time.RFC3339, true), gin.Recovery())
+					g.Use(Middleware(p.Logger)...)
 					options, optionsErr := resolveOptions(p.Config.Options, p.Options)
 					if optionsErr != nil {
 						return optionsErr

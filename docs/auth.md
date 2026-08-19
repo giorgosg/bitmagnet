@@ -120,13 +120,27 @@ byte-identical to `next`'s, which is the strongest evidence that the extraction 
 | `auth.rbac_cache_ttl`            | `1m`           |                                                                   |
 | `auth.invitation_required`       | `true`         |                                                                   |
 | `auth.email_required`            | `false`        |                                                                   |
-| `auth.email_verification`        | `true`         |                                                                   |
+| `auth.email_verification`        | `false`        | inert — see Known gaps; `next` defaults it `true`                 |
 | `auth.password_min_entropy`      | `70`           |                                                                   |
 | `auth.password_hashing_cost`     | bcrypt default | applies to registration _and_ password changes                    |
 | `auth.login_requests_per_minute` | `30`           | per bucket, not per process — see below                           |
 | `auth.login_request_burst`       | `5`            | per bucket, not per process — see below                           |
 
-Defaults match the corresponding parameters on `next`.
+Defaults match the corresponding parameters on `next`, with one deliberate
+exception: `auth.email_verification` defaults to `false` here and `true` there, because
+neither lineage implements it and a default of `true` advertises a check that never runs.
+
+**The bounds match too, and that took a correction.** `next` declares these parameters
+through its plugin config builder, which carries a validity constraint alongside each
+default — entropy at least 50, hashing cost within bcrypt's own range, the two login
+limiter values greater than zero. Re-expressing them as an ordinary struct for `configfx`
+kept every default and dropped every constraint, which is the kind of omission that leaves
+no trace until someone writes the value: `login_requests_per_minute: 0` reaches
+`rate.Every(time.Minute / 0)` and takes the process down from a config file alone, and
+`password_min_entropy: 0` silently accepts any password at all. The constraints are now
+`validate:` tags on `authconfig.Config`, which `configresolver` already enforces against
+every resolved config struct, plus `jwt_duration` greater than zero — not one of `next`'s,
+but a zero there issues tokens that have already expired.
 
 One key outside the `auth.` tree matters as much as any of them:
 
@@ -139,6 +153,20 @@ API key secrets are hashed at bcrypt's default cost rather than
 infeasible at any work factor, and the cost is paid on every request presenting a key.
 Invitation codes are 128 bits for the same reason the bootstrap one needs it: it grants
 admin and never expires.
+
+**Those secrets are only as good as the entropy behind them, and that is why this branch
+raises the module to Go 1.24.** Every one of them — the per-process JWT secret, the
+bootstrap invitation, each API key — comes from `auth.GenerateRandomString`, which reads
+`crypto/rand`. Under the pre-1.24 signature `rand.Read` returns an error and leaves the
+buffer as it found it, so discarding that error converts an entropy failure into an
+all-zero secret: a JWT signing key of zero, an administrator invitation of zero, and
+nothing in the log to say so. Go 1.24 made `crypto/rand.Read` incapable of returning an
+error — it terminates the program if the system source fails — which is the correct
+outcome for a credential. `go.mod`, the `Dockerfile` and the workflow pins move together;
+the error is still checked at the call site rather than discarded, so the guarantee is
+enforced where it is relied upon and not left implied by the `go` directive. The bump also
+retires this document's former note that `next`'s use of `testing.T.Context` was
+unavailable here.
 
 ### Resisting anonymous abuse
 
@@ -237,6 +265,19 @@ API keys do not expire by default, so read access to those logs is equivalent to
 application access. **If you front bitmagnet with a proxy, redact the `apikey`
 parameter there too.**
 
+**Redacting the request logger was not enough, because it is not the only thing that
+logs a request.** The server installed `gin.Recovery()`, whose panic handler dumps the
+request line verbatim — and on the broken-pipe branch it does so in release mode as well,
+which is precisely the branch a Torznab client reaches by disconnecting mid-response. It
+masks the `Authorization` header and nothing else, so `X-Api-Key` went to the log intact
+too. The vendored `ginzap` recovery had the same dump and redacted neither. Recovery now
+runs through `ginzap.RecoveryWithZap` with the same query-string redaction the request
+logger uses, extended to credential-bearing headers, and the middleware stack is built by
+one exported `httpserver.Middleware` so that a test exercises what the server actually
+installs rather than a stack of its own. The lesson generalises past this instance: a
+redaction guarantee holds only over the sinks it was applied to, and a panic path is a
+second sink that no amount of care in the first one covers.
+
 Two departures from it. The query-string credential is accepted **only** on this
 endpoint, where the protocol requires it — everywhere else the bearer header remains the
 only accepted form, since query strings leak into access logs, referrers and browser
@@ -278,10 +319,10 @@ GraphQL baseline: orchestrators poll it, and it reports liveness only.
   carried over for fidelity, but its value is never read and no verification code is ever
   issued — the `users.email_verify_code` column is written nowhere. It is inert on `next`
   too. Every other user parameter in the table above is consulted. Treat it as a
-  placeholder, not a feature.
-- **Go version divergence.** `next`'s tests use `testing.T.Context`, which needs Go 1.24;
-  this module targets 1.23.6 while `next` is on 1.25.1. `context.Background()` is
-  substituted rather than bumping the toolchain, which is a repo-wide decision.
+  placeholder, not a feature. It therefore **defaults to `false` here**, diverging from
+  `next`: a parameter that defaults to on while doing nothing tells an operator their
+  addresses are verified when they are not, and turning it on changes nothing either. The
+  default follows the behaviour, and it flips back when the behaviour arrives.
 
 ## How the port was done
 
@@ -413,6 +454,25 @@ the most words justifying.
 | `UpdatePassword` ignored `password_hashing_cost` | raising the cost silently did not apply to changes   |
 | `NewSecret` discarded its bcrypt error           | a zero-valued hash would be stored as the credential |
 | Invitation codes were 48 bits                    | thin for a non-expiring credential that grants admin |
+
+A third pass found five more. The first three are all cases where a control was correct and
+something outside it was not — the same shape as the four singled out below.
+
+| Defect                                     | Effect                                                     |
+| ------------------------------------------ | ---------------------------------------------------------- |
+| `gin.Recovery` dumped the raw request line | the redaction guarantee did not cover the panic path       |
+| Config validation was dropped in the port  | `login_requests_per_minute: 0` panics; entropy `0` is mute |
+| `GenerateRandomString` discarded its error | an entropy failure minted an all-zero secret before 1.24   |
+| `self.apiKeys` accepted an API key         | a Torznab-scoped key enumerated its owner's other keys     |
+| The JWT issuer was emitted, never checked  | a reused secret let another service's token be accepted    |
+
+The last two are narrower, and both are the same mistake: a check written in one place and
+not the neighbouring one. `CreateAPIKey` and `DeleteAPIKey` require an interactive session
+through `UserSessionFromContext`, while `APIKeys` asked only for a user — so listing, the
+third key-management operation, was the one a machine credential could reach, returning the
+owner's other key IDs, names, creation times and expirations. `Generate` set
+`Issuer: "bitmagnet"` and `Parse` never looked at it, which costs nothing while the signing
+key is unique to the instance and everything when an operator reuses one across services.
 
 Also removed: `rbac.repository.DeleteRolePermissions`, dead on arrival — absent from the
 `Repository` interface, called by nothing, and carrying a copy-paste bug that compared the

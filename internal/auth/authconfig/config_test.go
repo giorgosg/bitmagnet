@@ -2,9 +2,11 @@ package authconfig_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/authconfig"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/rbac"
+	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -67,4 +69,87 @@ func TestAnonymousPermissionsGrantNothingWhenClosed(t *testing.T) {
 	cfg.AnonymousAccess = false
 
 	assert.Empty(t, authconfig.AnonymousPermissions(cfg, registered())())
+}
+
+// The default config is what an installation that has configured nothing runs
+// with, so it has to satisfy its own constraints; a default that fails
+// validation would refuse to start.
+func TestDefaultConfigIsValid(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, validator.New().Struct(authconfig.NewDefaultConfig()))
+}
+
+// EmailVerification is inert — no verification code is issued and nothing reads
+// the value — so it defaults off rather than advertising a check that does not
+// happen.
+func TestEmailVerificationDefaultsOff(t *testing.T) {
+	t.Parallel()
+
+	assert.False(t, authconfig.NewDefaultConfig().EmailVerification)
+}
+
+// next declares these parameters with bounds; expressing them as a plain struct
+// dropped the bounds, leaving values that disable a control or crash the
+// process reachable from a config file.
+func TestConfigRejectsValuesNextWouldReject(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name   string
+		mutate func(*authconfig.Config)
+	}{
+		{
+			// time.Minute / 0 in the limiter's rate computation.
+			"zero login requests per minute",
+			func(c *authconfig.Config) { c.LoginRequestsPerMinute = 0 },
+		},
+		{
+			"zero login request burst",
+			func(c *authconfig.Config) { c.LoginRequestBurst = 0 },
+		},
+		{
+			// Accepts any password whatsoever.
+			"zero password entropy",
+			func(c *authconfig.Config) { c.PasswordMinEntropy = 0 },
+		},
+		{
+			// Rejected by bcrypt itself, breaking registration and the decoy
+			// comparison that hides whether an account exists.
+			"bcrypt cost below the minimum",
+			func(c *authconfig.Config) { c.PasswordHashingCost = 3 },
+		},
+		{
+			"bcrypt cost above the maximum",
+			func(c *authconfig.Config) { c.PasswordHashingCost = 32 },
+		},
+		{
+			// Issues tokens that have already expired.
+			"zero jwt duration",
+			func(c *authconfig.Config) { c.JWTDuration = 0 },
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := authconfig.NewDefaultConfig()
+			tt.mutate(&cfg)
+
+			assert.Error(t, validator.New().Struct(cfg))
+		})
+	}
+}
+
+// The bounds have to leave the useful range alone.
+func TestConfigAcceptsPlausibleHardening(t *testing.T) {
+	t.Parallel()
+
+	cfg := authconfig.NewDefaultConfig()
+	cfg.PasswordMinEntropy = 100
+	cfg.PasswordHashingCost = 14
+	cfg.LoginRequestsPerMinute = 5
+	cfg.LoginRequestBurst = 1
+	cfg.JWTDuration = time.Minute * 15
+
+	assert.NoError(t, validator.New().Struct(cfg))
 }

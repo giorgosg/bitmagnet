@@ -533,6 +533,25 @@ func TestAPIKeyCannotDeleteKeys(t *testing.T) {
 	assert.Contains(t, res.Errors[0].Message, "api keys may not manage api keys")
 }
 
+// API-key inventory is part of key management too. A narrow machine
+// credential must not be able to enumerate the owner's other credential IDs,
+// names, creation times, and expirations merely because it reports a user.
+func TestAPIKeyCannotListKeys(t *testing.T) {
+	t.Parallel()
+
+	cfg := authconfig.NewDefaultConfig()
+	cfg.AnonymousAccess = false
+
+	server, code := newAuthTestServerWithConfig(t, cfg)
+	token := loginAsAdmin(t, server, code)
+
+	narrow := apiKeyFrom(t, createAPIKeyAs(t, server, token, "narrow", "torznab", "torznab", "query"))
+
+	res := query(t, server, narrow, `{ self { apiKeys { id name createdAt expiresAt } } }`)
+	require.NotEmpty(t, res.Errors, "an API key must not be able to enumerate other API keys")
+	assert.Contains(t, res.Errors[0].Message, "api keys may not manage api keys")
+}
+
 // The legitimate path must keep working, or the guard above is just a denial.
 func TestUserSessionCanMintKey(t *testing.T) {
 	t.Parallel()

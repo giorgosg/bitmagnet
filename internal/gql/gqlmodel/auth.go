@@ -46,10 +46,16 @@ func (q SelfQuery) PasswordEntropy(_ context.Context, password string) gen.Passw
 	}
 }
 
+// APIKeys lists the caller's own keys. It requires an interactive session, not
+// merely a user, for the same reason creating and deleting one does: the
+// inventory is part of key management. A key scoped to Torznab alone could
+// otherwise enumerate its owner's other credentials — their IDs, names, creation
+// times and expirations — which is exactly the reconnaissance that scoping a key
+// narrowly is meant to prevent.
 func (q SelfQuery) APIKeys(ctx context.Context) ([]model.APIKey, error) {
-	currentUser, ok := gqlauth.UserFromContext(ctx)
-	if !ok {
-		return nil, ErrNotAuthenticated
+	currentUser, err := gqlauth.UserSessionFromContext(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	result, err := q.APIKeyService.List(ctx, api_key.ListRequest{UserID: currentUser.ID})

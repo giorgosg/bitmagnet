@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/jwt"
+	jwtlib "github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -63,4 +64,28 @@ func TestJWTService_TokenWithDifferentSecret(t *testing.T) {
 	// Try to validate with second service (different secret)
 	_, err = jwtService2.Parse(token)
 	assert.Error(t, err)
+}
+
+// A signing key identifies the cryptographic trust root, not the token's
+// application. If the same secret is reused, accepting an arbitrary issuer
+// lets a token minted for another service impersonate a bitmagnet user ID.
+func TestJWTService_RejectsTokenFromDifferentIssuer(t *testing.T) {
+	t.Parallel()
+
+	const secret = "shared-test-secret"
+
+	service := jwt.NewService(secret, jwt.Duration(time.Minute))
+	token := jwtlib.NewWithClaims(jwtlib.SigningMethodHS256, jwt.Claims{
+		UserID:   123,
+		Username: "testuser",
+		RegisteredClaims: jwtlib.RegisteredClaims{
+			Issuer:    "another-application",
+			ExpiresAt: jwtlib.NewNumericDate(time.Now().Add(time.Minute)),
+		},
+	})
+	signed, err := token.SignedString([]byte(secret))
+	require.NoError(t, err)
+
+	_, err = service.Parse(signed)
+	require.Error(t, err, "tokens issued for another application must be rejected")
 }

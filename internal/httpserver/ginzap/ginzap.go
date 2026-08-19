@@ -5,7 +5,6 @@ package ginzap
 import (
 	"net"
 	"net/http"
-	"net/http/httputil"
 	"os"
 	"runtime/debug"
 	"strings"
@@ -137,7 +136,9 @@ func CustomRecoveryWithZap(logger ZapLogger, stack bool, recovery gin.RecoveryFu
 					}
 				}
 
-				httpRequest, _ := httputil.DumpRequest(c.Request, false)
+				// Redacted, not raw: this dump reaches the log on a path the
+				// request logger's own redaction never sees.
+				httpRequest := dumpRequest(c.Request)
 				if brokenPipe {
 					logger.Error(c.Request.URL.Path,
 						zap.Any("error", err),
