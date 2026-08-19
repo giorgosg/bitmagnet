@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -31,6 +32,18 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/vektah/gqlparser/v2/ast"
 )
+
+// TestMain puts gin in test mode once, before any test starts.
+//
+// gin.SetMode writes package-level globals that gin.New and route registration
+// read back through IsDebugging and debugPrintRoute. Calling it from the test
+// helper instead meant every parallel test wrote those globals while its
+// siblings read them, which the race detector reports. Setting it here happens
+// before the first parallel test, so nothing writes them again afterwards.
+func TestMain(m *testing.M) {
+	gin.SetMode(gin.TestMode)
+	os.Exit(m.Run())
+}
 
 type daoProvider struct{ query *dao.Query }
 
@@ -115,8 +128,6 @@ func newAuthTestServerWithConfig(
 			Auth: gqlauth.NewDirective(),
 		},
 	})
-
-	gin.SetMode(gin.TestMode)
 
 	engine := gin.New()
 
