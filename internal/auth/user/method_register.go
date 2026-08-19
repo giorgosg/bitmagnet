@@ -39,7 +39,7 @@ func (s *service) Register(ctx context.Context, request RegisterRequest) (model.
 	}
 
 	if request.InvitationCode == "" && s.invitationRequired.Get() {
-		return model.User{}, ErrInvitationCodeMissing
+		return model.User{}, fmt.Errorf("%w: %w: %w", Err, ErrRegister, ErrInvitationCodeMissing)
 	}
 
 	if request.Email == "" && s.emailRequired.Get() {

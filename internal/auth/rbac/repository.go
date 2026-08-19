@@ -8,7 +8,6 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
 	"github.com/bitmagnet-io/bitmagnet/internal/slice"
-	"gorm.io/gen"
 	"gorm.io/gorm/clause"
 )
 
@@ -169,51 +168,6 @@ func (r *repository) DeleteRole(ctx context.Context, role Role) error {
 		Delete()
 
 	return err
-}
-
-func (r *repository) DeleteRolePermissions(
-	ctx context.Context,
-	role Role,
-	objectActions []ObjectAction,
-) (RoleInfo, error) {
-	var roleInfo RoleInfo
-
-	err := r.dao.DaoTransaction(func(tx *dao.Query) error {
-		if len(objectActions) > 0 {
-			_, err := tx.WithContext(ctx).RolePermission.Scopes(
-				func(scope gen.Dao) gen.Dao {
-					return scope.Where(dao.RolePermission.RoleName.Eq(string(role)))
-				},
-				func(scope gen.Dao) gen.Dao {
-					return scope.Or(
-						slice.Map(objectActions, func(objAct ObjectAction) gen.Condition {
-							return dao.RolePermission.
-								Where(dao.RolePermission.Object.Eq(objAct.Namespace)).
-								Where(dao.RolePermission.Object.Eq(objAct.Object)).
-								Where(dao.RolePermission.Action.Eq(objAct.Action))
-						})...)
-				},
-			).Delete()
-			if err != nil {
-				return err
-			}
-		}
-
-		roleModel, err := tx.WithContext(ctx).
-			Role.
-			Preload(dao.Role.Permissions).
-			Where(dao.Role.Name.Eq(string(role))).
-			First()
-		if err != nil {
-			return err
-		}
-
-		roleInfo = roleInfoFromModel(roleModel)
-
-		return nil
-	})
-
-	return roleInfo, err
 }
 
 func permissionFromModel(perm *model.RolePermission) Permission {

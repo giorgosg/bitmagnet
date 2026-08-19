@@ -73,7 +73,8 @@ func TestNewSecretDecodes(t *testing.T) {
 	t.Parallel()
 
 	for i := range 5 {
-		secret := NewSecret()
+		secret, err := NewSecret()
+		require.NoError(t, err)
 
 		var decoded KeyData
 

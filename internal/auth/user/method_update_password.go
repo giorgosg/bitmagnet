@@ -15,7 +15,13 @@ func (s *service) UpdatePassword(ctx context.Context, userID int, currentPasswor
 		return fmt.Errorf("%w: %w: %w", Err, ErrUpdatePassword, ErrPasswordInsufficientEntropy)
 	}
 
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	// The configured cost, not bcrypt's default: raising it is the whole remedy
+	// when hardware gets faster, and it is worth nothing if a password change
+	// quietly writes a weaker hash than registration did.
+	hashedPassword, err := bcrypt.GenerateFromPassword(
+		[]byte(newPassword),
+		int(s.passwordHashingCost.Get()),
+	)
 	if err != nil {
 		return fmt.Errorf("%w: %w: %w", Err, ErrUpdatePassword, err)
 	}

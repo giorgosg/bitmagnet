@@ -26,19 +26,33 @@ type Secret struct {
 	Hash   []byte
 }
 
-func NewSecret() Secret {
+// NewSecret generates an API key secret and its hash.
+//
+// bcrypt's default cost is deliberate here and is not the configured password
+// cost: the secret is 12 uniformly random bytes, so an offline attack against
+// the hash is infeasible at any work factor, and the cost is paid on every
+// request that presents a key.
+//
+// The errors are returned rather than dropped. Discarding the bcrypt error
+// yielded a zero-valued hash that would be stored as the credential.
+func NewSecret() (Secret, error) {
 	bytes := make([]byte, secretLength)
-	_, _ = rand.Read(bytes)
+	if _, err := rand.Read(bytes); err != nil {
+		return Secret{}, err
+	}
 
-	hash, _ := bcrypt.GenerateFromPassword(
+	hash, err := bcrypt.GenerateFromPassword(
 		bytes,
 		bcrypt.DefaultCost,
 	)
+	if err != nil {
+		return Secret{}, err
+	}
 
 	return Secret{
 		Secret: bytes,
 		Hash:   hash,
-	}
+	}, nil
 }
 
 type KeyData struct {

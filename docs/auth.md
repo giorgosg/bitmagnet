@@ -67,7 +67,15 @@ expired, naming a deleted account, naming a disabled one — falls through to th
 authenticator rather than aborting. Only an infrastructure failure, such as the database
 being unreachable, produces an error and no identity.
 
-This is a deliberate invariant, and it took three separate fixes to hold. A credential
+It holds for both credential types. The JWT authenticator was fixed first, and the API
+key one kept aborting for every failure except an unparseable key, so an expired or
+unknown key still refused the whole request; `revokedAPIKey` now names the five outcomes
+that mean "not a usable credential" and lets them fall through, leaving only genuine
+repository failures to abort. An expired key is therefore treated exactly like no key at
+all, which is what makes the endpoint's openness a question for the permission model
+alone.
+
+This is a deliberate invariant, and it took four separate fixes to hold. A credential
 that aborts the chain leaves the request with no identity at all, so _every_ field is
 refused — including `self.identity` and `self.login`, the two calls the UI needs to
 notice its token is dead and recover. The session then stays wedged across reloads,
@@ -114,11 +122,23 @@ byte-identical to `next`'s, which is the strongest evidence that the extraction 
 | `auth.email_required`            | `false`        |                                                                   |
 | `auth.email_verification`        | `true`         |                                                                   |
 | `auth.password_min_entropy`      | `70`           |                                                                   |
-| `auth.password_hashing_cost`     | bcrypt default |                                                                   |
+| `auth.password_hashing_cost`     | bcrypt default | applies to registration _and_ password changes                    |
 | `auth.login_requests_per_minute` | `30`           | per bucket, not per process — see below                           |
 | `auth.login_request_burst`       | `5`            | per bucket, not per process — see below                           |
 
 Defaults match the corresponding parameters on `next`.
+
+One key outside the `auth.` tree matters as much as any of them:
+
+| Key                           | Default   |                                                        |
+| ----------------------------- | --------- | ------------------------------------------------------ |
+| `http_server.trusted_proxies` | _(empty)_ | whose `X-Forwarded-For` to believe; empty means nobody |
+
+API key secrets are hashed at bcrypt's default cost rather than
+`auth.password_hashing_cost`. They are 12 uniformly random bytes, so an offline attack is
+infeasible at any work factor, and the cost is paid on every request presenting a key.
+Invitation codes are 128 bits for the same reason the bootstrap one needs it: it grants
+admin and never expires.
 
 ### Resisting anonymous abuse
 
@@ -145,6 +165,17 @@ The source comes from the HTTP middleware, so a caller reaching the service by a
 route has none and is bounded by account alone. The bucket map is size-capped, so it
 cannot be grown without bound by cycling keys; eviction only resets a bucket, which fails
 toward availability rather than lockout.
+
+**All of which depends on the source being something the caller cannot pick.** It is
+gin's `ClientIP()`, and gin reads that from `X-Forwarded-For` or `X-Real-IP` whenever the
+peer is a trusted proxy — where its default is to trust _every_ proxy. Directly reachable,
+that made the client address a header the attacker writes, and rotating it bought a fresh
+bucket per request: 30 guesses against one account from one socket, entirely unthrottled.
+`http_server.trusted_proxies` is therefore empty by default, which means believe nobody
+and take the peer that actually opened the connection. An operator behind a reverse proxy
+must list it there for the real client address to survive the hop — and until they do,
+every request is attributed to the proxy, which the per-source budget's width is there to
+absorb.
 
 **Registration validates the invitation before it hashes anything.** bcrypt is
 deliberately expensive, and hashing first meant an anonymous caller could spend a full
@@ -371,7 +402,25 @@ fixes landed.
 | Login limiter was process-wide, and waited | five wrong guesses locked out every account     |
 | Revoked tokens aborted the chain           | UI wedged, unable to reach the call clearing it |
 
-Three are worth singling out, because in each the security control worked and something
+A second review pass over the fixed branch found five more. The first is the sharpest
+finding on this branch, because the control it defeats is the one the section above spends
+the most words justifying.
+
+| Defect                                           | Effect                                               |
+| ------------------------------------------------ | ---------------------------------------------------- |
+| Login throttle keyed on a spoofable client IP    | rotating `X-Forwarded-For` bought unlimited guesses  |
+| Revoked API keys still aborted the chain         | the always-resolves invariant held for JWTs only     |
+| `UpdatePassword` ignored `password_hashing_cost` | raising the cost silently did not apply to changes   |
+| `NewSecret` discarded its bcrypt error           | a zero-valued hash would be stored as the credential |
+| Invitation codes were 48 bits                    | thin for a non-expiring credential that grants admin |
+
+Also removed: `rbac.repository.DeleteRolePermissions`, dead on arrival — absent from the
+`Repository` interface, called by nothing, and carrying a copy-paste bug that compared the
+object column against the namespace. `jwt.Parse` now pins HS256 rather than accepting
+whatever algorithm a token nominates; it was not exploitable against a symmetric key, but
+the parser built for exactly this purpose was being constructed and then ignored.
+
+Four are worth singling out, because in each the security control worked and something
 around it did not — the failure mode least likely to be caught by a test written after
 the fix.
 
@@ -386,6 +435,14 @@ The **chain-abort lockout** and the **login limiter** were both failures of the 
 path. In each case the control did its job and made the way back out unreachable: a dead
 token refused the query that would have cleared it, and a shared login budget refused the
 login that would have replaced it.
+
+The **spoofable throttle key** is the one to learn from, because it was introduced by a
+fix. Replacing the global limiter with keyed buckets was right, and the keys were chosen
+carefully — the reasoning about which bucket an attacker can fill on someone else's behalf
+still stands. What went unexamined was whether the attacker controls the key itself, and
+they did: the value came from a framework whose default is to believe a request header.
+A control is only as good as the least trustworthy input to it, and that input was two
+dependencies away from the code doing the reasoning.
 
 ### Lint policy
 

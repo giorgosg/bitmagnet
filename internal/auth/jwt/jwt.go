@@ -32,7 +32,10 @@ func NewService(secretKey Secret, duration Duration) Service {
 	}
 
 	return &service{
-		parser:        jwt.NewParser(),
+		// Tokens are signed with the one symmetric method below, so accept only
+		// that one. Leaving the set open lets a token nominate its own algorithm,
+		// which is the shape of every algorithm-confusion attack on JWT.
+		parser:        jwt.NewParser(jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()})),
 		secretKey:     []byte(secretKey),
 		tokenDuration: time.Duration(duration),
 	}
@@ -56,7 +59,7 @@ func (j *service) Generate(userID int, username string) (string, error) {
 }
 
 func (j *service) Parse(token string) (*Claims, error) {
-	parsed, err := jwt.ParseWithClaims(token, &Claims{}, func(*jwt.Token) (interface{}, error) {
+	parsed, err := j.parser.ParseWithClaims(token, &Claims{}, func(*jwt.Token) (interface{}, error) {
 		return j.secretKey, nil
 	})
 	if err != nil {

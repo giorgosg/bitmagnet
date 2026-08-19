@@ -23,7 +23,10 @@ type CreateResult struct {
 }
 
 func (s service) Create(ctx context.Context, req CreateRequest) (CreateResult, error) {
-	secret := NewSecret()
+	secret, err := NewSecret()
+	if err != nil {
+		return CreateResult{}, fmt.Errorf("%w: %w: %w", Err, ErrCreate, err)
+	}
 
 	var expiresAt time.Time
 	if req.Expiry > 0 {

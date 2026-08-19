@@ -18,6 +18,11 @@ var (
 	)
 )
 
+// invitationCodeLength is in hex characters, so half as many random bytes.
+// Twelve gave 48 bits, which is thin for a bearer credential that grants a role
+// — the bootstrap one grants admin and never expires. Thirty-two gives 128.
+const invitationCodeLength = 32
+
 func newInvitationCode() string {
-	return auth.GenerateRandomString(12)
+	return auth.GenerateRandomString(invitationCodeLength)
 }

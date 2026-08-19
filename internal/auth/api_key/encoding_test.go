@@ -12,7 +12,8 @@ import (
 func TestEncoding(t *testing.T) {
 	t.Parallel()
 
-	secret := api_key.NewSecret()
+	secret, err := api_key.NewSecret()
+	require.NoError(t, err)
 
 	require.NoError(t, bcrypt.CompareHashAndPassword(secret.Hash, secret.Secret))
 
