@@ -1,68 +1,159 @@
-# Authentication options
+# Authentication
 
-Upstream `main` has **no authentication at all** — GraphQL, Torznab and the web UI are
-all open.
+**Status: implemented on `codex/auth-port`
+([PR #28](https://github.com/giorgosg/bitmagnet/pull/28)), not yet merged.** Adapted from
+`upstream/next`. This document records what was built, why, and what is still missing;
+the survey of the alternatives that were considered is kept at the end, because it
+explains the choice and because two of them contributed material.
 
-It is also permissive cross-origin by default: `internal/httpserver/config.go` sets
+Upstream `main` has **no authentication at all** — GraphQL, Torznab and the web UI are all
+open. It is also permissive cross-origin by default: `internal/httpserver/config.go` sets
 
 ```go
 Cors: CorsConfig{ AllowedOrigins: []string{"*"}, ... }
 ```
 
-so any web page in any browser can query a reachable bitmagnet instance directly. That
-combination — no auth, `*` CORS — is why bitmagnet is normally run on a trusted network
-only, and why a third-party browser UI can talk to it with no server in between.
+so any web page in any browser can query a reachable instance directly. That combination
+is why bitmagnet is normally run on a trusted network only.
 
-Three implementations of auth exist, plus the option to build a focused fourth design.
-This matters at the GraphQL/HTTP layer regardless of which frontend you use, so it is
-relevant even if you replace the web UI entirely.
+## Authentication is opt-in, and off by default
 
-## Option 1 — `upstream/next` (`internal/auth`, 60 files)
+`auth.anonymous_access` defaults to **true**, which grants the `anon` role every
+registered object action. While it is on, every existing client keeps working with no
+credentials: GraphQL, Torznab and the web UI behave exactly as they did before.
 
-The maintainer's design, on the dormant [`next` branch](upstream-status.md#the-next-branch).
-The most complete, and the most likely to match upstream's eventual direction.
+Setting it to `false` is what turns authentication on. This is the same mechanism
+`upstream/next` uses — its `rbac.ParamAnonymousAccess` also defaults to `true` — except
+that `next` distributes the decision across its plugins, each granting its own object
+actions to `anon`. Without a plugin registry the same effect is produced centrally in
+`authconfig.AnonymousPermissions`.
+
+The practical consequence: this feature can be merged and shipped without changing
+anything for anyone, and an operator opts in when they want it.
+
+## What it consists of
 
 ```
-internal/auth/user/        17 files — register, login, invite, password entropy,
-                           set_role/set_enabled, list/get/delete, service, config
-internal/auth/rbac/        14 files — Casbin: casbin_adapter, casbin_enforcer,
-                           casbin_model.conf, permission, role, object_action(_provider),
-                           service(_lazy), subject (+ tests, mocks)
-internal/auth/identity/    12 files — authenticator chain: anon | api_key | jwt,
-                           identity types per authenticator, factory
-internal/auth/api_key/     11 files — encoding, method_auth, method_create/delete/list,
-                           repository, service (+ tests, mocks)
-internal/auth/jwt/          3 files — config, jwt (+ tests)
-internal/auth/http_auth/    1 file  — gin middleware
-internal/auth/util.go                (+ test)
+internal/auth/user/        register, login, invite, password entropy, set_role,
+                           set_enabled, list/get/delete
+internal/auth/rbac/        Casbin enforcement, roles, permissions, object actions
+internal/auth/identity/    authenticator chain: anon | api_key | jwt
+internal/auth/api_key/     encoding, auth, create/delete/list, repository
+internal/auth/jwt/         token issue and verification
+internal/auth/http_auth/   gin middleware and http server option
+internal/auth/authconfig/  main-lineage config, and the anonymous-access switch
+internal/auth/authfx/      fx wiring and the first-administrator bootstrap
 ```
 
-**Design:** a chain-of-responsibility authenticator resolving an identity from anonymous,
-API key, or JWT, with Casbin RBAC for authorization.
+**Design:** a chain-of-responsibility authenticator resolves an identity from a JWT, an
+API key, or anonymously, and Casbin evaluates that identity against an object action.
 
-**Total: 4,069 lines across 59 Go files** (5 test files, 2 generated mock files), plus an
-87-line migration.
+The middleware only _resolves_ an identity and attaches it to the request context — it
+never rejects. Enforcement is the job of whatever reads the identity back out, which
+today means Torznab and nothing else (see [Known gaps](#known-gaps)).
 
-### Measured dependency surface
+### Schema
 
-Surveyed 2026-08-18 by extracting every import across all 59 files, then walking the
-closure — descending only into packages the `main` lineage does not already provide, since
-the port uses `trunk`'s copy of the rest. This corrects an earlier claim in this document
-that the package could not be extracted without taking `next` wholesale.
+`migrations/00022_auth.sql`, six tables: `roles`, `role_permissions`, `users`,
+`invitations`, `api_keys`, `api_key_permissions`, seeding four core roles — `admin`,
+`editor`, `user`, `anon`. Renumbered from `next`'s `00021`, which collides with
+`00021_queue_jobs_fetch_index.sql`.
 
-`internal/auth` imports just six bitmagnet packages directly:
+The model and dao types are **gorm-gen output**, not hand-written:
+`internal/database/gen/gen.go` sets `ModelPkgPath` to `internal/model`, so applying the
+migration and running `task gen-gorm` produces them. The generated files came out
+byte-identical to `next`'s, which is the strongest evidence that the extraction is faithful.
 
-| Direct dependency       | Refs | Status on `main` lineage |
-| ----------------------- | ---- | ------------------------ |
-| `internal/model`        | 19   | present — and see below  |
-| `internal/slice`        | 9    | present                  |
-| `internal/database/dao` | 7    | present (generated)      |
-| `internal/database`     | 3    | present                  |
-| `internal/config/param` | 3    | **`next`-only**          |
-| `internal/atomic`       | 2    | **`next`-only**          |
+### Configuration
 
-Closing over those, the full set of packages that must be ported alongside auth is five,
-not two — `internal/config/param` pulls in three more:
+| Key                              | Default        |                                                                   |
+| -------------------------------- | -------------- | ----------------------------------------------------------------- |
+| `auth.anonymous_access`          | `true`         | the opt-in switch; `false` enables auth                           |
+| `auth.jwt_secret`                | _(none)_       | random per process when unset, so tokens do not survive a restart |
+| `auth.jwt_duration`              | `24h`          |                                                                   |
+| `auth.rbac_cache_ttl`            | `1m`           |                                                                   |
+| `auth.invitation_required`       | `true`         |                                                                   |
+| `auth.email_required`            | `false`        |                                                                   |
+| `auth.email_verification`        | `true`         |                                                                   |
+| `auth.password_min_entropy`      | `70`           |                                                                   |
+| `auth.password_hashing_cost`     | bcrypt default |                                                                   |
+| `auth.login_requests_per_minute` | `30`           |                                                                   |
+| `auth.login_request_burst`       | `5`            |                                                                   |
+
+Defaults match the corresponding parameters on `next`.
+
+### First administrator
+
+An `auth_initial_invitation` startup worker creates an admin invitation when no enabled
+admin user exists, and logs its code. Without it, an installation that enables
+authentication has no way in. It is idempotent: a second start finds the unclaimed
+invitation rather than issuing another.
+
+### Torznab
+
+Torznab is the one surface `next` never wired auth into. The approach here is adapted
+from the `kawaii-not-kawaii` fork (`172a784d3`), the only implementation in the fork
+landscape that solved it:
+
+- the credential is accepted as the `apikey` query parameter or an `X-Api-Key` header,
+  the query parameter being what \*arr clients actually send;
+- a refusal is a Torznab XML error, code 100 "Incorrect user credentials", not a bare
+  status code, because \*arr clients parse the error code;
+- **no network-based bypass.** That fork deliberately excludes Torznab from its
+  trusted-network bypass and the same call is made here. Being on the LAN is not a
+  credential for machine access.
+
+Two departures from it. The query-string credential is accepted **only** on this
+endpoint, where the protocol requires it — everywhere else the bearer header remains the
+only accepted form, since query strings leak into access logs, referrers and browser
+history. And authorization goes through rbac rather than that fork's global on/off flag,
+so Torznab contributes an object action, `anon` holds it while anonymous access is
+enabled, and individual keys can be scoped to it.
+
+### Web UI
+
+Login and registration, an account section with API key management, and users, roles and
+invitations screens under `dashboard`. Ported from `next`, whose auth components use no
+Angular syntax newer than this lineage's Angular 18 supports.
+
+The session token is attached by an Apollo link in `app.config.ts`. A token that no
+longer resolves to a user is cleared: the identity chain always resolves _something_,
+falling back to anonymous, so an expired token yields a successful response with a null
+user rather than an error.
+
+## Known gaps
+
+- **No field-level GraphQL authorization.** `next` carries an `@auth(object:, action:)`
+  directive on every schema field; it is deliberately not ported. With anonymous access
+  on it would be inert, and the middleware plus Torznab cover the surfaces that matter
+  today. **This is the main thing standing between the current state and a genuinely
+  enforced GraphQL API**, and the route guards below depend on it.
+- **No route guards in the UI.** `next`'s `authGuard` was ported and then removed:
+  guarding routes would hide screens the API still serves without restriction, which
+  looks like protection without being any. It belongs with the directive, not before it.
+- **`auth.email_verification` does nothing.** The parameter exists on `next` and is
+  carried over for fidelity, but its value is never read and no verification code is ever
+  issued — the `users.email_verify_code` column is written nowhere. It is inert on `next`
+  too. Every other user parameter in the table above is consulted. Treat it as a
+  placeholder, not a feature.
+- **Go version divergence.** `next`'s tests use `testing.T.Context`, which needs Go 1.24;
+  this module targets 1.23.6 while `next` is on 1.25.1. `context.Background()` is
+  substituted rather than bumping the toolchain, which is a repo-wide decision.
+
+## How the port was done
+
+Kept because the method is reusable for the rest of `next`, and because the numbers
+corrected an assumption this document previously recorded.
+
+### Dependency surface
+
+Measured by extracting every import across all 59 files of `internal/auth`, then walking
+the closure — descending only into packages the `main` lineage does not already provide,
+since the port uses `trunk`'s copy of the rest.
+
+`internal/auth` imports just six bitmagnet packages directly: `internal/model`,
+`internal/slice`, `internal/database/dao`, `internal/database`, `internal/config/param`
+and `internal/atomic`. Closing over those, five packages had to be ported alongside it:
 
 | Support package          |     Lines |
 | ------------------------ | --------: |
@@ -73,191 +164,106 @@ not two — `internal/config/param` pulls in three more:
 | `internal/atomic`        |       201 |
 | **Total**                | **3,044** |
 
-So the port is roughly **7,100 lines**: 4,069 of auth plus 3,044 of support.
+So about **7,100 lines**: 4,069 of auth plus 3,044 of support. All five compile against
+`trunk` unmodified.
 
-Critically, the closure **terminates there**. It reaches nothing in `internal/plugin`,
-`internal/gql`, `internal/wasm`, `internal/workers`, `internal/search` or `proto/` — the
-plugin and GraphQL entanglement previously recorded here is not in the import graph.
+Critically the closure **terminates there** — it reaches nothing in `internal/plugin`,
+`internal/gql`, `internal/wasm`, `internal/workers`, `internal/search` or `proto/`. An
+earlier version of this document claimed auth could not be extracted without taking
+`next` wholesale; that is not so at import level.
 
 (Walking `next`'s own copies of `internal/database` and `internal/model` instead of
-`trunk`'s does drag in `wasm`, `proto` and the plugin registry. That is an artefact of
-measuring the wrong thing: those packages already exist on `main`, and the port uses the
-`main` versions.)
+`trunk`'s does drag in `wasm`, `proto` and the plugin registry — an artefact of measuring
+the wrong thing, since those packages already exist on `main`.)
 
-Third-party dependencies are nearly as clean. `gorm`, `bcrypt`, `testify` and
-`x/time/rate` are already in `main`, and so is **`gin` v1.10.0**, which is all
-`http_auth/middleware.go` needs. The only genuinely new modules are **`casbin/v2`** and
-**`golang-jwt/v5`**.
+New third-party modules: **casbin/v2**, **golang-jwt/v5**, **go-password-validator** on
+the Go side, **picomatch** in the web UI. Everything else the support packages need was
+already present, including `gin`.
 
-The six model types it uses — `User`, `APIKey`, `Role`, `Invitation`, `RolePermission`,
-`APIKeyPermission` — are **gorm-gen output**, not hand-written: `internal/database/gen/gen.go`
-sets `ModelPkgPath` to `internal/model`. Apply the migration and run `task gen-gorm` and
-they appear, along with their dao counterparts. Nothing to port by hand.
+### Adaptations
 
-### Schema
+Where `next`'s design depends on infrastructure this lineage does not have:
 
-`migrations/00021_auth.sql`, 87 lines, six tables: `roles`, `role_permissions`, `users`,
-`invitations`, `api_keys`, `api_key_permissions`. Seeds four core roles (admin, editor,
-user, anon). Password and key material are `bytea` hashes; expiry is nullable on both keys
-and invitations; foreign keys cascade.
+- **fx instead of the plugin builder.** `next` assembles auth through
+  `internal/plugin/core/auth/plugin.go`, which needs its plugin registry, worker runner
+  and ref system. `authfx` is written directly against fx, mirroring the same service
+  set, value groups and the lazy indirection that breaks the rbac dependency cycle.
+- **`database.DaoTransactionProvider`.** On `next` this belongs to a provider abstraction
+  built on its worker-runner lifecycle. `internal/database/provider.go` adapts the
+  lineage's own `lazy.Lazy[*dao.Query]` to the same two-method surface, so the seam is in
+  the same place and a future switch to `next`'s provider would not touch
+  `internal/auth`.
+- **Config as a struct.** `next` declares eleven parameters through its plugin config
+  builder; `authconfig.Config` expresses them for `configfx` and converts them to the
+  atomic values the services take.
+- **Apollo Client v3, not v4.** `query` types `data` as non-null while `mutate` does not,
+  so `next`'s assertions are noise on the former and load-bearing on the latter. Its
+  `CombinedGraphQLErrors` handling and `dataState`-based `filterComplete` have no v3
+  equivalent and were rewritten.
 
-It **collides with `trunk`'s `00021_queue_jobs_fetch_index.sql`** — renumber to `00022`.
-Note that `next` also carries a `0022_tags.sql` with a four-digit typo; do not inherit it.
+### Defects found and fixed on the way
 
-### Assessment
+Both were found by porting, not by review, and both had a test written that was observed
+failing first:
 
-- ➕ Comprehensive, tested, has mocks, API keys are a real requirement for \*arr integrations
-- ➕ Aligns with upstream if `next` ever lands
-- ➕ Import-decoupled from `next`'s plugin and GraphQL rewrites
-- ➕ Model types and dao come from the generator, given the migration
-- ➕ The five support packages **compile unmodified against `trunk`** — verified on the port
-  branch, so the signature-drift risk is settled for that layer at least
-- ➖ Adds Casbin and golang-jwt as dependencies
-- ➖ Pulls in five `next`-only support packages (3,044 lines), and `internal/config/param`
-  has a **failing test on `next`** (`TestUint32`) that must be fixed rather than carried in
-  red — see [the port branch](#port-status) for the cause
-- ➖ Import-level decoupling is not compile-level proof for the auth packages themselves:
-  `next` also changed the internals of `internal/model` and `internal/database`, so
-  signature drift is still possible there
-- ➖ Brings no GraphQL wiring — `next`'s gql is a rewrite, so the resolver surface must be
-  built fresh against `trunk`'s gqlgen setup
-- ➖ **`next` relaxed the lint config for this code**: `var-naming` with
-  `skipPackageNameChecks`, `wsl` → `wsl_v5`, and the `if-return` and `nested-structs` revive
-  rules dropped. Porting means either adopting those relaxations or fixing the code to
-  `trunk`'s stricter config
-- ➖ Still a draft: `next` HEAD is 2026-01-31 and `internal/auth/` was last touched
-  2026-01-24 (`93dd4c623`)
+- **`rbac.PutRole` could not revoke.** It returned early when handed an empty object
+  action set, **before** the delete, so revoking every permission from a role silently did
+  nothing and returned a zero-valued `RoleInfo` with a `nil` error — indistinguishable
+  from success. It is the only way to change a role's permissions; there is no
+  `DeleteRolePermissions`, which is also why `next`'s rbac test carries a commented-out
+  revocation case: it exercises an API that was never written.
+- **`json_schema.NewValue` returned a document, not a value.** `yaml.Unmarshal` into a
+  `yaml.Node` always yields a `DocumentNode` wrapper annotated with its parse position,
+  while the `param` encoder emits the value node directly — so two constructions of the
+  same value compared unequal. This is the cause of `TestUint32` failing on `next`.
 
-### Port status
+Also removed rather than shipped: an expandable detail row in `next`'s users table whose
+entire content is the literal string `Hello`.
 
-Tracked on `codex/auth-port`, cut from `trunk`.
+### Lint policy
 
-**Done —** the five support packages, compiling and green on `trunk` with no source changes
-beyond lint fixes. `TestUint32` is fixed at its cause: `json_schema.NewValue` returned the
-`DocumentNode` that `yaml.Unmarshal` always wraps around a value, annotated with its parse
-position, while the `param` encoder emits the value node directly, so two constructions of
-the same value compared unequal. `NewValue` and `UnmarshalYAML` now unwrap and clear
-position; new tests in `pkg/json_schema` cover it.
+`trunk` adopted `next`'s `var-naming` `skipPackageNameChecks` relaxation, needed for
+underscored package names such as `json_schema`. `next` also switches `wsl` to `wsl_v5`
+and drops the `if-return` and `nested-structs` revive rules; **`wsl_v5` does not exist in
+golangci-lint v2.1.6**, which both repositories pin, and `golangci-lint config verify`
+rejects it — so that part cannot be adopted and the affected code was fixed by hand
+instead.
 
-**Next —** the renumbered migration and `task gen-gorm`, then `internal/auth` itself.
+---
 
-**Open —** `pkg/json_schema` trips `revive`'s `var-naming` under `trunk`'s config. Either
-rename the package to `jsonschema` (diverges from `next`, noisier future re-syncs) or adopt
-`next`'s `skipPackageNameChecks` relaxation. This is a repo-wide lint policy decision, not a
-port detail.
+## Alternatives considered
 
-## Option 2 — `gabriel20xx` (`internal/auth`, 5 files)
+### `upstream/next` — chosen
 
-Built on the `main` lineage. See [forks/gabriel20xx.md](forks/gabriel20xx.md).
+The maintainer's design, on the dormant [`next` branch](upstream-status.md#the-next-branch).
+Most complete, most likely to match upstream's eventual direction, and the only one with
+a real permission model. Still a draft: `next` HEAD is 2026-01-31 and `internal/auth/`
+was last touched 2026-01-24 (`93dd4c623`).
 
-Single-user session auth: `auth_users` (bcrypt, singleton unique index) and
-`auth_sessions` (sha256 token hash, expiry, cascade delete). GraphQL surface is
-`login` / `logout` / `createInitialUser` / `updateCredentials` / `status`, with an
-`@authenticated` directive on field definitions.
+### `gabriel20xx` (`internal/auth`, 5 files)
 
-- ➕ Small enough to read end to end before trusting it
-- ➕ Applies cleanly to `main` — standard fx module, one line in `appfx/module.go`
-- ➕ Sensible schema decisions, documented in the migration itself; has a `service_test.go`
-- ➕ `setupRequired` first-run flow suits a self-hosted app
-- ➖ **No API key support** — so no authenticated Torznab for \*arr clients. This is the
-  significant gap; sessions alone don't cover the integration surface.
-- ➖ Single user by design (deliberately, and reversible — the singleton index can be
-  dropped without a schema change)
-- ➖ Migration numbered `00033`; renumber to `00021`
-- ➖ Arrives from a fork with poor commit hygiene — review the diff, not the log
+Single-user session auth on the `main` lineage: `auth_users` (bcrypt, singleton unique
+index) and `auth_sessions` (sha256 token hash, expiry, cascade delete), with an
+`@authenticated` directive. Small enough to read end to end, and its first-run flow suits
+a self-hosted app — but **no API key support**, so no authenticated Torznab, and no
+permission model. Not used.
 
-## Option 3 — `kawaii-not-kawaii` (`internal/gql/auth`)
+### `kawaii-not-kawaii` (`internal/gql/auth`) — contributed the Torznab design
 
-An independent implementation on the `main` lineage, added after the original fork
-survey. It combines:
+An independent implementation on the `main` lineage: first-run setup through the fork's
+config writer, signed browser sessions, a machine API key accepted by GraphQL and
+Torznab, and a trusted-network bypass. Coupled to that fork's live config reader/writer
+and stores credentials in application config rather than database tables, so it was not a
+design basis — but it is the only fork that wired auth into Torznab, and that part was
+adapted here with attribution.
 
-- first-run username/password setup persisted through the fork's config writer;
-- signed browser sessions derived from the password hash and a private persisted salt;
-- a machine API key accepted by GraphQL and by Torznab as `apikey` or `X-Api-Key`;
-- trusted-network bypass with an explicit trusted-proxy list;
-- HTTP, middleware, session, and Torznab authorization tests.
+### Build a focused implementation
 
-- ➕ Covers both browser and \*arr clients, including the Torznab decision left open by
-  gabriel20xx
-- ➕ Has substantially more boundary and failure-path coverage than the smaller module
-- ➕ Remains on the upstream `main` architecture rather than depending on `next`
-- ➖ Is coupled to the fork's live config reader/writer and privileged `auth` config update
-  path
-- ➖ Stores the password hash and API key in the application config rather than dedicated
-  database tables
-- ➖ Its browser flow is tied to the fork's Angular UI, which is not useful when replacing
-  the frontend
+Rejected: security-sensitive code written from scratch, diverging from upstream if `next`
+lands.
 
-This is a design and test source, not a clean cherry-pick. Extracting only the backend
-requires deciding which configuration machinery and persistence model to keep.
+### Front it with a proxy
 
-## Option 4 — build a focused implementation
-
-If you're replacing the web UI, the frontend half of the fork implementations is
-discarded regardless, which lowers the cost of this option considerably.
-
-- ➕ Only the pieces actually needed
-- ➕ Can design the API-key story for Torznab from the start
-- ➖ Security-sensitive code written from scratch
-- ➖ Diverges from upstream if `next` lands
-
-## Recommendation
-
-If you front bitmagnet with your own proxy or gateway, doing auth there and leaving
-bitmagnet bound to localhost is a separate deployment option, and the least work. It
-leaves Torznab unauthenticated unless the proxy covers that too.
-
-Otherwise: **base the implementation on the `upstream/next` auth architecture.** Its
-identity chain, user and invitation lifecycle, API-key encoding and repository, JWT
-handling, and Casbin authorization model are the source of truth. Port the smallest
-coherent backend slice to the `main` lineage rather than designing a competing session
-or permission model.
-
-This is an adaptation, not a direct cherry-pick, but the dependency map above makes it a
-much smaller one than previously assumed: the auth packages themselves are import-clean,
-and the adaptation cost sits in the two `next`-only support packages, the GraphQL surface,
-and Torznab. Preserve the auth package boundaries and tests. Gabriel20xx and
-kawaii-not-kawaii remain useful for main-lineage HTTP integration tests, first-run
-behavior, and Torznab compatibility, but not as the design basis. Do not import either
-frontend.
-
-The initial port should include, in dependency order:
-
-1. The five `next`-only support packages — `internal/config/param`, `pkg/json_schema`,
-   `internal/logging/level`, `internal/ecma262`, `internal/atomic` — fixing `TestUint32`
-   rather than carrying it red.
-2. The migration, renumbered to `00022`, then `task gen-gorm` for the model and dao types.
-3. The `identity` authenticator chain and anonymous, API-key, and user identities.
-4. Revocable, encoded machine API keys using the `next` repository/service split.
-5. User bootstrap/login and JWT handling, preserving `next`'s password and token tests.
-6. The RBAC permission boundary, including Casbin if it remains required by the extracted
-   object/action model.
-7. GraphQL middleware plus Torznab API-key enforcement. `next` does not currently wire its
-   auth stack into Torznab, so that integration still needs a focused adapter and tests.
-
-### Auth must be opt-in
-
-Upstream `main` has no auth, the bundled Angular UI has no login flow, and existing
-deployments are open by default. Enabling authentication unconditionally would lock out
-every current client and break the committed web UI.
-
-So the port defaults to **disabled**, and the anonymous identity retains full access until
-an operator turns auth on. That keeps `webui/dist` working untouched for as long as the
-feature is off, and confines UI work to the enabled path — a login view and a 401 handler —
-rather than making it a prerequisite for merging the backend. The `anon` role seeded by the
-migration is the natural place to express this.
-
-If `next` comes out of draft, compare the port with the then-current upstream stack and
-replace adapters with upstream components where practical.
-
-## Open question
-
-The extraction-boundary question is largely answered by the dependency map above. What
-remains is compatibility: whether loopback is trusted implicitly, how Torznab maps its
-conventional `apikey` query parameter to a `next` API-key identity, and whether the
-existing Angular UI gets a login view or is left to the eventual replacement frontend.
-
-One thing the map does not settle: import-level decoupling is not the same as compiling.
-`next` also changed the internals of `internal/model` and `internal/database`, so the port
-may still hit signature drift. That is measurable rather than arguable — attempt the port
-and record what actually fails.
+Still a valid deployment option, and the least work: do auth at the gateway and bind
+bitmagnet to localhost. It leaves Torznab unauthenticated unless the proxy covers that
+too, and it does not give per-key scoping.
