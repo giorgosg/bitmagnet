@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/jwt"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/rbac"
@@ -21,18 +22,25 @@ func (a authenticatorJWT) Authenticate(ctx context.Context, token string) (Ident
 		return nil, errors.Is(err, jwt.ErrTokenInvalidClaims), err
 	}
 
-	user, err := a.userService.Get(ctx, claims.UserID)
+	usr, err := a.userService.Get(ctx, claims.UserID)
 	if err != nil {
 		return nil, true, err
 	}
 
-	role, err := a.rbac.GetRole(ctx, rbac.Role(user.RoleName))
+	// A token outlives the account state it was issued against, so disabling an
+	// account has to be checked here as well as at login — otherwise it revokes
+	// nothing until the token expires.
+	if !usr.Enabled {
+		return nil, true, fmt.Errorf("%w: %w", user.Err, user.ErrDisabled)
+	}
+
+	role, err := a.rbac.GetRole(ctx, rbac.Role(usr.RoleName))
 	if err != nil {
 		return nil, true, err
 	}
 
 	return User{
-		User:     user,
+		User:     usr,
 		role:     role,
 		enforcer: a.rbac,
 	}, true, nil

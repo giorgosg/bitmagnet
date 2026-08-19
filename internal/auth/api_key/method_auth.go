@@ -30,6 +30,12 @@ func (s service) Auth(ctx context.Context, key string) (model.APIKey, error) {
 		return model.APIKey{}, fmt.Errorf("%w: %w: %w", Err, ErrAuth, ErrExpired)
 	}
 
+	// API keys have no expiry by default, so without this a disabled account's
+	// keys would outlive it indefinitely.
+	if !apiKey.User.Enabled {
+		return model.APIKey{}, fmt.Errorf("%w: %w: %w", Err, ErrAuth, ErrDisabled)
+	}
+
 	apiKey.Hash = nil
 	apiKey.User.Password = nil
 

@@ -13,5 +13,6 @@ var (
 	ErrDelete     = errors.New("delete failed")
 	ErrNotFound   = errors.New("not found")
 	ErrExpired    = errors.New("expired")
+	ErrDisabled   = errors.New("account is disabled")
 	ErrRepository = errors.New("repository")
 )
