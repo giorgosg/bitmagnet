@@ -118,6 +118,14 @@ landscape that solved it:
   trusted-network bypass and the same call is made here. Being on the LAN is not a
   credential for machine access.
 
+**The key travels in the URL, so it reaches logs.** This application redacts
+`apikey` (and `token`, `password`, `secret`, `api_key`) from its own request
+logging. Nothing else in the request path does: a reverse proxy, ingress
+controller, CDN or WAF will record the full URL unless configured otherwise, and
+API keys do not expire by default, so read access to those logs is equivalent to
+application access. **If you front bitmagnet with a proxy, redact the `apikey`
+parameter there too.**
+
 Two departures from it. The query-string credential is accepted **only** on this
 endpoint, where the protocol requires it — everywhere else the bearer header remains the
 only accepted form, since query strings leak into access logs, referrers and browser
@@ -135,6 +143,17 @@ The session token is attached by an Apollo link in `app.config.ts`. A token that
 longer resolves to a user is cleared: the identity chain always resolves _something_,
 falling back to anonymous, so an expired token yields a successful response with a null
 user rather than an error.
+
+### Endpoints that are not GraphQL
+
+`/import`, `/metrics` and `/debug/pprof/*` are guarded by object actions in the
+`http` namespace, since the identity middleware only resolves an identity and
+something has to act on it. Before that they stayed open when anonymous access
+was disabled — including the data-mutating importer and `/debug/pprof/cmdline`,
+which discloses the process command line.
+
+`/status` is deliberately left public, matching the `health::query` grant in the
+GraphQL baseline: orchestrators poll it, and it reports liveness only.
 
 ## Known gaps
 

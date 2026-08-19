@@ -56,7 +56,8 @@ func WithConfig(logger ZapLogger, conf *Config) gin.HandlerFunc {
 		start := time.Now()
 		// some evil middlewares modify this values
 		path := c.Request.URL.Path
-		query := c.Request.URL.RawQuery
+		// Credentials can travel in the query string; do not log them.
+		query := redactQuery(c.Request.URL.RawQuery)
 		c.Next()
 
 		if _, ok := skipPaths[path]; !ok {

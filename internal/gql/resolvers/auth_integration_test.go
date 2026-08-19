@@ -428,24 +428,6 @@ func TestGraphQLAllowsLoginWhenAnonymousAccessIsOff(t *testing.T) {
 	requireNoGqlErrors(t, admin)
 }
 
-// The default must stay open, or every existing deployment breaks on upgrade.
-func TestGraphQLAllowsAnonymousByDefault(t *testing.T) {
-	t.Parallel()
-
-	server, _ := newAuthTestServer(t)
-
-	// auth is administrative and torrentContent is the catalogue: neither is in
-	// the baseline, so reaching both proves anonymous access grants the lot.
-	// (The search resolver itself needs services this harness does not wire, so
-	// authorization is asserted by it not being refused, not by the payload.)
-	requireNoGqlErrors(t, query(t, server, "", `{ auth { listUsers { totalCount } } }`))
-
-	search := query(t, server, "", `{ torrentContent { search(input: {limit: 1}) { totalCount } } }`)
-	for _, e := range search.Errors {
-		assert.NotEqual(t, "unauthorized", e.Message, "anonymous access must permit the catalogue")
-	}
-}
-
 // createAPIKeyAs mints a key with the given permissions using the supplied
 // credential, and returns the raw key plus any GraphQL errors.
 func createAPIKeyAs(
@@ -554,4 +536,62 @@ func TestUserSessionCanMintKey(t *testing.T) {
 
 	granted := query(t, server, key, `{ auth { listUsers { totalCount } } }`)
 	requireNoGqlErrors(t, granted)
+}
+
+// The open default must not be a trapdoor. An anonymous caller must never be
+// able to administer auth, because role grants persist in the database while the
+// anonymous grant is only in memory: a wildcard written onto the anon role while
+// the instance was open would survive switching anonymous access off, leaving it
+// permanently bypassed with nothing to show for it.
+func TestAnonymousCannotAdministerAuthEvenWhenOpen(t *testing.T) {
+	t.Parallel()
+
+	// Default config: anonymous access enabled.
+	server, _ := newAuthTestServer(t)
+
+	for _, testCase := range []struct {
+		name  string
+		query string
+	}{
+		{
+			name: "putRole on anon",
+			query: `mutation { auth { putRole(role: "anon", objectActions: [
+				{namespace: "**", object: "**", action: "**"}
+			]) { name } } }`,
+		},
+		{name: "listUsers", query: `{ auth { listUsers { totalCount } } }`},
+		{name: "listInvitations", query: `{ auth { listInvitations { invitations { code } } } }`},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			res := query(t, server, "", testCase.query)
+			require.NotEmpty(t, res.Errors, "anonymous callers must not administer auth")
+			assert.Equal(t, "unauthorized", res.Errors[0].Message)
+		})
+	}
+}
+
+// An installation that never configured auth is unaffected by the exclusion
+// above: the baseline still answers anonymously. Which object actions the anon
+// role holds is asserted directly against the permission model, in
+// authconfig — driving the catalogue resolvers needs services this harness does
+// not wire.
+func TestAnonymousStillReachesTheBaselineWhenOpen(t *testing.T) {
+	t.Parallel()
+
+	server, _ := newAuthTestServer(t)
+
+	requireNoGqlErrors(t, query(t, server, "", `{ version }`))
+	requireNoGqlErrors(t, query(t, server, "", `{ self { identity { user { username } } } }`))
+}
+
+// And an administrator still administers.
+func TestAdminAdministersAuthWhenOpen(t *testing.T) {
+	t.Parallel()
+
+	server, code := newAuthTestServer(t)
+	token := loginAsAdmin(t, server, code)
+
+	requireNoGqlErrors(t, query(t, server, token, `{ auth { listUsers { totalCount } } }`))
 }

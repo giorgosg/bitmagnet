@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/http_auth"
 	"github.com/bitmagnet-io/bitmagnet/internal/httpserver"
 	"github.com/bitmagnet-io/bitmagnet/internal/importer"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
@@ -18,6 +20,7 @@ import (
 type Params struct {
 	fx.In
 	Importer lazy.Lazy[importer.Importer]
+	Guard    http_auth.Guard
 	Logger   *zap.SugaredLogger
 }
 
@@ -30,6 +33,7 @@ func New(p Params) Result {
 	return Result{
 		Option: &builder{
 			importer: p.Importer,
+			guard:    p.Guard,
 			logger:   p.Logger.Named("importer"),
 		},
 	}
@@ -39,6 +43,7 @@ const ImportIDHeader = "X-Import-Id"
 
 type builder struct {
 	importer lazy.Lazy[importer.Importer]
+	guard    http_auth.Guard
 	logger   *zap.SugaredLogger
 }
 
@@ -53,6 +58,14 @@ func (b builder) Apply(e *gin.Engine) error {
 	}
 
 	e.POST("/import", func(ctx *gin.Context) {
+		// This endpoint writes torrents, so it must not stay open once
+		// anonymous access is disabled.
+		if !b.guard.Allow(ctx, http_auth.ObjectActionImport) {
+			ctx.AbortWithStatus(http.StatusUnauthorized)
+
+			return
+		}
+
 		b.handle(ctx, i)
 	})
 

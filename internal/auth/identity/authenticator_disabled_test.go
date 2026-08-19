@@ -167,3 +167,69 @@ func TestReEnabledUserIsAcceptedAgain(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, matched)
 }
+
+// An expired session must degrade to anonymous, not lock the caller out.
+//
+// jwt/v5 reports an expired token as ErrTokenInvalidClaims. Treating that as a
+// match aborted the authenticator chain, so no identity reached the request and
+// every field was refused — including self.login, the one call needed to
+// recover. The only escape was clearing browser storage by hand.
+func TestExpiredTokenFallsBackToAnonymous(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.New(t)
+
+	var provider database.DaoTransactionProvider = daoProvider{query: db.Query}
+
+	values := authconfig.NewDefaultConfig().UserValues()
+	// A lifetime already in the past, so the token is born expired.
+	jwtService := jwt.NewService(jwt.Secret("test-secret"), jwt.Duration(-time.Hour))
+	userService := user.NewService(
+		provider, jwtService,
+		values.InvitationRequired, values.EmailRequired, values.EmailVerification,
+		values.PasswordMinEntropy, values.PasswordHashingCost,
+		values.LoginRequestsPerMinute, values.LoginRequestBurst,
+	)
+	apiKeyService := api_key.NewService(api_key.NewRepository(provider))
+
+	objectActions := func() []rbac.ObjectAction {
+		return []rbac.ObjectAction{rbac.NewObjectAction("test", "test", "query")}
+	}
+	rbacService := rbac.NewService(
+		rbac.NewRepository(provider), objectActions,
+		rbac.PermissionProviders(rbac.CorePermissions, rbac.VerbatimPermissions(objectActions)),
+		rbac.CacheTTL(time.Minute),
+	)
+	authenticator := identity.NewAuthenticator(jwtService, userService, apiKeyService, rbacService)
+
+	invitation, err := userService.CreateInitialInvitation(context.Background())
+	require.NoError(t, err)
+
+	_, err = userService.Register(context.Background(), user.RegisterRequest{
+		InvitationCode: invitation.Code,
+		Username:       "admin",
+		Password:       testPassword,
+	})
+	require.NoError(t, err)
+
+	login, err := userService.Login(context.Background(), "admin", testPassword)
+	require.NoError(t, err)
+
+	resolved, matched, err := authenticator.Authenticate(context.Background(), login.Token)
+	require.NoError(t, err, "an expired token must not abort the chain")
+	require.True(t, matched, "the anonymous authenticator must still match")
+	require.NotNil(t, resolved)
+	assert.Nil(t, resolved.Self().User, "an expired token resolves to nobody, not to its former user")
+}
+
+// A syntactically invalid credential must behave the same way.
+func TestGarbageTokenFallsBackToAnonymous(t *testing.T) {
+	t.Parallel()
+
+	stack := newTestStack(t)
+
+	resolved, matched, err := stack.authenticator.Authenticate(context.Background(), "not-a-token")
+	require.NoError(t, err)
+	require.True(t, matched)
+	assert.Nil(t, resolved.Self().User)
+}

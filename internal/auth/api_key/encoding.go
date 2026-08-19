@@ -11,9 +11,14 @@ import (
 )
 
 const (
-	secretLength  = 12
-	keyLength     = 22
-	decodedLength = (keyLength*5 + 7) / 8
+	secretLength = 12
+	keyLength    = 22
+	// decodedLength is the exact payload width: the secret plus a uint32 id.
+	// It was previously derived as (keyLength*5+7)/8, which is the base32
+	// formula and yields 14 — narrower than the 16 bytes actually encoded. Since
+	// base62 drops leading zero bytes, any secret starting with 0x00 decoded
+	// short and was rejected, losing roughly one generated key in 256.
+	decodedLength = secretLength + 4
 )
 
 type Secret struct {
@@ -97,13 +102,13 @@ func base62Decode(s string) ([]byte, error) {
 	}
 
 	b := bi.Bytes()
-	if len(b) < decodedLength {
-		// Pad with leading zeros
-		padded := make([]byte, decodedLength)
-		copy(padded[decodedLength-len(b):], b)
-
-		return padded, nil
+	if len(b) > decodedLength {
+		return nil, ErrDecode
 	}
 
-	return b, nil
+	// Restore the leading zero bytes that big.Int dropped.
+	padded := make([]byte, decodedLength)
+	copy(padded[decodedLength-len(b):], b)
+
+	return padded, nil
 }

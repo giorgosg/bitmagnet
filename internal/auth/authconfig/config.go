@@ -78,18 +78,42 @@ type UserConfigValues struct {
 	LoginRequestBurst      *atomic.Value[user.LoginRequestBurst]
 }
 
-// AnonymousPermissions grants the anon role everything when anonymous access is
-// enabled. On next this decision is distributed across plugins, each granting its
-// own object actions to anon; without a plugin registry the same effect is
-// achieved centrally from the registered object actions.
+// authObject is the GraphQL object guarding user, role and invitation
+// administration.
+const authObject = "auth"
+
+// AnonymousPermissions grants the anon role the registered object actions while
+// anonymous access is enabled, preserving the open behaviour of an installation
+// that has never configured authentication. On next this decision is distributed
+// across plugins, each granting its own object actions to anon; without a plugin
+// registry the same effect is achieved centrally.
+//
+// Auth administration is deliberately excluded. Granting it made the open
+// default a trapdoor rather than a starting point: an anonymous caller could
+// call putRole to give the anon role a wildcard permission, and because role
+// grants live in the database while this grant is only in memory, that survived
+// setting anonymous_access to false — the instance stayed wide open with no
+// outward sign. The same access also listed the bootstrap invitation, so an
+// anonymous caller could claim the first administrator account.
+//
+// Nothing is lost by excluding it: the auth surface is new, so no previously
+// open installation had it to begin with. Bootstrapping does not need it either
+// — the first administrator registers with the invitation code from the startup
+// log, through self.register, which the baseline grants.
 func AnonymousPermissions(cfg Config, provider rbac.ObjectActionProvider) rbac.PermissionProvider {
 	return func() []rbac.Permission {
 		if !cfg.AnonymousAccess {
 			return nil
 		}
 
-		permissions := make([]rbac.Permission, 0, len(provider()))
-		for _, objectAction := range provider() {
+		objectActions := provider()
+		permissions := make([]rbac.Permission, 0, len(objectActions))
+
+		for _, objectAction := range objectActions {
+			if objectAction.Object == authObject {
+				continue
+			}
+
 			permissions = append(permissions, rbac.NewPermission(
 				rbac.SubjectRole{Role: rbac.RoleAnon},
 				objectAction,

@@ -219,3 +219,63 @@ func TestInvitationIsSingleUseUnderConcurrency(t *testing.T) {
 		assert.True(t, invitation.ClaimedBy.Valid, "a claimed invitation records its claimant")
 	}
 }
+
+// Login must not distinguish a missing account from a wrong password, in either
+// the message or the time taken. Both let a caller enumerate usernames.
+func TestLoginDoesNotEnumerateAccounts(t *testing.T) {
+	t.Parallel()
+
+	service, query := newUserService(t)
+	putInvitation(t, query, "enumtest00001", sql.NullTime{})
+
+	_, err := service.Register(context.Background(), user.RegisterRequest{
+		InvitationCode: "enumtest00001",
+		Username:       "known",
+		Password:       testPassword,
+	})
+	require.NoError(t, err)
+
+	_, errUnknown := service.Login(context.Background(), "nosuchuser", testPassword)
+	require.Error(t, errUnknown)
+
+	_, errWrongPassword := service.Login(context.Background(), "known", "wrong-password-entirely")
+	require.Error(t, errWrongPassword)
+
+	assert.Equal(t, errUnknown.Error(), errWrongPassword.Error(),
+		"an unknown account and a wrong password must be indistinguishable")
+	require.ErrorIs(t, errUnknown, user.ErrCredentialsInvalid)
+	require.ErrorIs(t, errWrongPassword, user.ErrCredentialsInvalid)
+}
+
+// The timing must not give it away either: before, a missing account returned
+// without ever reaching bcrypt, which is a difference of two orders of magnitude.
+func TestLoginTimingDoesNotRevealAccountExistence(t *testing.T) {
+	t.Parallel()
+
+	service, query := newUserService(t)
+	putInvitation(t, query, "timingtest001", sql.NullTime{})
+
+	_, err := service.Register(context.Background(), user.RegisterRequest{
+		InvitationCode: "timingtest001",
+		Username:       "known",
+		Password:       testPassword,
+	})
+	require.NoError(t, err)
+
+	measure := func(username string) time.Duration {
+		start := time.Now()
+		_, _ = service.Login(context.Background(), username, "wrong-password-entirely")
+
+		return time.Since(start)
+	}
+
+	// Warm the decoy hash so its one-off generation is not counted.
+	measure("nosuchuser")
+
+	known := measure("known")
+	unknown := measure("nosuchuser")
+
+	ratio := float64(unknown) / float64(known)
+	assert.Greater(t, ratio, 0.25, "an unknown account must not be dramatically faster (%v vs %v)", unknown, known)
+	assert.Less(t, ratio, 4.0, "an unknown account must not be dramatically slower (%v vs %v)", unknown, known)
+}

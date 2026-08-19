@@ -41,6 +41,13 @@ testem.log
 .DS_Store
 Thumbs.db
 
+# Agent tooling installed into this checkout — skills and their lockfile, and the
+# Claude Code configuration. Local tooling, not project source, and not formatted
+# by the repo's Prettier, so committing it would fail lint.
+/.agents
+/.claude
+/skills-lock.json
+
 # Local notes. This is a fork of a public repo, so personal deployment detail and
 # private plans stay untracked. Any file named *.local.md is ignored at any depth —
 # name a note `<topic>.local.md` and it stays out of git. See docs/README.md.

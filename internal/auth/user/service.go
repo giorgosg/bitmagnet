@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"sync"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/atomic"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/jwt"
@@ -30,6 +31,9 @@ type Service interface {
 }
 
 type service struct {
+	decoyOnce sync.Once
+	decoyHash []byte
+
 	database.DaoTransactionProvider
 	jwtService          jwt.Service
 	invitationRequired  *atomic.Value[InvitationRequired]

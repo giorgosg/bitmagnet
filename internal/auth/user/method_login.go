@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -33,39 +34,27 @@ func (s *service) Login(ctx context.Context, username, password string) (LoginRe
 		User.
 		Where(dao.User.Username.Eq(username)).
 		First()
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return LoginResult{}, fmt.Errorf(
-				"%w: %w: %w: %w",
-				Err,
-				ErrLogin,
-				ErrCredentialsInvalid,
-				ErrNotFound,
-			)
-		}
-
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return LoginResult{}, fmt.Errorf("%w: %w: %w", Err, ErrLogin, err)
 	}
 
-	if len(user.Password) == 0 {
-		return LoginResult{}, fmt.Errorf(
-			"%w: %w: %w: %w",
-			Err,
-			ErrLogin,
-			ErrCredentialsInvalid,
-			ErrHasNoPassword,
-		)
+	// A missing account, an account with no password set, and a wrong password
+	// are one outcome to the caller. Reporting them apart lets anyone enumerate
+	// usernames, and returning early for the first two skipped bcrypt entirely,
+	// so the response time told them the same thing. Comparing against a decoy
+	// hash keeps the cost of a miss close to the cost of a hit.
+	var storedHash []byte
+	if user != nil {
+		storedHash = user.Password
 	}
 
-	err = bcrypt.CompareHashAndPassword(user.Password, []byte(password))
-	if err != nil {
-		return LoginResult{}, fmt.Errorf(
-			"%w: %w: %w: %w",
-			Err,
-			ErrLogin,
-			ErrCredentialsInvalid,
-			ErrIncorrectPassword,
-		)
+	found := user != nil && len(storedHash) > 0
+	if !found {
+		storedHash = s.decoyPasswordHash()
+	}
+
+	if bcrypt.CompareHashAndPassword(storedHash, []byte(password)) != nil || !found {
+		return LoginResult{}, fmt.Errorf("%w: %w: %w", Err, ErrLogin, ErrCredentialsInvalid)
 	}
 
 	if !user.Enabled {
@@ -123,4 +112,19 @@ func newLoginLimiter(
 	})
 
 	return limiter
+}
+
+// decoyPasswordHash is a hash of a value no caller can supply, compared against
+// when there is no stored hash so that the work done for an unknown account
+// matches the work done for a known one. Generated once, at the configured cost,
+// so it tracks whatever bcrypt work factor the deployment uses.
+func (s *service) decoyPasswordHash() []byte {
+	s.decoyOnce.Do(func() {
+		secret := make([]byte, 32)
+		_, _ = rand.Read(secret)
+
+		s.decoyHash, _ = bcrypt.GenerateFromPassword(secret, int(s.passwordHashingCost.Get()))
+	})
+
+	return s.decoyHash
 }

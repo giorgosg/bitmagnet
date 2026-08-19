@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/http_auth"
 	"github.com/bitmagnet-io/bitmagnet/internal/httpserver"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
 	"github.com/prometheus/client_golang/prometheus"
@@ -10,6 +11,7 @@ import (
 type Params struct {
 	fx.In
 	PrometheusRegistry lazy.Lazy[*prometheus.Registry]
+	Guard              http_auth.Guard
 }
 
 type Result struct {
@@ -20,9 +22,10 @@ type Result struct {
 
 func New(p Params) Result {
 	return Result{
-		PprofOption: pprofBuilder{},
+		PprofOption: pprofBuilder{guard: p.Guard},
 		PrometheusOption: prometheusBuilder{
 			registry: p.PrometheusRegistry,
+			guard:    p.Guard,
 		},
 	}
 }

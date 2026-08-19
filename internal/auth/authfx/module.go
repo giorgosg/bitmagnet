@@ -38,6 +38,11 @@ func New() fx.Option {
 			identity.NewAuthenticator,
 			http_auth.NewMiddleware,
 			http_auth.New,
+			http_auth.NewGuard,
+			fx.Annotate(
+				http_auth.ObjectActionProvider,
+				fx.ResultTags(`group:"auth_object_actions"`),
+			),
 
 			newBootstrapWorker,
 
