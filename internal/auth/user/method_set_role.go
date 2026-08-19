@@ -36,8 +36,13 @@ func (s *service) SetRole(ctx context.Context, userID int, roleName string) (mod
 			return nil
 		}
 
+		// Without the predicate this is a global update: gorm refuses it, which
+		// is the only reason it failed loudly rather than reassigning the role
+		// of every user in the table. SetEnabled, in the same package, scopes
+		// its update correctly.
 		_, err = tx.User.
 			WithContext(ctx).
+			Where(tx.User.ID.Eq(userID)).
 			UpdateColumn(tx.User.RoleName, roleName)
 		if err != nil {
 			return err

@@ -120,18 +120,34 @@ func (s *service) Register(ctx context.Context, request RegisterRequest) (model.
 		}
 
 		if request.InvitationCode != "" {
-			_, err = tx.WithContext(ctx).
+			// Claim atomically. The check above is a plain read, so concurrent
+			// registrations can all observe the invitation as unclaimed; an
+			// unconditional update then lets every one of them through, with
+			// the last writer simply overwriting the rest. Predicating the
+			// update on the code still being unclaimed makes exactly one win.
+			result, err := tx.WithContext(ctx).
 				Invitation.
-				Where(tx.Invitation.Code.Eq(request.InvitationCode)).
+				Where(
+					tx.Invitation.Code.Eq(request.InvitationCode),
+					tx.Invitation.ClaimedBy.IsNull(),
+				).
 				UpdateColumn(tx.Invitation.ClaimedBy, user.ID)
 			if err != nil {
 				return err
+			}
+
+			if result.RowsAffected == 0 {
+				// Lost the race. Roll back, so the user is not created against
+				// an invitation someone else claimed.
+				errUser = ErrInvitationClaimed
+
+				return errInvitationRace
 			}
 		}
 
 		return nil
 	})
-	if errTx != nil {
+	if errTx != nil && !errors.Is(errTx, errInvitationRace) {
 		return model.User{}, fmt.Errorf("%w: %w: %w: %w", Err, ErrRegister, ErrTransaction, errTx)
 	} else if errUser != nil {
 		return model.User{}, fmt.Errorf("%w: %w: %w", Err, ErrRegister, errUser)
@@ -142,3 +158,7 @@ func (s *service) Register(ctx context.Context, request RegisterRequest) (model.
 
 	return user, nil
 }
+
+// errInvitationRace rolls the registration back when another caller claimed the
+// invitation first. It never escapes this file: the caller sees ErrInvitationClaimed.
+var errInvitationRace = errors.New("invitation claimed concurrently")

@@ -103,9 +103,9 @@ func (m SelfMutation) Login(ctx context.Context, username, password string) (gen
 }
 
 func (m SelfMutation) CreateAPIKey(ctx context.Context, input gen.CreateAPIKeyInput) (gen.CreateAPIKeyResult, error) {
-	currentUser, ok := gqlauth.UserFromContext(ctx)
-	if !ok {
-		return gen.CreateAPIKeyResult{}, ErrNotAuthenticated
+	currentUser, err := gqlauth.UserSessionFromContext(ctx)
+	if err != nil {
+		return gen.CreateAPIKeyResult{}, err
 	}
 
 	req := api_key.CreateRequest{
@@ -129,9 +129,9 @@ func (m SelfMutation) CreateAPIKey(ctx context.Context, input gen.CreateAPIKeyIn
 }
 
 func (m SelfMutation) DeleteAPIKey(ctx context.Context, id int) (*string, error) {
-	currentUser, ok := gqlauth.UserFromContext(ctx)
-	if !ok {
-		return nil, ErrNotAuthenticated
+	currentUser, err := gqlauth.UserSessionFromContext(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	return nil, m.APIKeyService.Delete(ctx, api_key.DeleteRequest{

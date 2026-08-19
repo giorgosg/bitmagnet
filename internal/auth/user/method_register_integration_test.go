@@ -3,6 +3,9 @@ package user_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -121,4 +124,98 @@ func TestRegisterAcceptsInvitationWithoutExpiry(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "someone", registered.Username)
+}
+
+// SetRole must change exactly one user. The update was written without a
+// predicate, so gorm refused it as a global update — meaning the method always
+// failed, and would have reassigned every user's role had that guard not
+// existed. Both halves are asserted: the target changes, the bystander does not.
+func TestSetRoleAffectsOnlyTheTargetUser(t *testing.T) {
+	t.Parallel()
+
+	service, query := newUserService(t)
+
+	putInvitation(t, query, "roletarget001", sql.NullTime{})
+	putInvitation(t, query, "rolebystand01", sql.NullTime{})
+
+	target, err := service.Register(context.Background(), user.RegisterRequest{
+		InvitationCode: "roletarget001",
+		Username:       "target",
+		Password:       testPassword,
+	})
+	require.NoError(t, err)
+
+	bystander, err := service.Register(context.Background(), user.RegisterRequest{
+		InvitationCode: "rolebystand01",
+		Username:       "bystander",
+		Password:       testPassword,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "user", bystander.RoleName)
+
+	updated, err := service.SetRole(context.Background(), target.ID, "admin")
+	require.NoError(t, err)
+	assert.Equal(t, "admin", updated.RoleName)
+
+	unchanged, err := service.Get(context.Background(), bystander.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "user", unchanged.RoleName, "SetRole must not touch other users")
+}
+
+// An invitation is single use, including when several registrations race for it.
+//
+// This is not a hypothetical: before the claim was made atomic, every one of
+// the eight racers succeeded under load, because each read the invitation as
+// unclaimed and the update that marked it claimed carried no predicate. For the
+// bootstrap invitation that means several administrators from one code.
+func TestInvitationIsSingleUseUnderConcurrency(t *testing.T) {
+	t.Parallel()
+
+	service, query := newUserService(t)
+	putInvitation(t, query, "oneusecode01", sql.NullTime{})
+
+	const callers = 8
+
+	var (
+		wg        sync.WaitGroup
+		successes atomic.Int32
+	)
+
+	start := make(chan struct{})
+
+	for i := range callers {
+		wg.Add(1)
+
+		go func(i int) {
+			defer wg.Done()
+			<-start
+
+			if _, err := service.Register(context.Background(), user.RegisterRequest{
+				InvitationCode: "oneusecode01",
+				Username:       fmt.Sprintf("racer%02d", i),
+				Password:       testPassword,
+			}); err == nil {
+				successes.Add(1)
+			}
+		}(i)
+	}
+
+	close(start)
+	wg.Wait()
+
+	claimed := successes.Load()
+	assert.Equal(t, int32(1), claimed, "exactly one registration may claim an invitation")
+
+	// The database must agree with what the callers were told.
+	registered, err := query.WithContext(context.Background()).User.Count()
+	require.NoError(t, err)
+	assert.Equal(t, int64(claimed), registered, "a user exists for each successful claim, and no more")
+
+	invitation, err := query.WithContext(context.Background()).
+		Invitation.Where(query.Invitation.Code.Eq("oneusecode01")).First()
+	require.NoError(t, err)
+
+	if claimed == 1 {
+		assert.True(t, invitation.ClaimedBy.Valid, "a claimed invitation records its claimant")
+	}
 }

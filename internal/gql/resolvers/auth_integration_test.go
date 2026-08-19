@@ -96,6 +96,7 @@ func newAuthTestServerWithConfig(
 		objectActions,
 		rbac.PermissionProviders(
 			rbac.CorePermissions,
+			rbac.VerbatimPermissions(objectActions),
 			gqlauth.Permissions,
 			authconfig.AnonymousPermissions(cfg, objectActions),
 		),
@@ -192,6 +193,18 @@ type selfIdentityBody struct {
 
 type identityResponse struct {
 	Self selfIdentityBody `json:"self"`
+}
+
+type createAPIKeyBody struct {
+	APIKey string `json:"apiKey"`
+}
+
+type selfCreateAPIKeyBody struct {
+	CreateAPIKey createAPIKeyBody `json:"createAPIKey"`
+}
+
+type createAPIKeyResponse struct {
+	Self selfCreateAPIKeyBody `json:"self"`
 }
 
 func query(t *testing.T, server *httptest.Server, token, q string) gqlResponse {
@@ -431,4 +444,114 @@ func TestGraphQLAllowsAnonymousByDefault(t *testing.T) {
 	for _, e := range search.Errors {
 		assert.NotEqual(t, "unauthorized", e.Message, "anonymous access must permit the catalogue")
 	}
+}
+
+// createAPIKeyAs mints a key with the given permissions using the supplied
+// credential, and returns the raw key plus any GraphQL errors.
+func createAPIKeyAs(
+	t *testing.T,
+	server *httptest.Server,
+	credential, name, namespace, object, action string,
+) gqlResponse {
+	t.Helper()
+
+	return query(t, server, credential, `mutation { self { createAPIKey(input: {
+		name: "`+name+`", permissions: [{namespace: "`+namespace+`", object: "`+object+`", action: "`+action+`"}]
+	}) { apiKey } } }`)
+}
+
+func apiKeyFrom(t *testing.T, res gqlResponse) string {
+	t.Helper()
+	requireNoGqlErrors(t, res)
+
+	var body createAPIKeyResponse
+
+	require.NoError(t, json.Unmarshal(res.Data, &body))
+	require.NotEmpty(t, body.Self.CreateAPIKey.APIKey)
+
+	return body.Self.CreateAPIKey.APIKey
+}
+
+func loginAsAdmin(t *testing.T, server *httptest.Server, code string) string {
+	t.Helper()
+
+	const password = "correct-horse-battery-staple-99"
+
+	requireNoGqlErrors(t, query(t, server, "", `mutation { self { register(input: {
+		invitationCode: "`+code+`", username: "admin", password: "`+password+`"
+	}) { user { id } } } }`))
+
+	loggedIn := query(t, server, "", `mutation { self { login(
+		username: "admin", password: "`+password+`"
+	) { token } } }`)
+	requireNoGqlErrors(t, loggedIn)
+
+	var login loginResponse
+
+	require.NoError(t, json.Unmarshal(loggedIn.Data, &login))
+	require.NotEmpty(t, login.Self.Login.Token)
+
+	return login.Self.Login.Token
+}
+
+// A narrowly scoped API key must not be able to widen itself.
+//
+// The chain this guards against: an API-key identity reports its owning user
+// and inherits whatever the anon role may do, which necessarily includes the
+// self mutations because login lives there. So without a check, a key scoped to
+// one object action could call createAPIKey and mint a second key naming any
+// registered object action — bounded only by the owner's role, which for an
+// administrator is everything.
+func TestAPIKeyCannotMintAnotherKey(t *testing.T) {
+	t.Parallel()
+
+	cfg := authconfig.NewDefaultConfig()
+	cfg.AnonymousAccess = false
+
+	server, code := newAuthTestServerWithConfig(t, cfg)
+	token := loginAsAdmin(t, server, code)
+
+	narrow := apiKeyFrom(t, createAPIKeyAs(t, server, token, "narrow", "torznab", "torznab", "query"))
+
+	// The key cannot reach the administrative surface it was not granted.
+	denied := query(t, server, narrow, `{ auth { listUsers { totalCount } } }`)
+	require.NotEmpty(t, denied.Errors)
+	assert.Equal(t, "unauthorized", denied.Errors[0].Message)
+
+	// Nor can it mint a key that could.
+	escalated := createAPIKeyAs(t, server, narrow, "escalated", "graphql", "auth", "query")
+	require.NotEmpty(t, escalated.Errors, "an API key must not be able to mint another")
+	assert.Contains(t, escalated.Errors[0].Message, "api keys may not manage api keys")
+}
+
+func TestAPIKeyCannotDeleteKeys(t *testing.T) {
+	t.Parallel()
+
+	cfg := authconfig.NewDefaultConfig()
+	cfg.AnonymousAccess = false
+
+	server, code := newAuthTestServerWithConfig(t, cfg)
+	token := loginAsAdmin(t, server, code)
+
+	narrow := apiKeyFrom(t, createAPIKeyAs(t, server, token, "narrow", "torznab", "torznab", "query"))
+
+	res := query(t, server, narrow, `mutation { self { deleteAPIKey(id: 1) } }`)
+	require.NotEmpty(t, res.Errors)
+	assert.Contains(t, res.Errors[0].Message, "api keys may not manage api keys")
+}
+
+// The legitimate path must keep working, or the guard above is just a denial.
+func TestUserSessionCanMintKey(t *testing.T) {
+	t.Parallel()
+
+	cfg := authconfig.NewDefaultConfig()
+	cfg.AnonymousAccess = false
+
+	server, code := newAuthTestServerWithConfig(t, cfg)
+	token := loginAsAdmin(t, server, code)
+
+	key := apiKeyFrom(t, createAPIKeyAs(t, server, token, "legit", "graphql", "auth", "query"))
+
+	granted := query(t, server, key, `{ auth { listUsers { totalCount } } }`)
+	requireNoGqlErrors(t, granted)
 }
