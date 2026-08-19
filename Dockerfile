@@ -1,4 +1,4 @@
-FROM golang:1.23.6-alpine3.20 AS build
+FROM golang:1.24.13-alpine3.22 AS build
 
 RUN apk --update add \
     gcc \
