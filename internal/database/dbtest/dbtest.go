@@ -161,19 +161,27 @@ func replaceDatabase(dsn, name string) string {
 	return u.String()
 }
 
-// migrate applies the embedded goose migrations. goose keeps its dialect and
-// filesystem in package-level state, so this is set every time rather than once.
+// migrate applies the embedded goose migrations.
+//
+// goose's package-level API — SetBaseFS, SetLogger, SetDialect — writes globals,
+// so calling it from tests that run in parallel is a data race. [goose.Provider]
+// holds the same configuration per instance and is documented safe for concurrent
+// use, so each test migrates through a provider of its own and no global is
+// touched.
 func migrate(ctx context.Context, t *testing.T, sqlDB *sql.DB) {
 	t.Helper()
 
-	goose.SetBaseFS(migrationssql.FS)
-	goose.SetLogger(goose.NopLogger())
-
-	if err := goose.SetDialect("postgres"); err != nil {
-		t.Fatalf("setting the goose dialect: %v", err)
+	provider, err := goose.NewProvider(
+		goose.DialectPostgres,
+		sqlDB,
+		migrationssql.FS,
+		goose.WithLogger(goose.NopLogger()),
+	)
+	if err != nil {
+		t.Fatalf("creating the goose provider: %v", err)
 	}
 
-	if err := goose.UpContext(ctx, sqlDB, "."); err != nil {
+	if _, err := provider.Up(ctx); err != nil {
 		t.Fatalf("applying migrations: %v", err)
 	}
 }
