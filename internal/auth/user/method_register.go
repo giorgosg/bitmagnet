@@ -92,7 +92,10 @@ func (s *service) Register(ctx context.Context, request RegisterRequest) (model.
 				return nil
 			}
 
-			if invitation.ExpiresAt.Valid && invitation.ExpiresAt.Time.After(time.Now()) {
+			// Expired means the expiry is in the past. The comparison was
+			// inverted, which both accepted expired invitations and refused
+			// valid ones; api_key.Auth gets the same test right.
+			if invitation.ExpiresAt.Valid && invitation.ExpiresAt.Time.Before(time.Now()) {
 				errUser = ErrInvitationExpired
 				return nil
 			}

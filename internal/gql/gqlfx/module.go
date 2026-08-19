@@ -33,15 +33,17 @@ func New() fx.Option {
 
 			// The @auth directives in the schema are the authoritative list of
 			// GraphQL object actions, so they are extracted rather than restated.
-			func(lcfg lazy.Lazy[graphql.ExecutableSchema]) (directive.AuthDirectives, error) {
-				schema, err := lcfg.Get()
-				if err != nil {
-					return nil, err
-				}
-
+			//
+			// Deliberately built from an empty config: the schema AST is static,
+			// so this needs no resolvers. Resolving the real ExecutableSchema here
+			// would drag the entire resolver graph — database included — into
+			// every command that happens to construct the auth module.
+			func() directive.AuthDirectives {
 				return directive.ExtractAuthDirectives(
-					directive.ExtractSchemaDirectives(schema.Schema()),
-				), nil
+					directive.ExtractSchemaDirectives(
+						gql.NewExecutableSchema(gql.Config{}).Schema(),
+					),
+				)
 			},
 			fx.Annotate(
 				func(directives directive.AuthDirectives) rbac.ObjectActionProvider {
