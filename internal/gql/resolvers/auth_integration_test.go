@@ -23,6 +23,8 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dbtest"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql"
+	gqlauth "github.com/bitmagnet-io/bitmagnet/internal/gql/auth"
+	"github.com/bitmagnet-io/bitmagnet/internal/gql/directive"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql/resolvers"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -45,11 +47,19 @@ func (p daoProvider) DaoTransaction(fn func(tx *dao.Query) error) error {
 func newAuthTestServer(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
 
+	return newAuthTestServerWithConfig(t, authconfig.NewDefaultConfig())
+}
+
+func newAuthTestServerWithConfig(
+	t *testing.T,
+	cfg authconfig.Config,
+) (*httptest.Server, string) {
+	t.Helper()
+
 	db := dbtest.New(t)
 
 	var provider database.DaoTransactionProvider = daoProvider{query: db.Query}
 
-	cfg := authconfig.NewDefaultConfig()
 	values := cfg.UserValues()
 
 	jwtService := jwt.NewService(jwt.Secret("test-secret"), jwt.Duration(time.Hour))
@@ -66,15 +76,27 @@ func newAuthTestServer(t *testing.T) (*httptest.Server, string) {
 	)
 	apiKeyService := api_key.NewService(api_key.NewRepository(provider))
 
-	objectActions := func() []rbac.ObjectAction {
-		return []rbac.ObjectAction{rbac.NewObjectAction("torrent", "torrent", "query")}
-	}
+	// Built exactly as production does, directive and all: without it the
+	// schema resolves an identity and then ignores it.
+	schema := gql.NewExecutableSchema(gql.Config{
+		Resolvers: &resolvers.Resolver{},
+		Directives: gql.DirectiveRoot{
+			Auth: gqlauth.NewDirective(),
+		},
+	})
+
+	// The @auth directives in the schema are the object action set.
+	schemaObjectActions := gqlauth.ObjectActions(
+		directive.ExtractAuthDirectives(directive.ExtractSchemaDirectives(schema.Schema())),
+	)
+	objectActions := func() []rbac.ObjectAction { return schemaObjectActions }
+
 	rbacService := rbac.NewService(
 		rbac.NewRepository(provider),
 		objectActions,
 		rbac.PermissionProviders(
 			rbac.CorePermissions,
-			rbac.VerbatimPermissions(objectActions),
+			gqlauth.Permissions,
 			authconfig.AnonymousPermissions(cfg, objectActions),
 		),
 		rbac.CacheTTL(time.Minute),
@@ -82,11 +104,16 @@ func newAuthTestServer(t *testing.T) (*httptest.Server, string) {
 
 	authenticator := identity.NewAuthenticator(jwtService, userService, apiKeyService, rbacService)
 
-	schema := gql.NewExecutableSchema(gql.Config{Resolvers: &resolvers.Resolver{
-		UserService:   userService,
-		APIKeyService: apiKeyService,
-		RBACService:   rbacService,
-	}})
+	schema = gql.NewExecutableSchema(gql.Config{
+		Resolvers: &resolvers.Resolver{
+			UserService:   userService,
+			APIKeyService: apiKeyService,
+			RBACService:   rbacService,
+		},
+		Directives: gql.DirectiveRoot{
+			Auth: gqlauth.NewDirective(),
+		},
+	})
 
 	gin.SetMode(gin.TestMode)
 
@@ -307,4 +334,101 @@ func TestAuthPutRoleRevokesThroughGraphQL(t *testing.T) {
 		`{"auth":{"putRole":{"name":"tester","permissions":[]}}}`,
 		string(revoked.Data),
 	)
+}
+
+// With anonymous access disabled, an unauthenticated caller must not reach the
+// administrative surface. These are the exact requests that demonstrated the
+// hole before the @auth directive was wired in: they returned the user list,
+// leaked unclaimed invitation codes — which are registration credentials — and
+// allowed a wildcard role to be created, all without any credential.
+func TestGraphQLDeniesAnonymousWhenAnonymousAccessIsOff(t *testing.T) {
+	t.Parallel()
+
+	cfg := authconfig.NewDefaultConfig()
+	cfg.AnonymousAccess = false
+
+	server, _ := newAuthTestServerWithConfig(t, cfg)
+
+	for _, testCase := range []struct {
+		name  string
+		query string
+	}{
+		{
+			name:  "listUsers",
+			query: `{ auth { listUsers { totalCount users { id username role } } } }`,
+		},
+		{
+			name:  "listInvitations",
+			query: `{ auth { listInvitations { invitations { code role } } } }`,
+		},
+		{
+			name: "putRole",
+			query: `mutation { auth { putRole(role: "attacker", objectActions: [
+				{namespace: "**", object: "**", action: "**"}
+			]) { name } } }`,
+		},
+		{
+			name:  "torrentContent search",
+			query: `{ torrentContent { search(input: {limit: 1}) { totalCount } } }`,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			res := query(t, server, "", testCase.query)
+
+			require.NotEmpty(t, res.Errors, "unauthenticated request must be refused")
+			assert.Equal(t, "unauthorized", res.Errors[0].Message)
+		})
+	}
+}
+
+// Refusing everything would be a lockout, since logging in is itself a mutation.
+// The baseline permissions must survive anonymous access being disabled.
+func TestGraphQLAllowsLoginWhenAnonymousAccessIsOff(t *testing.T) {
+	t.Parallel()
+
+	cfg := authconfig.NewDefaultConfig()
+	cfg.AnonymousAccess = false
+
+	server, code := newAuthTestServerWithConfig(t, cfg)
+
+	const password = "correct-horse-battery-staple-99"
+
+	registered := query(t, server, "", `mutation { self { register(input: {
+		invitationCode: "`+code+`", username: "admin", password: "`+password+`"
+	}) { user { username } } } }`)
+	requireNoGqlErrors(t, registered)
+
+	loggedIn := query(t, server, "", `mutation { self { login(
+		username: "admin", password: "`+password+`"
+	) { token } } }`)
+	requireNoGqlErrors(t, loggedIn)
+
+	var login loginResponse
+
+	require.NoError(t, json.Unmarshal(loggedIn.Data, &login))
+	require.NotEmpty(t, login.Self.Login.Token)
+
+	// And the administrator, once authenticated, reaches what anonymous cannot.
+	admin := query(t, server, login.Self.Login.Token, `{ auth { listUsers { totalCount } } }`)
+	requireNoGqlErrors(t, admin)
+}
+
+// The default must stay open, or every existing deployment breaks on upgrade.
+func TestGraphQLAllowsAnonymousByDefault(t *testing.T) {
+	t.Parallel()
+
+	server, _ := newAuthTestServer(t)
+
+	// auth is administrative and torrentContent is the catalogue: neither is in
+	// the baseline, so reaching both proves anonymous access grants the lot.
+	// (The search resolver itself needs services this harness does not wire, so
+	// authorization is asserted by it not being refused, not by the payload.)
+	requireNoGqlErrors(t, query(t, server, "", `{ auth { listUsers { totalCount } } }`))
+
+	search := query(t, server, "", `{ torrentContent { search(input: {limit: 1}) { totalCount } } }`)
+	for _, e := range search.Errors {
+		assert.NotEqual(t, "unauthorized", e.Message, "anonymous access must permit the catalogue")
+	}
 }

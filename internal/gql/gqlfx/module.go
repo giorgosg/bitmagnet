@@ -9,7 +9,9 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/search"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql"
+	gqlauth "github.com/bitmagnet-io/bitmagnet/internal/gql/auth"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql/config"
+	"github.com/bitmagnet-io/bitmagnet/internal/gql/directive"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql/httpserver"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql/resolvers"
 	"github.com/bitmagnet-io/bitmagnet/internal/health"
@@ -28,6 +30,31 @@ func New() fx.Option {
 		fx.Provide(
 			config.New,
 			httpserver.New,
+
+			// The @auth directives in the schema are the authoritative list of
+			// GraphQL object actions, so they are extracted rather than restated.
+			func(lcfg lazy.Lazy[graphql.ExecutableSchema]) (directive.AuthDirectives, error) {
+				schema, err := lcfg.Get()
+				if err != nil {
+					return nil, err
+				}
+
+				return directive.ExtractAuthDirectives(
+					directive.ExtractSchemaDirectives(schema.Schema()),
+				), nil
+			},
+			fx.Annotate(
+				func(directives directive.AuthDirectives) rbac.ObjectActionProvider {
+					return func() []rbac.ObjectAction {
+						return gqlauth.ObjectActions(directives)
+					}
+				},
+				fx.ResultTags(`group:"auth_object_actions"`),
+			),
+			fx.Annotate(
+				func() rbac.PermissionProvider { return gqlauth.Permissions },
+				fx.ResultTags(`group:"auth_permissions"`),
+			),
 			func(
 				lcfg lazy.Lazy[gql.Config],
 			) lazy.Lazy[graphql.ExecutableSchema] {

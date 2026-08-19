@@ -49,8 +49,23 @@ internal/auth/authfx/      fx wiring and the first-administrator bootstrap
 API key, or anonymously, and Casbin evaluates that identity against an object action.
 
 The middleware only _resolves_ an identity and attaches it to the request context — it
-never rejects. Enforcement is the job of whatever reads the identity back out, which
-today means Torznab and nothing else (see [Known gaps](#known-gaps)).
+never rejects. Enforcement happens above it: on GraphQL through the `@auth` directive,
+and in the Torznab handler.
+
+### GraphQL enforcement
+
+Every root field carries `@auth(object:, action:)`, and the directive refuses the request
+unless the resolved identity holds that object action. It is **deny by default** — no
+identity, or an identity without the permission, is refused.
+
+The directive is also the source of truth for the permission set: the schema is walked at
+startup and each directive becomes a registered object action in the `graphql` namespace,
+so nothing is restated by hand.
+
+A baseline is granted to `anon` and `user` regardless of the anonymous-access setting —
+`self::query`, `self::mutate`, `health::query`, `version::query` — because logging in is
+itself a GraphQL mutation. Without it, enabling authentication would be a permanent
+lockout.
 
 ### Schema
 
@@ -123,14 +138,10 @@ user rather than an error.
 
 ## Known gaps
 
-- **No field-level GraphQL authorization.** `next` carries an `@auth(object:, action:)`
-  directive on every schema field; it is deliberately not ported. With anonymous access
-  on it would be inert, and the middleware plus Torznab cover the surfaces that matter
-  today. **This is the main thing standing between the current state and a genuinely
-  enforced GraphQL API**, and the route guards below depend on it.
-- **No route guards in the UI.** `next`'s `authGuard` was ported and then removed:
-  guarding routes would hide screens the API still serves without restriction, which
-  looks like protection without being any. It belongs with the directive, not before it.
+- **No route guards in the UI.** `next`'s `authGuard` was ported and then removed. Now
+  that the GraphQL surface is enforced they would be worth adding back, as a matter of
+  presentation rather than protection: an unauthorised user currently reaches an
+  administrative screen and sees its queries refused, instead of being sent to login.
 - **`auth.email_verification` does nothing.** The parameter exists on `next` and is
   carried over for fidelity, but its value is never read and no verification code is ever
   issued — the `users.email_verify_code` column is written nowhere. It is inert on `next`

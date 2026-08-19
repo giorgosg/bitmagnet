@@ -2,6 +2,7 @@ package config
 
 import (
 	"github.com/bitmagnet-io/bitmagnet/internal/gql"
+	gqlauth "github.com/bitmagnet-io/bitmagnet/internal/gql/auth"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql/resolvers"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
 	"go.uber.org/fx"
@@ -19,6 +20,13 @@ func New(p Params) lazy.Lazy[gql.Config] {
 			return gql.Config{}, err
 		}
 
-		return gql.Config{Resolvers: root}, nil
+		// The @auth directive is what enforces authorization on the GraphQL
+		// surface. Without it the identity is resolved and then ignored.
+		return gql.Config{
+			Resolvers: root,
+			Directives: gql.DirectiveRoot{
+				Auth: gqlauth.NewDirective(),
+			},
+		}, nil
 	})
 }

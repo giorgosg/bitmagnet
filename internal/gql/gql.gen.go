@@ -62,6 +62,7 @@ type ResolverRoot interface {
 }
 
 type DirectiveRoot struct {
+	Auth func(ctx context.Context, obj any, next graphql.Resolver, object string, action string) (res any, err error)
 }
 
 type ComplexityRoot struct {
@@ -3056,6 +3057,8 @@ type Invitation {
   createdAt: DateTime!
 }
 `, BuiltIn: false},
+	{Name: "../../graphql/schema/directives.graphqls", Input: `directive @auth(object: String!, action: String!) on FIELD_DEFINITION
+`, BuiltIn: false},
 	{Name: "../../graphql/schema/enums.graphqls", Input: `enum ContentType {
   movie
   tv_show
@@ -3412,14 +3415,15 @@ type ContentCollection {
 }
 `, BuiltIn: false},
 	{Name: "../../graphql/schema/mutation.graphqls", Input: `type Mutation {
-  self: SelfMutation!
-  auth: AuthMutation!
-  torrent: TorrentMutation!
-  queue: QueueMutation!
+  self: SelfMutation! @auth(object: "self", action: "mutate")
+  auth: AuthMutation! @auth(object: "auth", action: "mutate")
+  torrent: TorrentMutation! @auth(object: "torrent", action: "mutate")
+  queue: QueueMutation! @auth(object: "queue", action: "mutate")
 }
 
 type TorrentMutation {
   delete(infoHashes: [Hash20!]!): Void
+    @auth(object: "torrent", action: "delete")
   putTags(infoHashes: [Hash20!]!, tagNames: [String!]!): Void
   setTags(infoHashes: [Hash20!]!, tagNames: [String!]!): Void
   deleteTags(infoHashes: [Hash20!], tagNames: [String!]): Void
@@ -3441,14 +3445,15 @@ input TorrentReprocessInput {
 }
 `, BuiltIn: false},
 	{Name: "../../graphql/schema/query.graphqls", Input: `type Query {
-  version: String!
-  self: SelfQuery!
-  auth: AuthQuery!
-  workers: WorkersQuery!
-  health: HealthQuery!
-  queue: QueueQuery!
-  torrent: TorrentQuery!
+  version: String! @auth(object: "version", action: "query")
+  self: SelfQuery! @auth(object: "self", action: "query")
+  auth: AuthQuery! @auth(object: "auth", action: "query")
+  workers: WorkersQuery! @auth(object: "workers", action: "query")
+  health: HealthQuery! @auth(object: "health", action: "query")
+  queue: QueueQuery! @auth(object: "queue", action: "query")
+  torrent: TorrentQuery! @auth(object: "torrent", action: "query")
   torrentContent: TorrentContentQuery!
+    @auth(object: "torrentContent", action: "query")
 }
 
 type TorrentQuery {
@@ -3877,6 +3882,57 @@ var parsedSchema = gqlparser.MustLoadSchema(sources...)
 // endregion ************************** generated!.gotpl **************************
 
 // region    ***************************** args.gotpl *****************************
+
+func (ec *executionContext) dir_auth_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := ec.dir_auth_argsObject(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["object"] = arg0
+	arg1, err := ec.dir_auth_argsAction(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["action"] = arg1
+	return args, nil
+}
+func (ec *executionContext) dir_auth_argsObject(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (string, error) {
+	if _, ok := rawArgs["object"]; !ok {
+		var zeroVal string
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("object"))
+	if tmp, ok := rawArgs["object"]; ok {
+		return ec.unmarshalNString2string(ctx, tmp)
+	}
+
+	var zeroVal string
+	return zeroVal, nil
+}
+
+func (ec *executionContext) dir_auth_argsAction(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (string, error) {
+	if _, ok := rawArgs["action"]; !ok {
+		var zeroVal string
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("action"))
+	if tmp, ok := rawArgs["action"]; ok {
+		return ec.unmarshalNString2string(ctx, tmp)
+	}
+
+	var zeroVal string
+	return zeroVal, nil
+}
 
 func (ec *executionContext) field_AuthMutation_deleteInvitation_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
@@ -9618,8 +9674,40 @@ func (ec *executionContext) _Mutation_self(ctx context.Context, field graphql.Co
 		}
 	}()
 	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
-		ctx = rctx // use context from middleware stack in children
-		return ec.resolvers.Mutation().Self(rctx)
+		directive0 := func(rctx context.Context) (any, error) {
+			ctx = rctx // use context from middleware stack in children
+			return ec.resolvers.Mutation().Self(rctx)
+		}
+
+		directive1 := func(ctx context.Context) (any, error) {
+			object, err := ec.unmarshalNString2string(ctx, "self")
+			if err != nil {
+				var zeroVal gqlmodel.SelfMutation
+				return zeroVal, err
+			}
+			action, err := ec.unmarshalNString2string(ctx, "mutate")
+			if err != nil {
+				var zeroVal gqlmodel.SelfMutation
+				return zeroVal, err
+			}
+			if ec.directives.Auth == nil {
+				var zeroVal gqlmodel.SelfMutation
+				return zeroVal, errors.New("directive auth is not implemented")
+			}
+			return ec.directives.Auth(ctx, nil, directive0, object, action)
+		}
+
+		tmp, err := directive1(rctx)
+		if err != nil {
+			return nil, graphql.ErrorOnPath(ctx, err)
+		}
+		if tmp == nil {
+			return nil, nil
+		}
+		if data, ok := tmp.(gqlmodel.SelfMutation); ok {
+			return data, nil
+		}
+		return nil, fmt.Errorf(`unexpected type %T from directive, should be github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel.SelfMutation`, tmp)
 	})
 	if err != nil {
 		ec.Error(ctx, err)
@@ -9672,8 +9760,40 @@ func (ec *executionContext) _Mutation_auth(ctx context.Context, field graphql.Co
 		}
 	}()
 	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
-		ctx = rctx // use context from middleware stack in children
-		return ec.resolvers.Mutation().Auth(rctx)
+		directive0 := func(rctx context.Context) (any, error) {
+			ctx = rctx // use context from middleware stack in children
+			return ec.resolvers.Mutation().Auth(rctx)
+		}
+
+		directive1 := func(ctx context.Context) (any, error) {
+			object, err := ec.unmarshalNString2string(ctx, "auth")
+			if err != nil {
+				var zeroVal gqlmodel.AuthMutation
+				return zeroVal, err
+			}
+			action, err := ec.unmarshalNString2string(ctx, "mutate")
+			if err != nil {
+				var zeroVal gqlmodel.AuthMutation
+				return zeroVal, err
+			}
+			if ec.directives.Auth == nil {
+				var zeroVal gqlmodel.AuthMutation
+				return zeroVal, errors.New("directive auth is not implemented")
+			}
+			return ec.directives.Auth(ctx, nil, directive0, object, action)
+		}
+
+		tmp, err := directive1(rctx)
+		if err != nil {
+			return nil, graphql.ErrorOnPath(ctx, err)
+		}
+		if tmp == nil {
+			return nil, nil
+		}
+		if data, ok := tmp.(gqlmodel.AuthMutation); ok {
+			return data, nil
+		}
+		return nil, fmt.Errorf(`unexpected type %T from directive, should be github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel.AuthMutation`, tmp)
 	})
 	if err != nil {
 		ec.Error(ctx, err)
@@ -9732,8 +9852,40 @@ func (ec *executionContext) _Mutation_torrent(ctx context.Context, field graphql
 		}
 	}()
 	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
-		ctx = rctx // use context from middleware stack in children
-		return ec.resolvers.Mutation().Torrent(rctx)
+		directive0 := func(rctx context.Context) (any, error) {
+			ctx = rctx // use context from middleware stack in children
+			return ec.resolvers.Mutation().Torrent(rctx)
+		}
+
+		directive1 := func(ctx context.Context) (any, error) {
+			object, err := ec.unmarshalNString2string(ctx, "torrent")
+			if err != nil {
+				var zeroVal gqlmodel.TorrentMutation
+				return zeroVal, err
+			}
+			action, err := ec.unmarshalNString2string(ctx, "mutate")
+			if err != nil {
+				var zeroVal gqlmodel.TorrentMutation
+				return zeroVal, err
+			}
+			if ec.directives.Auth == nil {
+				var zeroVal gqlmodel.TorrentMutation
+				return zeroVal, errors.New("directive auth is not implemented")
+			}
+			return ec.directives.Auth(ctx, nil, directive0, object, action)
+		}
+
+		tmp, err := directive1(rctx)
+		if err != nil {
+			return nil, graphql.ErrorOnPath(ctx, err)
+		}
+		if tmp == nil {
+			return nil, nil
+		}
+		if data, ok := tmp.(gqlmodel.TorrentMutation); ok {
+			return data, nil
+		}
+		return nil, fmt.Errorf(`unexpected type %T from directive, should be github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel.TorrentMutation`, tmp)
 	})
 	if err != nil {
 		ec.Error(ctx, err)
@@ -9788,8 +9940,40 @@ func (ec *executionContext) _Mutation_queue(ctx context.Context, field graphql.C
 		}
 	}()
 	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
-		ctx = rctx // use context from middleware stack in children
-		return ec.resolvers.Mutation().Queue(rctx)
+		directive0 := func(rctx context.Context) (any, error) {
+			ctx = rctx // use context from middleware stack in children
+			return ec.resolvers.Mutation().Queue(rctx)
+		}
+
+		directive1 := func(ctx context.Context) (any, error) {
+			object, err := ec.unmarshalNString2string(ctx, "queue")
+			if err != nil {
+				var zeroVal gqlmodel.QueueMutation
+				return zeroVal, err
+			}
+			action, err := ec.unmarshalNString2string(ctx, "mutate")
+			if err != nil {
+				var zeroVal gqlmodel.QueueMutation
+				return zeroVal, err
+			}
+			if ec.directives.Auth == nil {
+				var zeroVal gqlmodel.QueueMutation
+				return zeroVal, errors.New("directive auth is not implemented")
+			}
+			return ec.directives.Auth(ctx, nil, directive0, object, action)
+		}
+
+		tmp, err := directive1(rctx)
+		if err != nil {
+			return nil, graphql.ErrorOnPath(ctx, err)
+		}
+		if tmp == nil {
+			return nil, nil
+		}
+		if data, ok := tmp.(gqlmodel.QueueMutation); ok {
+			return data, nil
+		}
+		return nil, fmt.Errorf(`unexpected type %T from directive, should be github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel.QueueMutation`, tmp)
 	})
 	if err != nil {
 		ec.Error(ctx, err)
@@ -10116,8 +10300,40 @@ func (ec *executionContext) _Query_version(ctx context.Context, field graphql.Co
 		}
 	}()
 	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
-		ctx = rctx // use context from middleware stack in children
-		return ec.resolvers.Query().Version(rctx)
+		directive0 := func(rctx context.Context) (any, error) {
+			ctx = rctx // use context from middleware stack in children
+			return ec.resolvers.Query().Version(rctx)
+		}
+
+		directive1 := func(ctx context.Context) (any, error) {
+			object, err := ec.unmarshalNString2string(ctx, "version")
+			if err != nil {
+				var zeroVal string
+				return zeroVal, err
+			}
+			action, err := ec.unmarshalNString2string(ctx, "query")
+			if err != nil {
+				var zeroVal string
+				return zeroVal, err
+			}
+			if ec.directives.Auth == nil {
+				var zeroVal string
+				return zeroVal, errors.New("directive auth is not implemented")
+			}
+			return ec.directives.Auth(ctx, nil, directive0, object, action)
+		}
+
+		tmp, err := directive1(rctx)
+		if err != nil {
+			return nil, graphql.ErrorOnPath(ctx, err)
+		}
+		if tmp == nil {
+			return nil, nil
+		}
+		if data, ok := tmp.(string); ok {
+			return data, nil
+		}
+		return nil, fmt.Errorf(`unexpected type %T from directive, should be string`, tmp)
 	})
 	if err != nil {
 		ec.Error(ctx, err)
@@ -10160,8 +10376,40 @@ func (ec *executionContext) _Query_self(ctx context.Context, field graphql.Colle
 		}
 	}()
 	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
-		ctx = rctx // use context from middleware stack in children
-		return ec.resolvers.Query().Self(rctx)
+		directive0 := func(rctx context.Context) (any, error) {
+			ctx = rctx // use context from middleware stack in children
+			return ec.resolvers.Query().Self(rctx)
+		}
+
+		directive1 := func(ctx context.Context) (any, error) {
+			object, err := ec.unmarshalNString2string(ctx, "self")
+			if err != nil {
+				var zeroVal gqlmodel.SelfQuery
+				return zeroVal, err
+			}
+			action, err := ec.unmarshalNString2string(ctx, "query")
+			if err != nil {
+				var zeroVal gqlmodel.SelfQuery
+				return zeroVal, err
+			}
+			if ec.directives.Auth == nil {
+				var zeroVal gqlmodel.SelfQuery
+				return zeroVal, errors.New("directive auth is not implemented")
+			}
+			return ec.directives.Auth(ctx, nil, directive0, object, action)
+		}
+
+		tmp, err := directive1(rctx)
+		if err != nil {
+			return nil, graphql.ErrorOnPath(ctx, err)
+		}
+		if tmp == nil {
+			return nil, nil
+		}
+		if data, ok := tmp.(gqlmodel.SelfQuery); ok {
+			return data, nil
+		}
+		return nil, fmt.Errorf(`unexpected type %T from directive, should be github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel.SelfQuery`, tmp)
 	})
 	if err != nil {
 		ec.Error(ctx, err)
@@ -10212,8 +10460,40 @@ func (ec *executionContext) _Query_auth(ctx context.Context, field graphql.Colle
 		}
 	}()
 	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
-		ctx = rctx // use context from middleware stack in children
-		return ec.resolvers.Query().Auth(rctx)
+		directive0 := func(rctx context.Context) (any, error) {
+			ctx = rctx // use context from middleware stack in children
+			return ec.resolvers.Query().Auth(rctx)
+		}
+
+		directive1 := func(ctx context.Context) (any, error) {
+			object, err := ec.unmarshalNString2string(ctx, "auth")
+			if err != nil {
+				var zeroVal gqlmodel.AuthQuery
+				return zeroVal, err
+			}
+			action, err := ec.unmarshalNString2string(ctx, "query")
+			if err != nil {
+				var zeroVal gqlmodel.AuthQuery
+				return zeroVal, err
+			}
+			if ec.directives.Auth == nil {
+				var zeroVal gqlmodel.AuthQuery
+				return zeroVal, errors.New("directive auth is not implemented")
+			}
+			return ec.directives.Auth(ctx, nil, directive0, object, action)
+		}
+
+		tmp, err := directive1(rctx)
+		if err != nil {
+			return nil, graphql.ErrorOnPath(ctx, err)
+		}
+		if tmp == nil {
+			return nil, nil
+		}
+		if data, ok := tmp.(gqlmodel.AuthQuery); ok {
+			return data, nil
+		}
+		return nil, fmt.Errorf(`unexpected type %T from directive, should be github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel.AuthQuery`, tmp)
 	})
 	if err != nil {
 		ec.Error(ctx, err)
@@ -10266,8 +10546,40 @@ func (ec *executionContext) _Query_workers(ctx context.Context, field graphql.Co
 		}
 	}()
 	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
-		ctx = rctx // use context from middleware stack in children
-		return ec.resolvers.Query().Workers(rctx)
+		directive0 := func(rctx context.Context) (any, error) {
+			ctx = rctx // use context from middleware stack in children
+			return ec.resolvers.Query().Workers(rctx)
+		}
+
+		directive1 := func(ctx context.Context) (any, error) {
+			object, err := ec.unmarshalNString2string(ctx, "workers")
+			if err != nil {
+				var zeroVal gen.WorkersQuery
+				return zeroVal, err
+			}
+			action, err := ec.unmarshalNString2string(ctx, "query")
+			if err != nil {
+				var zeroVal gen.WorkersQuery
+				return zeroVal, err
+			}
+			if ec.directives.Auth == nil {
+				var zeroVal gen.WorkersQuery
+				return zeroVal, errors.New("directive auth is not implemented")
+			}
+			return ec.directives.Auth(ctx, nil, directive0, object, action)
+		}
+
+		tmp, err := directive1(rctx)
+		if err != nil {
+			return nil, graphql.ErrorOnPath(ctx, err)
+		}
+		if tmp == nil {
+			return nil, nil
+		}
+		if data, ok := tmp.(gen.WorkersQuery); ok {
+			return data, nil
+		}
+		return nil, fmt.Errorf(`unexpected type %T from directive, should be github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel/gen.WorkersQuery`, tmp)
 	})
 	if err != nil {
 		ec.Error(ctx, err)
@@ -10314,8 +10626,40 @@ func (ec *executionContext) _Query_health(ctx context.Context, field graphql.Col
 		}
 	}()
 	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
-		ctx = rctx // use context from middleware stack in children
-		return ec.resolvers.Query().Health(rctx)
+		directive0 := func(rctx context.Context) (any, error) {
+			ctx = rctx // use context from middleware stack in children
+			return ec.resolvers.Query().Health(rctx)
+		}
+
+		directive1 := func(ctx context.Context) (any, error) {
+			object, err := ec.unmarshalNString2string(ctx, "health")
+			if err != nil {
+				var zeroVal gen.HealthQuery
+				return zeroVal, err
+			}
+			action, err := ec.unmarshalNString2string(ctx, "query")
+			if err != nil {
+				var zeroVal gen.HealthQuery
+				return zeroVal, err
+			}
+			if ec.directives.Auth == nil {
+				var zeroVal gen.HealthQuery
+				return zeroVal, errors.New("directive auth is not implemented")
+			}
+			return ec.directives.Auth(ctx, nil, directive0, object, action)
+		}
+
+		tmp, err := directive1(rctx)
+		if err != nil {
+			return nil, graphql.ErrorOnPath(ctx, err)
+		}
+		if tmp == nil {
+			return nil, nil
+		}
+		if data, ok := tmp.(gen.HealthQuery); ok {
+			return data, nil
+		}
+		return nil, fmt.Errorf(`unexpected type %T from directive, should be github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel/gen.HealthQuery`, tmp)
 	})
 	if err != nil {
 		ec.Error(ctx, err)
@@ -10364,8 +10708,40 @@ func (ec *executionContext) _Query_queue(ctx context.Context, field graphql.Coll
 		}
 	}()
 	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
-		ctx = rctx // use context from middleware stack in children
-		return ec.resolvers.Query().Queue(rctx)
+		directive0 := func(rctx context.Context) (any, error) {
+			ctx = rctx // use context from middleware stack in children
+			return ec.resolvers.Query().Queue(rctx)
+		}
+
+		directive1 := func(ctx context.Context) (any, error) {
+			object, err := ec.unmarshalNString2string(ctx, "queue")
+			if err != nil {
+				var zeroVal gqlmodel.QueueQuery
+				return zeroVal, err
+			}
+			action, err := ec.unmarshalNString2string(ctx, "query")
+			if err != nil {
+				var zeroVal gqlmodel.QueueQuery
+				return zeroVal, err
+			}
+			if ec.directives.Auth == nil {
+				var zeroVal gqlmodel.QueueQuery
+				return zeroVal, errors.New("directive auth is not implemented")
+			}
+			return ec.directives.Auth(ctx, nil, directive0, object, action)
+		}
+
+		tmp, err := directive1(rctx)
+		if err != nil {
+			return nil, graphql.ErrorOnPath(ctx, err)
+		}
+		if tmp == nil {
+			return nil, nil
+		}
+		if data, ok := tmp.(gqlmodel.QueueQuery); ok {
+			return data, nil
+		}
+		return nil, fmt.Errorf(`unexpected type %T from directive, should be github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel.QueueQuery`, tmp)
 	})
 	if err != nil {
 		ec.Error(ctx, err)
@@ -10414,8 +10790,40 @@ func (ec *executionContext) _Query_torrent(ctx context.Context, field graphql.Co
 		}
 	}()
 	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
-		ctx = rctx // use context from middleware stack in children
-		return ec.resolvers.Query().Torrent(rctx)
+		directive0 := func(rctx context.Context) (any, error) {
+			ctx = rctx // use context from middleware stack in children
+			return ec.resolvers.Query().Torrent(rctx)
+		}
+
+		directive1 := func(ctx context.Context) (any, error) {
+			object, err := ec.unmarshalNString2string(ctx, "torrent")
+			if err != nil {
+				var zeroVal gqlmodel.TorrentQuery
+				return zeroVal, err
+			}
+			action, err := ec.unmarshalNString2string(ctx, "query")
+			if err != nil {
+				var zeroVal gqlmodel.TorrentQuery
+				return zeroVal, err
+			}
+			if ec.directives.Auth == nil {
+				var zeroVal gqlmodel.TorrentQuery
+				return zeroVal, errors.New("directive auth is not implemented")
+			}
+			return ec.directives.Auth(ctx, nil, directive0, object, action)
+		}
+
+		tmp, err := directive1(rctx)
+		if err != nil {
+			return nil, graphql.ErrorOnPath(ctx, err)
+		}
+		if tmp == nil {
+			return nil, nil
+		}
+		if data, ok := tmp.(gqlmodel.TorrentQuery); ok {
+			return data, nil
+		}
+		return nil, fmt.Errorf(`unexpected type %T from directive, should be github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel.TorrentQuery`, tmp)
 	})
 	if err != nil {
 		ec.Error(ctx, err)
@@ -10468,8 +10876,40 @@ func (ec *executionContext) _Query_torrentContent(ctx context.Context, field gra
 		}
 	}()
 	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
-		ctx = rctx // use context from middleware stack in children
-		return ec.resolvers.Query().TorrentContent(rctx)
+		directive0 := func(rctx context.Context) (any, error) {
+			ctx = rctx // use context from middleware stack in children
+			return ec.resolvers.Query().TorrentContent(rctx)
+		}
+
+		directive1 := func(ctx context.Context) (any, error) {
+			object, err := ec.unmarshalNString2string(ctx, "torrentContent")
+			if err != nil {
+				var zeroVal gqlmodel.TorrentContentQuery
+				return zeroVal, err
+			}
+			action, err := ec.unmarshalNString2string(ctx, "query")
+			if err != nil {
+				var zeroVal gqlmodel.TorrentContentQuery
+				return zeroVal, err
+			}
+			if ec.directives.Auth == nil {
+				var zeroVal gqlmodel.TorrentContentQuery
+				return zeroVal, errors.New("directive auth is not implemented")
+			}
+			return ec.directives.Auth(ctx, nil, directive0, object, action)
+		}
+
+		tmp, err := directive1(rctx)
+		if err != nil {
+			return nil, graphql.ErrorOnPath(ctx, err)
+		}
+		if tmp == nil {
+			return nil, nil
+		}
+		if data, ok := tmp.(gqlmodel.TorrentContentQuery); ok {
+			return data, nil
+		}
+		return nil, fmt.Errorf(`unexpected type %T from directive, should be github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel.TorrentContentQuery`, tmp)
 	})
 	if err != nil {
 		ec.Error(ctx, err)
@@ -16884,8 +17324,40 @@ func (ec *executionContext) _TorrentMutation_delete(ctx context.Context, field g
 		}
 	}()
 	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
-		ctx = rctx // use context from middleware stack in children
-		return ec.resolvers.TorrentMutation().Delete(rctx, obj, fc.Args["infoHashes"].([]protocol.ID))
+		directive0 := func(rctx context.Context) (any, error) {
+			ctx = rctx // use context from middleware stack in children
+			return ec.resolvers.TorrentMutation().Delete(rctx, obj, fc.Args["infoHashes"].([]protocol.ID))
+		}
+
+		directive1 := func(ctx context.Context) (any, error) {
+			object, err := ec.unmarshalNString2string(ctx, "torrent")
+			if err != nil {
+				var zeroVal *string
+				return zeroVal, err
+			}
+			action, err := ec.unmarshalNString2string(ctx, "delete")
+			if err != nil {
+				var zeroVal *string
+				return zeroVal, err
+			}
+			if ec.directives.Auth == nil {
+				var zeroVal *string
+				return zeroVal, errors.New("directive auth is not implemented")
+			}
+			return ec.directives.Auth(ctx, obj, directive0, object, action)
+		}
+
+		tmp, err := directive1(rctx)
+		if err != nil {
+			return nil, graphql.ErrorOnPath(ctx, err)
+		}
+		if tmp == nil {
+			return nil, nil
+		}
+		if data, ok := tmp.(*string); ok {
+			return data, nil
+		}
+		return nil, fmt.Errorf(`unexpected type %T from directive, should be *string`, tmp)
 	})
 	if err != nil {
 		ec.Error(ctx, err)
