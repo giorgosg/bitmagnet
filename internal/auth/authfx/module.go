@@ -37,6 +37,9 @@ func New() fx.Option {
 			api_key.NewService,
 			identity.NewAuthenticator,
 			http_auth.NewMiddleware,
+			http_auth.New,
+
+			newBootstrapWorker,
 
 			// Object actions and permissions are collected from value groups so
 			// that other modules can contribute their own without this module
