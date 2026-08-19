@@ -40,6 +40,37 @@
               ><mat-icon svgIcon="magnet" />{{ t("routes.torrents") }}</a
             >
           </li>
+          <li>
+            <a
+              mat-button
+              routerLink="users"
+              routerLinkActive
+              #linkUsers="routerLinkActive"
+              [class]="linkUsers.isActive ? 'active' : ''"
+              ><mat-icon>group</mat-icon>{{ t("routes.users") }}</a
+            >
+          </li>
+          <li>
+            <a
+              mat-button
+              routerLink="roles"
+              routerLinkActive
+              #linkRoles="routerLinkActive"
+              [class]="linkRoles.isActive ? 'active' : ''"
+              ><mat-icon>admin_panel_settings</mat-icon
+              >{{ t("routes.roles") }}</a
+            >
+          </li>
+          <li>
+            <a
+              mat-button
+              routerLink="invitations"
+              routerLinkActive
+              #linkInvitations="routerLinkActive"
+              [class]="linkInvitations.isActive ? 'active' : ''"
+              ><mat-icon>mail</mat-icon>{{ t("routes.invitations") }}</a
+            >
+          </li>
         </ul>
       </nav>
     </mat-drawer>

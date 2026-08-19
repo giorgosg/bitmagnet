@@ -1,14 +1,36 @@
 {
+  "account": {
+    "account": "Account",
+    "api_key_created": "API key created",
+    "api_key_take_note": "Take note of this key now — it cannot be shown again",
+    "new_api_key": "New API key"
+  },
+  "admin": {
+    "interval": {
+      "days_1": "__missing__",
+      "weeks_1": "__missing__"
+    }
+  },
   "auth": {
+    "claimed_by": "Claimed by",
     "confirm_password": "Confirm password",
+    "created_by": "Created by",
+    "expires_at": "Expires at",
+    "expiry": "Expiry",
     "invitation_code": "Invitation code",
+    "last_login_at": "Last login at",
     "login": "Login",
     "login_failed": "Login failed",
+    "logout": "Logout",
+    "new_invitation": "New invitation",
+    "new_role": "New role",
     "password": "Password",
     "password_has_insufficient_entropy": "Password has insufficient entropy",
     "passwords_do_not_match": "Passwords do not match",
     "register": "Register",
     "register_failed": "Register failed",
+    "role": "Role",
+    "unclaimed": "Unclaimed",
     "username": "Username"
   },
   "content_types": {
@@ -117,14 +139,24 @@
     "video": "Video"
   },
   "general": {
+    "actions": "Actions",
     "all": "All",
+    "code": "Code",
+    "confirm": "Confirm",
+    "copy_to_clipboard": "Copy to clipboard",
+    "created_at": "Created at",
+    "delete": "Delete",
     "dismiss": "Dismiss",
     "email": "Email",
     "error": "Error",
+    "name": "Name",
+    "never": "Never",
     "none": "None",
     "page_not_found": "Page not found",
     "refresh": "Refresh",
-    "status": "Status"
+    "save": "Save",
+    "status": "Status",
+    "system": "System"
   },
   "health": {
     "bitmagnet_is_status": "bitmagnet is {{status}}",
@@ -238,12 +270,17 @@
     "x_to_y_of_z": "{{x}} to {{y}} of {{z}}"
   },
   "routes": {
+    "account": "Account",
     "admin": "Admin",
+    "api_keys": "API keys",
     "dashboard": "Dashboard",
     "home": "Home",
+    "invitations": "Invitations",
     "jobs": "Jobs",
     "queues": "Queues",
+    "roles": "Roles",
     "torrents": "Torrents",
+    "users": "Users",
     "visualize": "Visualize"
   },
   "torrents": {

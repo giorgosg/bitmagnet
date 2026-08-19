@@ -142,6 +142,30 @@
         ><mat-icon>favorite</mat-icon>{{ t("layout.sponsor") }}</a
       >
     }
+    <button
+      mat-icon-button
+      [matMenuTriggerFor]="accountMenu"
+      [matTooltip]="t('routes.account')"
+    >
+      <mat-icon>{{ (user$ | async) ? "account_circle" : "login" }}</mat-icon>
+    </button>
+    <mat-menu #accountMenu="matMenu" class="layout-header-menu">
+      @if (user$ | async; as user) {
+        <a mat-menu-item routerLink="/account"
+          ><mat-icon>person</mat-icon>{{ user.username }}</a
+        >
+        <button mat-menu-item (click)="logout()">
+          <mat-icon>logout</mat-icon>{{ t("auth.logout") }}
+        </button>
+      } @else {
+        <a mat-menu-item routerLink="/login"
+          ><mat-icon>login</mat-icon>{{ t("auth.login") }}</a
+        >
+        <a mat-menu-item routerLink="/register"
+          ><mat-icon>person_add</mat-icon>{{ t("auth.register") }}</a
+        >
+      }
+    </mat-menu>
   </mat-toolbar>
   <div class="app-content">
     <ng-content></ng-content>
