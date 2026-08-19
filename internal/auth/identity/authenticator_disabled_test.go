@@ -95,6 +95,10 @@ func (s testStack) registerAdmin(t *testing.T) model.User {
 // Disabling an account must revoke the sessions it already has. Blocking only
 // new logins leaves a disabled user with full access until the token expires,
 // which defeats the point of disabling them.
+//
+// Revoked means the token stops resolving to its user — not that the request is
+// aborted. Aborting the chain leaves no identity at all, which wedges the UI;
+// see TestDisabledTokenFallsBackToAnonymous.
 func TestDisabledUserTokenIsRejected(t *testing.T) {
 	t.Parallel()
 
@@ -106,16 +110,63 @@ func TestDisabledUserTokenIsRejected(t *testing.T) {
 	require.NotEmpty(t, login.Token)
 
 	// The token works while the account is enabled.
-	_, matched, err := stack.authenticator.Authenticate(context.Background(), login.Token)
+	resolved, matched, err := stack.authenticator.Authenticate(context.Background(), login.Token)
 	require.NoError(t, err)
 	require.True(t, matched)
+	require.NotNil(t, resolved.Self().User)
 
 	_, err = stack.userService.SetEnabled(context.Background(), admin.ID, false)
 	require.NoError(t, err)
 
-	_, _, err = stack.authenticator.Authenticate(context.Background(), login.Token)
-	require.Error(t, err, "a disabled account's existing token must be rejected")
-	assert.ErrorIs(t, err, user.ErrDisabled)
+	resolved, _, err = stack.authenticator.Authenticate(context.Background(), login.Token)
+	require.NoError(t, err)
+	assert.Nil(t, resolved.Self().User,
+		"a disabled account's existing token must no longer resolve to it")
+}
+
+// The disabled token must leave the caller anonymous rather than unauthenticated.
+//
+// Returning a matched error aborted the chain, so the request carried no
+// identity and every field was refused — including self.identity, the query the
+// UI polls to notice its token is dead and clear it. The session stayed wedged
+// across reloads until browser storage was cleared by hand.
+func TestDisabledTokenFallsBackToAnonymous(t *testing.T) {
+	t.Parallel()
+
+	stack := newTestStack(t)
+	admin := stack.registerAdmin(t)
+
+	login, err := stack.userService.Login(context.Background(), "admin", testPassword)
+	require.NoError(t, err)
+
+	_, err = stack.userService.SetEnabled(context.Background(), admin.ID, false)
+	require.NoError(t, err)
+
+	resolved, matched, err := stack.authenticator.Authenticate(context.Background(), login.Token)
+	require.NoError(t, err, "a revoked token must not abort the chain")
+	require.True(t, matched, "the anonymous authenticator must still match")
+	require.NotNil(t, resolved)
+	assert.Nil(t, resolved.Self().User)
+}
+
+// A token naming an account that has since been deleted is revoked in the same
+// way, and must degrade the same way rather than wedging the session.
+func TestDeletedUserTokenFallsBackToAnonymous(t *testing.T) {
+	t.Parallel()
+
+	stack := newTestStack(t)
+	admin := stack.registerAdmin(t)
+
+	login, err := stack.userService.Login(context.Background(), "admin", testPassword)
+	require.NoError(t, err)
+
+	require.NoError(t, stack.userService.Delete(context.Background(), admin.ID))
+
+	resolved, matched, err := stack.authenticator.Authenticate(context.Background(), login.Token)
+	require.NoError(t, err)
+	require.True(t, matched)
+	require.NotNil(t, resolved)
+	assert.Nil(t, resolved.Self().User)
 }
 
 // The same for machine credentials, which matters more: API keys have no
@@ -157,15 +208,17 @@ func TestReEnabledUserIsAcceptedAgain(t *testing.T) {
 	_, err = stack.userService.SetEnabled(context.Background(), admin.ID, false)
 	require.NoError(t, err)
 
-	_, _, err = stack.authenticator.Authenticate(context.Background(), login.Token)
-	require.Error(t, err)
+	revoked, _, err := stack.authenticator.Authenticate(context.Background(), login.Token)
+	require.NoError(t, err)
+	require.Nil(t, revoked.Self().User)
 
 	_, err = stack.userService.SetEnabled(context.Background(), admin.ID, true)
 	require.NoError(t, err)
 
-	_, matched, err := stack.authenticator.Authenticate(context.Background(), login.Token)
+	resolved, matched, err := stack.authenticator.Authenticate(context.Background(), login.Token)
 	require.NoError(t, err)
-	assert.True(t, matched)
+	require.True(t, matched)
+	assert.NotNil(t, resolved.Self().User, "re-enabling restores the existing session")
 }
 
 // An expired session must degrade to anonymous, not lock the caller out.

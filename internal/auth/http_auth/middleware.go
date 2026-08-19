@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/identity"
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/user"
 	"github.com/gin-gonic/gin"
 )
 
@@ -29,6 +30,14 @@ func NewMiddleware(authenticator identity.Authenticator) Middleware {
 
 func (a *authMiddleware) AttachAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// The login throttle is keyed partly by where a request came from, and
+		// this is the only layer that knows. It goes on the request context
+		// rather than the gin one because resolvers downstream only ever see
+		// the former.
+		c.Request = c.Request.WithContext(
+			user.ContextWithLoginSource(c.Request.Context(), c.ClientIP()),
+		)
+
 		identity, matched, err := a.authenticator.Authenticate(c, extractToken(c))
 
 		if err == nil && matched {

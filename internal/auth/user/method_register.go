@@ -10,7 +10,6 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/gorm"
 )
 
 type RegisterRequest struct {
@@ -59,6 +58,29 @@ func (s *service) Register(ctx context.Context, request RegisterRequest) (model.
 		return model.User{}, fmt.Errorf("%w: %w: %w", Err, ErrRegister, ErrPasswordInsufficientEntropy)
 	}
 
+	// Resolve the invitation before hashing anything. bcrypt is deliberately
+	// expensive and self.register is reachable anonymously, so hashing first
+	// meant an unauthenticated caller could spend a full hash per request just
+	// by posting arbitrary codes — a cheap way to saturate every core.
+	//
+	// This pass only rejects codes that were never going to work. The
+	// transaction below still re-reads the invitation and claims it atomically,
+	// because anything learned here can be stale by the time the insert runs.
+	if request.InvitationCode != "" {
+		q, err := s.Dao()
+		if err != nil {
+			return model.User{}, fmt.Errorf("%w: %w: %w", Err, ErrRegister, err)
+		}
+
+		if _, err := checkInvitation(ctx, q, request.InvitationCode); err != nil {
+			if isInvitationUserError(err) {
+				return model.User{}, fmt.Errorf("%w: %w: %w", Err, ErrRegister, err)
+			}
+
+			return model.User{}, fmt.Errorf("%w: %w: %w: %w", Err, ErrRegister, ErrTransaction, err)
+		}
+	}
+
 	hashedPassword, err := bcrypt.GenerateFromPassword(
 		[]byte(request.Password),
 		int(s.passwordHashingCost.Get()),
@@ -74,30 +96,15 @@ func (s *service) Register(ctx context.Context, request RegisterRequest) (model.
 	errTx := s.DaoTransaction(func(tx *dao.Query) error {
 		// Check invitation validity
 		if request.InvitationCode != "" {
-			invitation, err := tx.WithContext(ctx).Invitation.
-				Where(tx.Invitation.Code.Eq(request.InvitationCode)).
-				First()
+			invitation, err := checkInvitation(ctx, tx, request.InvitationCode)
 			if err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					errUser = ErrInvitationNotFound
+				if isInvitationUserError(err) {
+					errUser = err
 
 					return nil
 				}
 
 				return err
-			}
-
-			if invitation.ClaimedBy.Valid {
-				errUser = ErrInvitationClaimed
-				return nil
-			}
-
-			// Expired means the expiry is in the past. The comparison was
-			// inverted, which both accepted expired invitations and refused
-			// valid ones; api_key.Auth gets the same test right.
-			if invitation.ExpiresAt.Valid && invitation.ExpiresAt.Time.Before(time.Now()) {
-				errUser = ErrInvitationExpired
-				return nil
 			}
 
 			user.RoleName = invitation.RoleName

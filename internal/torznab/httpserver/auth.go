@@ -3,7 +3,6 @@ package httpserver
 import (
 	"net/http"
 
-	"github.com/bitmagnet-io/bitmagnet/internal/auth/http_auth"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/identity"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/rbac"
 	"github.com/bitmagnet-io/bitmagnet/internal/torznab"
@@ -71,27 +70,30 @@ func (h handler) authorize(ctx *gin.Context) bool {
 }
 
 func (h handler) resolveIdentity(ctx *gin.Context) (identity.Identity, bool) {
-	// An explicit key on the request takes precedence over whatever the global
-	// middleware resolved, so a client can always present its own credential.
-	if key := torznabAPIKey(ctx); key != "" {
-		id, matched, err := h.authenticator.Authenticate(ctx.Request.Context(), key)
-		if err != nil || !matched {
-			return nil, false
-		}
-
-		return id, true
-	}
-
-	if id, ok := http_auth.GetIdentity(ctx); ok {
-		return id, true
-	}
-
-	// No credential and no identity from the middleware — which also covers the
-	// middleware not being mounted at all. Resolve the anonymous identity
-	// directly rather than refusing, so authorization here depends only on the
-	// permission model and not on how the server happens to be assembled.
-	id, matched, err := h.authenticator.Authenticate(ctx.Request.Context(), "")
+	// Only the credential Torznab defines counts here: the apikey query
+	// parameter or the X-Api-Key header. Whatever the global bearer middleware
+	// resolved is deliberately ignored.
+	//
+	// Reading that identity back made a browser session a third credential type
+	// for this endpoint. An operator with the web UI open had their JWT attached
+	// by the middleware, so the endpoint answered 200 to a request carrying no
+	// apikey at all — which means any page that could make the browser issue the
+	// request got Torznab access on the operator's behalf.
+	//
+	// An empty token resolves the anonymous identity rather than refusing
+	// outright, so whether the endpoint is open depends only on the permission
+	// model and not on how the server happens to be assembled — including the
+	// middleware not being mounted.
+	id, matched, err := h.authenticator.Authenticate(ctx.Request.Context(), torznabAPIKey(ctx))
 	if err != nil || !matched {
+		return nil, false
+	}
+
+	// A key presented in the apikey slot is still resolved by the shared
+	// authenticator chain, which would happily accept a JWT there too. Machine
+	// credentials only: an identity carrying a user but no API key is an
+	// interactive session, whichever slot it arrived in.
+	if self := id.Self(); self.User != nil && self.APIKey == nil {
 		return nil, false
 	}
 

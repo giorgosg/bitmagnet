@@ -2,6 +2,7 @@ package identity
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/jwt"
@@ -31,14 +32,30 @@ func (a authenticatorJWT) Authenticate(ctx context.Context, token string) (Ident
 
 	usr, err := a.userService.Get(ctx, claims.UserID)
 	if err != nil {
+		// An account that no longer exists is a revoked credential, not a
+		// failure to look one up: fall through, exactly as for a token that
+		// could not be parsed. Any other error is the database talking, and
+		// must not be allowed to silently downgrade a session to anonymous.
+		if errors.Is(err, user.ErrNotFound) {
+			return nil, false, err
+		}
+
 		return nil, true, err
 	}
 
 	// A token outlives the account state it was issued against, so disabling an
 	// account has to be checked here as well as at login — otherwise it revokes
 	// nothing until the token expires.
+	//
+	// Reporting no match rather than an error is what makes the revocation
+	// recoverable. Claiming the match aborts the chain, so no identity reaches
+	// the request and self.identity itself answers `unauthorized` — the very
+	// query the UI polls to notice its token is dead and clear it. The session
+	// stayed wedged, re-sending the revoked token on every reload, until the
+	// operator emptied browser storage by hand. Falling through leaves the
+	// caller anonymous, which is what a revoked credential should mean.
 	if !usr.Enabled {
-		return nil, true, fmt.Errorf("%w: %w", user.Err, user.ErrDisabled)
+		return nil, false, fmt.Errorf("%w: %w", user.Err, user.ErrDisabled)
 	}
 
 	role, err := a.rbac.GetRole(ctx, rbac.Role(usr.RoleName))

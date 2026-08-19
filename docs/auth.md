@@ -19,8 +19,18 @@ is why bitmagnet is normally run on a trusted network only.
 ## Authentication is opt-in, and off by default
 
 `auth.anonymous_access` defaults to **true**, which grants the `anon` role every
-registered object action. While it is on, every existing client keeps working with no
-credentials: GraphQL, Torznab and the web UI behave exactly as they did before.
+registered object action **except auth administration**. While it is on, every existing
+client keeps working with no credentials: GraphQL, Torznab and the web UI behave exactly
+as they did before.
+
+The exclusion is what makes the default a starting point rather than a trapdoor. Granting
+auth administration to `anon` let an unauthenticated caller give the `anon` role a
+wildcard permission through `putRole` — and since role grants live in the database while
+this one is only in memory, that wildcard survived setting `anonymous_access` to `false`.
+The switch that is supposed to turn authentication on left the instance open, with
+nothing outward to show for it. Nothing is lost by excluding it: the auth surface is new,
+so no previously open installation had it, and the first administrator registers through
+`self.register`, which the baseline grants.
 
 Setting it to `false` is what turns authentication on. This is the same mechanism
 `upstream/next` uses — its `rbac.ParamAnonymousAccess` also defaults to `true` — except
@@ -37,7 +47,7 @@ anything for anyone, and an operator opts in when they want it.
 internal/auth/user/        register, login, invite, password entropy, set_role,
                            set_enabled, list/get/delete
 internal/auth/rbac/        Casbin enforcement, roles, permissions, object actions
-internal/auth/identity/    authenticator chain: anon | api_key | jwt
+internal/auth/identity/    authenticator chain: jwt | api_key | anon
 internal/auth/api_key/     encoding, auth, create/delete/list, repository
 internal/auth/jwt/         token issue and verification
 internal/auth/http_auth/   gin middleware and http server option
@@ -51,6 +61,19 @@ API key, or anonymously, and Casbin evaluates that identity against an object ac
 The middleware only _resolves_ an identity and attaches it to the request context — it
 never rejects. Enforcement happens above it: on GraphQL through the `@auth` directive,
 and in the Torznab handler.
+
+**The chain always resolves something.** Every way a credential can fail — unparseable,
+expired, naming a deleted account, naming a disabled one — falls through to the anonymous
+authenticator rather than aborting. Only an infrastructure failure, such as the database
+being unreachable, produces an error and no identity.
+
+This is a deliberate invariant, and it took three separate fixes to hold. A credential
+that aborts the chain leaves the request with no identity at all, so _every_ field is
+refused — including `self.identity` and `self.login`, the two calls the UI needs to
+notice its token is dead and recover. The session then stays wedged across reloads,
+re-sending the dead token, until the operator clears browser storage by hand. Revocation
+is expressed as "this token no longer resolves to its user", not as "this request is
+aborted"; the permission model does the rest.
 
 ### GraphQL enforcement
 
@@ -83,7 +106,7 @@ byte-identical to `next`'s, which is the strongest evidence that the extraction 
 
 | Key                              | Default        |                                                                   |
 | -------------------------------- | -------------- | ----------------------------------------------------------------- |
-| `auth.anonymous_access`          | `true`         | the opt-in switch; `false` enables auth                           |
+| `auth.anonymous_access`          | `true`         | `false` enables auth; `true` grants anon all but auth admin       |
 | `auth.jwt_secret`                | _(none)_       | random per process when unset, so tokens do not survive a restart |
 | `auth.jwt_duration`              | `24h`          |                                                                   |
 | `auth.rbac_cache_ttl`            | `1m`           |                                                                   |
@@ -92,10 +115,47 @@ byte-identical to `next`'s, which is the strongest evidence that the extraction 
 | `auth.email_verification`        | `true`         |                                                                   |
 | `auth.password_min_entropy`      | `70`           |                                                                   |
 | `auth.password_hashing_cost`     | bcrypt default |                                                                   |
-| `auth.login_requests_per_minute` | `30`           |                                                                   |
-| `auth.login_request_burst`       | `5`            |                                                                   |
+| `auth.login_requests_per_minute` | `30`           | per bucket, not per process — see below                           |
+| `auth.login_request_burst`       | `5`            | per bucket, not per process — see below                           |
 
 Defaults match the corresponding parameters on `next`.
+
+### Resisting anonymous abuse
+
+`self.login` and `self.register` are reachable without credentials by construction —
+they are how anyone gets credentials in the first place — and both do bcrypt work. That
+makes them the two endpoints an unauthenticated caller can aim at.
+
+**Login is throttled per bucket, and refuses rather than queues.** `next` uses one
+process-wide `rate.Limiter` and calls `Wait` on it. Both halves of that are wrong: the
+budget is shared, so five wrong guesses against usernames that do not exist lock out
+every account on the instance; and waiting holds the request open instead of answering
+it. Attempts are now counted against an LRU of keyed token buckets — one for
+`(account, source)`, one for the source alone with a wider budget — and an attempt that
+cannot be served immediately is refused immediately.
+
+There is deliberately **no per-account bucket spanning all sources**. It is the one key
+an attacker can fill on someone else's behalf, which would let anyone lock any account
+out from its owner's own address. Keying by `(account, source)` means an attacker's
+guesses only ever exhaust their own budget; the cost is that an attacker holding many
+addresses gets a few guesses from each, which against a password meeting the entropy
+floor is not a threat.
+
+The source comes from the HTTP middleware, so a caller reaching the service by any other
+route has none and is bounded by account alone. The bucket map is size-capped, so it
+cannot be grown without bound by cycling keys; eviction only resets a bucket, which fails
+toward availability rather than lockout.
+
+**Registration validates the invitation before it hashes anything.** bcrypt is
+deliberately expensive, and hashing first meant an anonymous caller could spend a full
+hash per request by posting arbitrary invitation codes — a cheap way to saturate every
+core. The transaction that claims the invitation still re-reads it, because anything
+learned before the transaction can be stale by the time the insert runs; the early pass
+only rejects codes that were never going to work.
+
+Login's own comparison runs against a decoy hash when the account does not exist, so the
+work done for a miss matches the work done for a hit. Returning early there was a
+username-enumeration oracle even though the error text was identical.
 
 ### First administrator
 
@@ -103,6 +163,14 @@ An `auth_initial_invitation` startup worker creates an admin invitation when no 
 admin user exists, and logs its code. Without it, an installation that enables
 authentication has no way in. It is idempotent: a second start finds the unclaimed
 invitation rather than issuing another.
+
+**The check and the insert are serialized by a Postgres advisory lock** held for the
+transaction. bitmagnet is routinely run as more than one process against one database,
+and without the lock every replica reads the same empty state and inserts its own code: a
+synchronized 16-replica start produced 16 distinct, non-expiring administrator
+invitations, each a permanent path to an admin account. It has to be a database lock
+rather than a mutex, because the processes racing here do not share memory. The lock
+releases on commit or rollback, so a crashed replica cannot wedge the next start.
 
 ### Torznab
 
@@ -117,6 +185,18 @@ landscape that solved it:
 - **no network-based bypass.** That fork deliberately excludes Torznab from its
   trusted-network bypass and the same call is made here. Being on the LAN is not a
   credential for machine access.
+
+**Machine credentials only, and that is enforced in both directions.** The handler
+ignores whatever identity the global bearer middleware resolved, and rejects any
+identity that carries a user but no API key — an interactive session, whichever slot it
+arrived in. Reading the ambient identity made a browser session a third credential type
+for this endpoint: an operator with the web UI open had their JWT attached by the
+middleware, so Torznab answered `200` to a request carrying no `apikey` at all. Given
+the permissive default CORS policy, that means any page that could make the browser
+issue the request got Torznab access on the operator's behalf. An absent credential
+resolves the anonymous identity rather than refusing outright, so whether the endpoint
+is open still depends only on the permission model — including when the middleware is
+not mounted at all.
 
 **The key travels in the URL, so it reaches logs.** This application redacts
 `apikey` (and `token`, `password`, `secret`, `api_key`) from its own request
@@ -140,9 +220,11 @@ invitations screens under `dashboard`. Ported from `next`, whose auth components
 Angular syntax newer than this lineage's Angular 18 supports.
 
 The session token is attached by an Apollo link in `app.config.ts`. A token that no
-longer resolves to a user is cleared: the identity chain always resolves _something_,
-falling back to anonymous, so an expired token yields a successful response with a null
-user rather than an error.
+longer resolves to a user is cleared, and this is the client half of the always-resolves
+invariant above: an expired, revoked or deleted-account token yields a successful
+`self.identity` response with a null user rather than an error, which is the signal the
+UI acts on. Were the server to refuse the query instead, the UI would never reach its
+token-clearing code.
 
 ### Endpoints that are not GraphQL
 
@@ -249,6 +331,61 @@ failing first:
 
 Also removed rather than shipped: an expandable detail row in `next`'s users table whose
 entire content is the literal string `Hello`.
+
+### Defects found by review
+
+Everything above compiled, passed `go vet`, and passed the whole suite before any of the
+below was known. That is the argument for the repo's test-first rule, and each of these
+landed with a test that was watched failing against the unfixed code first. They are
+described where they belong in the sections above; this is the index, in the order the
+fixes landed.
+
+**Authorization was missing rather than wrong.**
+
+| Defect                                               | Effect                                                    |
+| ---------------------------------------------------- | --------------------------------------------------------- |
+| GraphQL surface was unenforced                       | every field reachable regardless of the `@auth` directive |
+| `/import`, `/metrics`, `/debug/pprof` were unguarded | a data-mutating importer and `pprof/cmdline` left open    |
+| `anon` was granted auth administration               | see below — a trapdoor, not merely an open door           |
+| Torznab trusted the ambient bearer identity          | a browser session authenticated an API-key-only endpoint  |
+| API key could mint a second key naming any action    | scope escalation to the owner's full role                 |
+
+**Credentials did not mean what they said.**
+
+| Defect                                        | Effect                                                     |
+| --------------------------------------------- | ---------------------------------------------------------- |
+| Invitation expiry comparison inverted         | expired invitations accepted, valid ones refused           |
+| Invitation claimed by an unconditional update | concurrent registrations all claimed the same invitation   |
+| Disabling a user revoked nothing              | existing tokens and API keys worked until they expired     |
+| Bootstrap did an unlocked check-then-insert   | 16 replicas produced 16 permanent administrator codes      |
+| `SetRole` updated without a `WHERE` clause    | gorm's global-update guard was the only thing stopping it  |
+| Roughly one API key in 256 could not decode   | `decodedLength` used the base32 formula on a 16-byte value |
+
+**Disclosure and abuse.**
+
+| Defect                                     | Effect                                          |
+| ------------------------------------------ | ----------------------------------------------- |
+| Login distinguished missing from wrong     | username enumeration, by message and by timing  |
+| Torznab keys were logged verbatim          | log read access equalled application access     |
+| Registration hashed before validating      | one bcrypt per anonymous request, in parallel   |
+| Login limiter was process-wide, and waited | five wrong guesses locked out every account     |
+| Revoked tokens aborted the chain           | UI wedged, unable to reach the call clearing it |
+
+Three are worth singling out, because in each the security control worked and something
+around it did not — the failure mode least likely to be caught by a test written after
+the fix.
+
+The **anonymous-access trapdoor** was the worst of them. Granting `anon` every registered
+object action included auth administration, so an unauthenticated caller could call
+`putRole` and give the `anon` role a wildcard. Role grants live in the database while the
+compatibility grant is only in memory, so the wildcard **survived setting
+`anonymous_access` to `false`**: the switch documented as "this is how you turn
+authentication on" left the instance wide open, with nothing visible to show for it.
+
+The **chain-abort lockout** and the **login limiter** were both failures of the recovery
+path. In each case the control did its job and made the way back out unreachable: a dead
+token refused the query that would have cleared it, and a shared login budget refused the
+login that would have replaced it.
 
 ### Lint policy
 

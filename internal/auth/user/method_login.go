@@ -8,10 +8,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/bitmagnet-io/bitmagnet/internal/atomic"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
 	"golang.org/x/crypto/bcrypt"
-	"golang.org/x/time/rate"
 	"gorm.io/gorm"
 )
 
@@ -21,7 +19,7 @@ type LoginResult struct {
 }
 
 func (s *service) Login(ctx context.Context, username, password string) (LoginResult, error) {
-	if err := s.loginLimiter.Wait(ctx); err != nil {
+	if !s.loginLimiter.allow(username, loginSourceFromContext(ctx)) {
 		return LoginResult{}, fmt.Errorf("%w: %w", Err, ErrLoginRequestLimiter)
 	}
 
@@ -81,37 +79,6 @@ func (s *service) Login(ctx context.Context, username, password string) (LoginRe
 		Token: token,
 		User:  *user,
 	}, nil
-}
-
-func (rpm LoginRequestsPerMinute) limit() rate.Limit {
-	return rate.Every(time.Minute / time.Duration(rpm))
-}
-
-func newLoginLimiter(
-	rpm *atomic.Value[LoginRequestsPerMinute],
-	burst *atomic.Value[LoginRequestBurst],
-) *rate.Limiter {
-	currentRpm, currentBurst := rpm.Get(), burst.Get()
-	limiter := rate.NewLimiter(
-		currentRpm.limit(),
-		int(currentBurst),
-	)
-
-	rpm.Subscribe(func(rpm LoginRequestsPerMinute) {
-		if rpm != currentRpm {
-			currentRpm = rpm
-			limiter.SetLimit(currentRpm.limit())
-		}
-	})
-
-	burst.Subscribe(func(burst LoginRequestBurst) {
-		if burst != currentBurst {
-			currentBurst = burst
-			limiter.SetBurst(int(currentBurst))
-		}
-	})
-
-	return limiter
 }
 
 // decoyPasswordHash is a hash of a value no caller can supply, compared against

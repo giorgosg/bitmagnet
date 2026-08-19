@@ -8,7 +8,6 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/jwt"
 	"github.com/bitmagnet-io/bitmagnet/internal/database"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
-	"golang.org/x/time/rate"
 )
 
 type Service interface {
@@ -41,7 +40,7 @@ type service struct {
 	emailVerification   *atomic.Value[EmailVerification]
 	passwordMinEntropy  *atomic.Value[PasswordMinEntropy]
 	passwordHashingCost *atomic.Value[PasswordHashingCost]
-	loginLimiter        *rate.Limiter
+	loginLimiter        *loginLimiter
 }
 
 // revive:disable:argument-limit
