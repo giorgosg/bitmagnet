@@ -5,6 +5,16 @@ type Config struct {
 	GinMode      string
 	Cors         CorsConfig
 	Options      []string
+	// TrustedProxies lists the CIDRs whose X-Forwarded-For and X-Real-IP headers
+	// may be believed. Empty means believe nobody, and the client address is the
+	// peer that actually opened the connection.
+	//
+	// Gin's own default is to trust every proxy, which makes the reported client
+	// address a header the caller writes. Anything keyed by it — the login
+	// throttle above all — is then keyed by a value the attacker chooses, and
+	// bounds nothing. An operator running behind a reverse proxy has to name it
+	// here for the real client address to survive the hop.
+	TrustedProxies []string
 }
 
 type CorsConfig struct {

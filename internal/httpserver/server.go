@@ -28,6 +28,24 @@ type Result struct {
 	Worker worker.Worker `group:"workers"`
 }
 
+// NewEngine builds the gin engine with the settings that have to hold before any
+// handler runs. It is exported so that tests exercising middleware get an engine
+// configured the way the real server configures one — the proxy trust below is
+// invisible at the point where it matters, and setting it up by hand in a test
+// would only ever test the test.
+func NewEngine(config Config) (*gin.Engine, error) {
+	g := gin.New()
+
+	// Must precede anything that reads ClientIP. Gin trusts every proxy by
+	// default, which makes the reported client address a header the caller
+	// writes; see the TrustedProxies field.
+	if err := g.SetTrustedProxies(config.TrustedProxies); err != nil {
+		return nil, err
+	}
+
+	return g, nil
+}
+
 func New(p Params) Result {
 	var s *http.Server
 
@@ -37,7 +55,12 @@ func New(p Params) Result {
 			fx.Hook{
 				OnStart: func(context.Context) error {
 					gin.SetMode(p.Config.GinMode)
-					g := gin.New()
+
+					g, engineErr := NewEngine(p.Config)
+					if engineErr != nil {
+						return engineErr
+					}
+
 					g.Use(ginzap.Ginzap(p.Logger.Named("gin"), time.RFC3339, true), gin.Recovery())
 					options, optionsErr := resolveOptions(p.Config.Options, p.Options)
 					if optionsErr != nil {
