@@ -1,6 +1,7 @@
 # Other forks
 
-Surveyed but not recommended as merge sources. Recorded so they don't get re-triaged.
+Forks already triaged and set aside, recorded so nobody spends the afternoon triaging
+them again. **Snapshot:** surveyed 2026-08-18.
 
 ## nigowl/bitmagnet
 

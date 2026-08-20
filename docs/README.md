@@ -1,47 +1,35 @@
 # bitmagnet — working notes
 
-Notes on the state of [bitmagnet](https://github.com/bitmagnet-io/bitmagnet) and its
-ecosystem, written for anyone trying to get into hacking on it.
+Reference for hacking on [bitmagnet](https://github.com/bitmagnet-io/bitmagnet) and for
+mining its ecosystem. The rules that apply to every change live one level up in
+[AGENTS.md](../AGENTS.md); these pages carry the reasoning, the measurements, and the
+longer examples behind them.
 
 Upstream development is slow-moving, and a fair amount of real work has accumulated in
-community forks and unmerged PRs instead. These pages map that out: where the code is,
-what's already been fixed by someone, and what's worth picking up.
+community forks and unmerged PRs instead. Much of what follows maps that out: where the
+code is, what someone has already fixed, and what is worth picking up.
 
-They are _working notes_, not user documentation — the user docs live in `bitmagnet.io/`
-and at [bitmagnet.io](https://bitmagnet.io).
+These are _working notes_. The user documentation lives in `bitmagnet.io/` and at
+[bitmagnet.io](https://bitmagnet.io).
 
-## Start here
+## Which page, and when
 
-| Doc                                            | What's in it                                                          |
-| ---------------------------------------------- | --------------------------------------------------------------------- |
-| [hacking.md](hacking.md)                       | Making your first change: toolchain, generated code, adding a feature |
-| [architecture.md](architecture.md)             | How the Go application is wired together                              |
-| [upstream-status.md](upstream-status.md)       | State of upstream `main`, the `next` rewrite, and the PR queue        |
-| [forks/](forks/README.md)                      | What the community forks contain, and which parts are worth taking    |
-| [integration-status.md](integration-status.md) | What has reached `trunk`, what is next, and what was deferred         |
-| [auth.md](auth.md)                             | bitmagnet has no authentication — the three available implementations |
-| [git-workflow.md](git-workflow.md)             | Reviewing forks and PRs without drowning in generated diffs           |
+| Read                                           | When                                                                                  |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------- |
+| [hacking.md](hacking.md)                       | Making a change: toolchain, feature shape, GraphQL, migrations, testing at real scale |
+| [architecture.md](architecture.md)             | Working out what a package does, or how `fx` assembles the binary                     |
+| [porting.md](porting.md)                       | Measuring, reviewing, or cherry-picking from a fork or an upstream PR                 |
+| [forks/](forks/README.md)                      | Choosing which downstream repo a change should come from                              |
+| [upstream-status.md](upstream-status.md)       | Sending a change upstream, or weighing whether the `next` rewrite makes it moot       |
+| [integration-status.md](integration-status.md) | Checking whether a candidate is already merged, queued, or rejected                   |
+| [auth.md](auth.md)                             | Adding or protecting an externally reachable interface                                |
+| [agents/](agents/issue-tracker.md)             | Filing an issue, applying a triage label, or looking for domain docs                  |
 
-## If you're using an LLM assistant
+## Snapshots expire
 
-Two pages carry most of the value, because they cover the things an assistant will
-otherwise get confidently wrong:
+The fork survey, the upstream survey, and every divergence count on these pages are
+**snapshots**, taken 2026-08-18 against upstream `main` at `e31b30d` (2026-05-21). The
+figures were patch-equivalence based and accurate that day; the active forks move.
+Re-measure with the commands in [porting.md](porting.md) before acting on a number.
 
-- [hacking.md](hacking.md#the-single-most-important-thing-generated-code) — the table of
-  generated files. Assistants routinely edit `gql.gen.go` by hand to make a schema change
-  compile; the next `task gen` silently undoes it.
-- [git-workflow.md](git-workflow.md#three-analysis-gotchas) — why GitHub's ahead/behind
-  counts, three-dot diffs, and raw diffstats all give wrong answers for these particular
-  forks.
-
-## Status
-
-Fork and PR survey carried out 2026-08-18, against upstream `main` at `e31b30d`
-(2026-05-21). Divergence figures are patch-equivalence based and were accurate that day;
-the active forks move, so re-run the commands in
-[git-workflow.md](git-workflow.md) rather than trusting the numbers indefinitely.
-
-Anything named `*.local.md` is gitignored at any depth, which is where
-deployment-specific measurements and personal plans go. That keeps the pages above
-generally useful while leaving somewhere obvious to put notes that aren't. Nothing is
-missing from this directory as a result — the local files are purely additive.
+Pages carrying snapshots say so at the top, with their date.

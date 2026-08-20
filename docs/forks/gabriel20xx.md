@@ -2,6 +2,8 @@
 
 <https://github.com/gabriel20xx/Bitmagnet> · remote `gabriel20xx` · branch `main`
 
+**Snapshot:** surveyed 2026-08-18. See [integration-status.md](../integration-status.md) for what has been taken from it since.
+
 **86 unique commits, 0 missing from upstream.** Active Jul 2026.
 Real diff: 226 Go files / 715 files total. Go module path unchanged.
 

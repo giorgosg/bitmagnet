@@ -1,13 +1,14 @@
 # Integration status
 
-This is the compact ledger for downstream work evaluated for `trunk`. The fork pages
-under [forks/](forks/README.md) explain the source repositories; this page records what
-we actually accepted, what we intend to evaluate next, and why plausible patches were
-deferred.
+The ledger of downstream work evaluated for `trunk`: what was accepted, what is queued
+next, and why plausible patches were turned down. Read the last section before starting
+on a fork commit — several obvious-looking candidates are there with the measurement that
+killed them. The fork pages under [forks/](forks/README.md) describe the source
+repositories themselves.
 
-Update this page when a candidate is merged, rejected, or superseded. A source commit
+Update this page whenever a candidate is merged, rejected, or superseded. A source commit
 listed here is attribution and provenance, not permission to cherry-pick it without the
-test-first review described in [git-workflow.md](git-workflow.md).
+review in [porting.md](porting.md) and a test seen **red**.
 
 ## Integrated into trunk
 
@@ -34,23 +35,24 @@ test-first review described in [git-workflow.md](git-workflow.md).
 | [#22](https://github.com/giorgosg/bitmagnet/pull/22) | Parse alternative `S4 - 02` episode syntax                                  | upstream #500 `da043e421`, adapted               | Parser regression observed red; omitted call site repaired |
 | [#23](https://github.com/giorgosg/bitmagnet/pull/23) | Add AV1 codec support                                                       | upstream #515 `605de43a3`                        | Inference regression observed red; generators verified     |
 | [#24](https://github.com/giorgosg/bitmagnet/pull/24) | Cache Go module downloads in the Docker build                               | upstream #513 `ba737ad25`                        | Equivalent build and full CI passed                        |
+| [#26](https://github.com/giorgosg/bitmagnet/pull/26) | Preserve compact season ranges                                              | local — regression from #22                      | Parser regression observed red                             |
 
-## Next candidates
+## In flight
 
-In suggested evaluation order:
+- **The `upstream/next` auth port**, on `codex/auth-port` as
+  [#28](https://github.com/giorgosg/bitmagnet/pull/28). [auth.md](auth.md) is the live
+  record for it — the dependency map, the port order, and what is still open. Leave both
+  the branch and that page to it.
 
-1. lodestone `751a09607` / integration candidate `f32ebd2f0` — race metadata requests
-   across a bounded number of peers. Keep the idea, but redesign the implementation: the
-   candidate delays result consumption while filling semaphore slots and its cancellation
-   branch does not exit the enclosing loop. Cover prompt first-success return, the global
-   concurrency bound, cancellation, all-failure behavior, and banned metadata.
-2. Map and port the `upstream/next` auth architecture onto the `main` lineage. Preserve
-   its identity, user, API-key, JWT, and RBAC boundaries; add a focused Torznab API-key
-   adapter because `next` does not currently wire auth into that surface. Use the two
-   main-lineage implementations as integration-test references, not as the design basis;
-   see [auth.md](auth.md).
+## Next candidate
 
-## Deferred or already resolved
+lodestone `751a09607` / integration candidate `f32ebd2f0` — race metadata requests across
+a bounded number of peers. Keep the idea, but redesign the implementation: the candidate
+delays result consumption while filling semaphore slots, and its cancellation branch does
+not exit the enclosing loop. Cover prompt first-success return, the global concurrency
+bound, cancellation, all-failure behavior, and banned metadata.
+
+## Rejected, deferred, or already resolved
 
 - niklas2233 `0b3f1480b` edits only `categories.gen.go`; its generator was removed from
   the repository. Do not hand-edit the generated file. Revisit only with a maintained

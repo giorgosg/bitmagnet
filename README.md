@@ -7,3 +7,6 @@ A self-hosted BitTorrent indexer, DHT crawler, content classifier and torrent se
 > into the `trunk` branch while keeping `main` as a pristine upstream mirror.
 
 Visit the website at [bitmagnet.io](https://bitmagnet.io).
+
+Working on the code: [AGENTS.md](AGENTS.md) for the rules, [docs/](docs/README.md) for the
+notes behind them.
