@@ -83,7 +83,7 @@ func unauthorizedXML(t *testing.T) string {
 func requestCaps(t *testing.T, h *testHarness, path, header, remoteAddr string) {
 	t.Helper()
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, path, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 	require.NoError(t, err)
 
 	if header != "" {

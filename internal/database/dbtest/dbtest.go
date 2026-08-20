@@ -63,8 +63,9 @@ func New(t *testing.T) *DB {
 		t.Skipf("%s is not set; skipping database integration test", DSNEnvVar)
 	}
 
-	// t.Context needs Go 1.24; this module targets 1.23.
-	ctx, cancel := context.WithCancel(context.Background())
+	// Cancelled when the test ends, which is before cleanup runs — hence drop's
+	// own context below.
+	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 
 	name := fmt.Sprintf("bitmagnet_test_%d_%d", time.Now().UnixNano(), rand.IntN(1_000_000))

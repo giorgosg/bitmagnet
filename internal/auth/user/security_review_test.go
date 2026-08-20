@@ -86,7 +86,7 @@ func TestConcurrentBootstrapCreatesOneInitialInvitation(t *testing.T) {
 			defer wg.Done()
 			<-launch
 
-			result, err := service.CreateInitialInvitation(context.Background())
+			result, err := service.CreateInitialInvitation(t.Context())
 			results <- result
 			errs <- err
 		}()
@@ -112,7 +112,7 @@ func TestConcurrentBootstrapCreatesOneInitialInvitation(t *testing.T) {
 		codes[result.Code] = struct{}{}
 	}
 
-	count, err := db.Query.WithContext(context.Background()).Invitation.Count()
+	count, err := db.Query.WithContext(t.Context()).Invitation.Count()
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(1), count, "bootstrap must persist exactly one administrator invitation")
@@ -128,7 +128,7 @@ func TestLoginLimiterIsNotGlobalAcrossAccounts(t *testing.T) {
 	service, query := newUserService(t)
 	putInvitation(t, query, "limittest0001", sql.NullTime{})
 
-	_, err := service.Register(context.Background(), user.RegisterRequest{
+	_, err := service.Register(t.Context(), user.RegisterRequest{
 		InvitationCode: "limittest0001",
 		Username:       "legitimate",
 		Password:       testPassword,
@@ -137,11 +137,11 @@ func TestLoginLimiterIsNotGlobalAcrossAccounts(t *testing.T) {
 
 	// Consume the default burst with attempts against unrelated accounts.
 	for i := range 5 {
-		_, err = service.Login(context.Background(), "attacker"+string(rune('a'+i)), "wrong-password")
+		_, err = service.Login(t.Context(), "attacker"+string(rune('a'+i)), "wrong-password")
 		require.Error(t, err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
 
 	_, err = service.Login(ctx, "legitimate", testPassword)
@@ -174,7 +174,7 @@ func TestUnknownInvitationIsRejectedBeforePasswordHashing(t *testing.T) {
 		values.LoginRequestBurst,
 	)
 
-	_, err := service.Register(context.Background(), user.RegisterRequest{
+	_, err := service.Register(t.Context(), user.RegisterRequest{
 		InvitationCode: "does-not-exist",
 		Username:       "attacker",
 		Password:       testPassword,

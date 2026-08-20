@@ -1,7 +1,6 @@
 package user_test
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"sync"
@@ -55,7 +54,7 @@ func newUserService(t *testing.T) (user.Service, *dao.Query) {
 func putInvitation(t *testing.T, query *dao.Query, code string, expiresAt sql.NullTime) {
 	t.Helper()
 
-	require.NoError(t, query.WithContext(context.Background()).Invitation.Create(&model.Invitation{
+	require.NoError(t, query.WithContext(t.Context()).Invitation.Create(&model.Invitation{
 		Code:      code,
 		RoleName:  "user",
 		ExpiresAt: expiresAt,
@@ -75,7 +74,7 @@ func TestRegisterRejectsExpiredInvitation(t *testing.T) {
 		Valid: true,
 	})
 
-	_, err := service.Register(context.Background(), user.RegisterRequest{
+	_, err := service.Register(t.Context(), user.RegisterRequest{
 		InvitationCode: "expiredcode00",
 		Username:       "someone",
 		Password:       testPassword,
@@ -97,7 +96,7 @@ func TestRegisterAcceptsUnexpiredInvitation(t *testing.T) {
 		Valid: true,
 	})
 
-	registered, err := service.Register(context.Background(), user.RegisterRequest{
+	registered, err := service.Register(t.Context(), user.RegisterRequest{
 		InvitationCode: "validcode0001",
 		Username:       "someone",
 		Password:       testPassword,
@@ -116,7 +115,7 @@ func TestRegisterAcceptsInvitationWithoutExpiry(t *testing.T) {
 
 	putInvitation(t, query, "noexpiry00001", sql.NullTime{})
 
-	registered, err := service.Register(context.Background(), user.RegisterRequest{
+	registered, err := service.Register(t.Context(), user.RegisterRequest{
 		InvitationCode: "noexpiry00001",
 		Username:       "someone",
 		Password:       testPassword,
@@ -138,14 +137,14 @@ func TestSetRoleAffectsOnlyTheTargetUser(t *testing.T) {
 	putInvitation(t, query, "roletarget001", sql.NullTime{})
 	putInvitation(t, query, "rolebystand01", sql.NullTime{})
 
-	target, err := service.Register(context.Background(), user.RegisterRequest{
+	target, err := service.Register(t.Context(), user.RegisterRequest{
 		InvitationCode: "roletarget001",
 		Username:       "target",
 		Password:       testPassword,
 	})
 	require.NoError(t, err)
 
-	bystander, err := service.Register(context.Background(), user.RegisterRequest{
+	bystander, err := service.Register(t.Context(), user.RegisterRequest{
 		InvitationCode: "rolebystand01",
 		Username:       "bystander",
 		Password:       testPassword,
@@ -153,11 +152,11 @@ func TestSetRoleAffectsOnlyTheTargetUser(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "user", bystander.RoleName)
 
-	updated, err := service.SetRole(context.Background(), target.ID, "admin")
+	updated, err := service.SetRole(t.Context(), target.ID, "admin")
 	require.NoError(t, err)
 	assert.Equal(t, "admin", updated.RoleName)
 
-	unchanged, err := service.Get(context.Background(), bystander.ID)
+	unchanged, err := service.Get(t.Context(), bystander.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "user", unchanged.RoleName, "SetRole must not touch other users")
 }
@@ -190,7 +189,7 @@ func TestInvitationIsSingleUseUnderConcurrency(t *testing.T) {
 			defer wg.Done()
 			<-start
 
-			if _, err := service.Register(context.Background(), user.RegisterRequest{
+			if _, err := service.Register(t.Context(), user.RegisterRequest{
 				InvitationCode: "oneusecode01",
 				Username:       fmt.Sprintf("racer%02d", i),
 				Password:       testPassword,
@@ -207,11 +206,11 @@ func TestInvitationIsSingleUseUnderConcurrency(t *testing.T) {
 	assert.Equal(t, int32(1), claimed, "exactly one registration may claim an invitation")
 
 	// The database must agree with what the callers were told.
-	registered, err := query.WithContext(context.Background()).User.Count()
+	registered, err := query.WithContext(t.Context()).User.Count()
 	require.NoError(t, err)
 	assert.Equal(t, int64(claimed), registered, "a user exists for each successful claim, and no more")
 
-	invitation, err := query.WithContext(context.Background()).
+	invitation, err := query.WithContext(t.Context()).
 		Invitation.Where(query.Invitation.Code.Eq("oneusecode01")).First()
 	require.NoError(t, err)
 
@@ -228,17 +227,17 @@ func TestLoginDoesNotEnumerateAccounts(t *testing.T) {
 	service, query := newUserService(t)
 	putInvitation(t, query, "enumtest00001", sql.NullTime{})
 
-	_, err := service.Register(context.Background(), user.RegisterRequest{
+	_, err := service.Register(t.Context(), user.RegisterRequest{
 		InvitationCode: "enumtest00001",
 		Username:       "known",
 		Password:       testPassword,
 	})
 	require.NoError(t, err)
 
-	_, errUnknown := service.Login(context.Background(), "nosuchuser", testPassword)
+	_, errUnknown := service.Login(t.Context(), "nosuchuser", testPassword)
 	require.Error(t, errUnknown)
 
-	_, errWrongPassword := service.Login(context.Background(), "known", "wrong-password-entirely")
+	_, errWrongPassword := service.Login(t.Context(), "known", "wrong-password-entirely")
 	require.Error(t, errWrongPassword)
 
 	assert.Equal(t, errUnknown.Error(), errWrongPassword.Error(),
@@ -255,7 +254,7 @@ func TestLoginTimingDoesNotRevealAccountExistence(t *testing.T) {
 	service, query := newUserService(t)
 	putInvitation(t, query, "timingtest001", sql.NullTime{})
 
-	_, err := service.Register(context.Background(), user.RegisterRequest{
+	_, err := service.Register(t.Context(), user.RegisterRequest{
 		InvitationCode: "timingtest001",
 		Username:       "known",
 		Password:       testPassword,
@@ -264,7 +263,7 @@ func TestLoginTimingDoesNotRevealAccountExistence(t *testing.T) {
 
 	measure := func(username string) time.Duration {
 		start := time.Now()
-		_, _ = service.Login(context.Background(), username, "wrong-password-entirely")
+		_, _ = service.Login(t.Context(), username, "wrong-password-entirely")
 
 		return time.Since(start)
 	}

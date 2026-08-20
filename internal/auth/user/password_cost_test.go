@@ -1,7 +1,6 @@
 package user_test
 
 import (
-	"context"
 	"database/sql"
 	"testing"
 	"time"
@@ -44,7 +43,7 @@ func TestPasswordHashingCostAppliesToEveryStoredHash(t *testing.T) {
 
 	putInvitation(t, db.Query, "costcheck001", sql.NullTime{})
 
-	registered, err := service.Register(context.Background(), user.RegisterRequest{
+	registered, err := service.Register(t.Context(), user.RegisterRequest{
 		InvitationCode: "costcheck001",
 		Username:       "costuser",
 		Password:       testPassword,
@@ -54,7 +53,7 @@ func TestPasswordHashingCostAppliesToEveryStoredHash(t *testing.T) {
 	storedCost := func() int {
 		t.Helper()
 
-		stored, err := db.Query.WithContext(context.Background()).
+		stored, err := db.Query.WithContext(t.Context()).
 			User.Where(db.Query.User.ID.Eq(registered.ID)).First()
 		require.NoError(t, err)
 
@@ -69,7 +68,7 @@ func TestPasswordHashingCostAppliesToEveryStoredHash(t *testing.T) {
 	const newPassword = "another-correct-horse-battery-77"
 
 	require.NoError(t, service.UpdatePassword(
-		context.Background(), registered.ID, testPassword, newPassword,
+		t.Context(), registered.ID, testPassword, newPassword,
 	))
 
 	assert.Equal(t, configuredCost, storedCost(), "UpdatePassword must hash at the configured cost")

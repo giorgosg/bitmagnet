@@ -2,7 +2,6 @@ package resolvers_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -147,7 +146,7 @@ func newAuthTestServerWithConfig(
 	})
 
 	// The bootstrap invitation is what makes the first registration possible.
-	invitation, err := userService.CreateInitialInvitation(context.Background())
+	invitation, err := userService.CreateInitialInvitation(t.Context())
 	require.NoError(t, err)
 	require.NotEmpty(t, invitation.Code)
 
@@ -225,7 +224,7 @@ func query(t *testing.T, server *httptest.Server, token, q string) gqlResponse {
 	require.NoError(t, err)
 
 	req, err := http.NewRequestWithContext(
-		context.Background(),
+		t.Context(),
 		http.MethodPost,
 		server.URL+"/graphql",
 		bytes.NewReader(body),

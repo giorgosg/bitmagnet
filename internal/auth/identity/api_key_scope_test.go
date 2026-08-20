@@ -1,7 +1,6 @@
 package identity_test
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -67,18 +66,18 @@ func TestAPIKeyPermissionExactMatchIsAllowed(t *testing.T) {
 	stack := newScopeStack(t)
 	admin := stack.registerAdmin(t)
 
-	created, err := stack.apiKeyService.Create(context.Background(), api_key.CreateRequest{
+	created, err := stack.apiKeyService.Create(t.Context(), api_key.CreateRequest{
 		UserID:      admin.ID,
 		Name:        "exact",
 		Permissions: []rbac.ObjectAction{scopeTestObjectAction},
 	})
 	require.NoError(t, err)
 
-	id, matched, err := stack.authenticator.Authenticate(context.Background(), created.APIKey)
+	id, matched, err := stack.authenticator.Authenticate(t.Context(), created.APIKey)
 	require.NoError(t, err)
 	require.True(t, matched)
 
-	allow, err := id.Enforce(context.Background(), scopeTestObjectAction)
+	allow, err := id.Enforce(t.Context(), scopeTestObjectAction)
 	require.NoError(t, err)
 	assert.True(t, allow, "a key naming the registered action exactly must be allowed")
 }
@@ -103,19 +102,19 @@ func TestAPIKeyPermissionWildcardsDoNotWidenScope(t *testing.T) {
 		// is the other shape worth trying.
 		{Namespace: "*::*::*", Object: "*", Action: "*"},
 	} {
-		created, err := stack.apiKeyService.Create(context.Background(), api_key.CreateRequest{
+		created, err := stack.apiKeyService.Create(t.Context(), api_key.CreateRequest{
 			UserID:      admin.ID,
 			Name:        "wildcard " + wildcard.Namespace,
 			Permissions: []rbac.ObjectAction{wildcard},
 		})
 		require.NoError(t, err)
 
-		id, matched, err := stack.authenticator.Authenticate(context.Background(), created.APIKey)
+		id, matched, err := stack.authenticator.Authenticate(t.Context(), created.APIKey)
 		require.NoError(t, err)
 		require.True(t, matched)
 		require.NotNil(t, id.Self().APIKey)
 
-		allow, err := id.Enforce(context.Background(), scopeTestObjectAction)
+		allow, err := id.Enforce(t.Context(), scopeTestObjectAction)
 		require.NoError(t, err)
 
 		assert.False(t, allow,

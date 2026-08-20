@@ -1,7 +1,6 @@
 package api_key_test
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -44,7 +43,7 @@ func TestService(t *testing.T) {
 
 	h.repository.EXPECT().
 		Create(
-			context.Background(),
+			t.Context(),
 			1,
 			"test",
 			mock.IsType([]byte{}),
@@ -54,7 +53,7 @@ func TestService(t *testing.T) {
 		Return(2, nil).
 		Once()
 
-	result, err := h.service.Create(context.Background(), api_key.CreateRequest{
+	result, err := h.service.Create(t.Context(), api_key.CreateRequest{
 		UserID:      1,
 		Name:        "test",
 		Permissions: permissions,

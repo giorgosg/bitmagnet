@@ -1,7 +1,6 @@
 package identity_test
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -79,10 +78,10 @@ const testPassword = "correct-horse-battery-staple-99"
 func (s testStack) registerAdmin(t *testing.T) model.User {
 	t.Helper()
 
-	invitation, err := s.userService.CreateInitialInvitation(context.Background())
+	invitation, err := s.userService.CreateInitialInvitation(t.Context())
 	require.NoError(t, err)
 
-	registered, err := s.userService.Register(context.Background(), user.RegisterRequest{
+	registered, err := s.userService.Register(t.Context(), user.RegisterRequest{
 		InvitationCode: invitation.Code,
 		Username:       "admin",
 		Password:       testPassword,
@@ -105,20 +104,20 @@ func TestDisabledUserTokenIsRejected(t *testing.T) {
 	stack := newTestStack(t)
 	admin := stack.registerAdmin(t)
 
-	login, err := stack.userService.Login(context.Background(), "admin", testPassword)
+	login, err := stack.userService.Login(t.Context(), "admin", testPassword)
 	require.NoError(t, err)
 	require.NotEmpty(t, login.Token)
 
 	// The token works while the account is enabled.
-	resolved, matched, err := stack.authenticator.Authenticate(context.Background(), login.Token)
+	resolved, matched, err := stack.authenticator.Authenticate(t.Context(), login.Token)
 	require.NoError(t, err)
 	require.True(t, matched)
 	require.NotNil(t, resolved.Self().User)
 
-	_, err = stack.userService.SetEnabled(context.Background(), admin.ID, false)
+	_, err = stack.userService.SetEnabled(t.Context(), admin.ID, false)
 	require.NoError(t, err)
 
-	resolved, _, err = stack.authenticator.Authenticate(context.Background(), login.Token)
+	resolved, _, err = stack.authenticator.Authenticate(t.Context(), login.Token)
 	require.NoError(t, err)
 	assert.Nil(t, resolved.Self().User,
 		"a disabled account's existing token must no longer resolve to it")
@@ -136,13 +135,13 @@ func TestDisabledTokenFallsBackToAnonymous(t *testing.T) {
 	stack := newTestStack(t)
 	admin := stack.registerAdmin(t)
 
-	login, err := stack.userService.Login(context.Background(), "admin", testPassword)
+	login, err := stack.userService.Login(t.Context(), "admin", testPassword)
 	require.NoError(t, err)
 
-	_, err = stack.userService.SetEnabled(context.Background(), admin.ID, false)
+	_, err = stack.userService.SetEnabled(t.Context(), admin.ID, false)
 	require.NoError(t, err)
 
-	resolved, matched, err := stack.authenticator.Authenticate(context.Background(), login.Token)
+	resolved, matched, err := stack.authenticator.Authenticate(t.Context(), login.Token)
 	require.NoError(t, err, "a revoked token must not abort the chain")
 	require.True(t, matched, "the anonymous authenticator must still match")
 	require.NotNil(t, resolved)
@@ -157,12 +156,12 @@ func TestDeletedUserTokenFallsBackToAnonymous(t *testing.T) {
 	stack := newTestStack(t)
 	admin := stack.registerAdmin(t)
 
-	login, err := stack.userService.Login(context.Background(), "admin", testPassword)
+	login, err := stack.userService.Login(t.Context(), "admin", testPassword)
 	require.NoError(t, err)
 
-	require.NoError(t, stack.userService.Delete(context.Background(), admin.ID))
+	require.NoError(t, stack.userService.Delete(t.Context(), admin.ID))
 
-	resolved, matched, err := stack.authenticator.Authenticate(context.Background(), login.Token)
+	resolved, matched, err := stack.authenticator.Authenticate(t.Context(), login.Token)
 	require.NoError(t, err)
 	require.True(t, matched)
 	require.NotNil(t, resolved)
@@ -177,20 +176,20 @@ func TestDisabledUserAPIKeyIsRejected(t *testing.T) {
 	stack := newTestStack(t)
 	admin := stack.registerAdmin(t)
 
-	created, err := stack.apiKeyService.Create(context.Background(), api_key.CreateRequest{
+	created, err := stack.apiKeyService.Create(t.Context(), api_key.CreateRequest{
 		UserID:      admin.ID,
 		Name:        "test",
 		Permissions: []rbac.ObjectAction{rbac.NewObjectAction("test", "test", "query")},
 	})
 	require.NoError(t, err)
 
-	_, err = stack.apiKeyService.Auth(context.Background(), created.APIKey)
+	_, err = stack.apiKeyService.Auth(t.Context(), created.APIKey)
 	require.NoError(t, err, "the key works while the account is enabled")
 
-	_, err = stack.userService.SetEnabled(context.Background(), admin.ID, false)
+	_, err = stack.userService.SetEnabled(t.Context(), admin.ID, false)
 	require.NoError(t, err)
 
-	_, err = stack.apiKeyService.Auth(context.Background(), created.APIKey)
+	_, err = stack.apiKeyService.Auth(t.Context(), created.APIKey)
 	require.Error(t, err, "a disabled account's API key must be rejected")
 }
 
@@ -202,20 +201,20 @@ func TestReEnabledUserIsAcceptedAgain(t *testing.T) {
 	stack := newTestStack(t)
 	admin := stack.registerAdmin(t)
 
-	login, err := stack.userService.Login(context.Background(), "admin", testPassword)
+	login, err := stack.userService.Login(t.Context(), "admin", testPassword)
 	require.NoError(t, err)
 
-	_, err = stack.userService.SetEnabled(context.Background(), admin.ID, false)
+	_, err = stack.userService.SetEnabled(t.Context(), admin.ID, false)
 	require.NoError(t, err)
 
-	revoked, _, err := stack.authenticator.Authenticate(context.Background(), login.Token)
+	revoked, _, err := stack.authenticator.Authenticate(t.Context(), login.Token)
 	require.NoError(t, err)
 	require.Nil(t, revoked.Self().User)
 
-	_, err = stack.userService.SetEnabled(context.Background(), admin.ID, true)
+	_, err = stack.userService.SetEnabled(t.Context(), admin.ID, true)
 	require.NoError(t, err)
 
-	resolved, matched, err := stack.authenticator.Authenticate(context.Background(), login.Token)
+	resolved, matched, err := stack.authenticator.Authenticate(t.Context(), login.Token)
 	require.NoError(t, err)
 	require.True(t, matched)
 	assert.NotNil(t, resolved.Self().User, "re-enabling restores the existing session")
@@ -255,20 +254,20 @@ func TestExpiredTokenFallsBackToAnonymous(t *testing.T) {
 	)
 	authenticator := identity.NewAuthenticator(jwtService, userService, apiKeyService, rbacService)
 
-	invitation, err := userService.CreateInitialInvitation(context.Background())
+	invitation, err := userService.CreateInitialInvitation(t.Context())
 	require.NoError(t, err)
 
-	_, err = userService.Register(context.Background(), user.RegisterRequest{
+	_, err = userService.Register(t.Context(), user.RegisterRequest{
 		InvitationCode: invitation.Code,
 		Username:       "admin",
 		Password:       testPassword,
 	})
 	require.NoError(t, err)
 
-	login, err := userService.Login(context.Background(), "admin", testPassword)
+	login, err := userService.Login(t.Context(), "admin", testPassword)
 	require.NoError(t, err)
 
-	resolved, matched, err := authenticator.Authenticate(context.Background(), login.Token)
+	resolved, matched, err := authenticator.Authenticate(t.Context(), login.Token)
 	require.NoError(t, err, "an expired token must not abort the chain")
 	require.True(t, matched, "the anonymous authenticator must still match")
 	require.NotNil(t, resolved)
@@ -281,7 +280,7 @@ func TestGarbageTokenFallsBackToAnonymous(t *testing.T) {
 
 	stack := newTestStack(t)
 
-	resolved, matched, err := stack.authenticator.Authenticate(context.Background(), "not-a-token")
+	resolved, matched, err := stack.authenticator.Authenticate(t.Context(), "not-a-token")
 	require.NoError(t, err)
 	require.True(t, matched)
 	assert.Nil(t, resolved.Self().User)

@@ -155,7 +155,7 @@ func doTestCheckerCheckFunc(t *testing.T, updateInterval time.Duration, err erro
 	)
 
 	// Act
-	res := ckr.Check(context.Background())
+	res := ckr.Check(t.Context())
 
 	// Assert
 	require.NotNil(t, res.Details)
@@ -197,7 +197,7 @@ func TestPanicRecovery(t *testing.T) {
 	)
 
 	// Act
-	res := ckr.Check(context.Background())
+	res := ckr.Check(t.Context())
 
 	// Assert
 	require.NotNil(t, res.Details)

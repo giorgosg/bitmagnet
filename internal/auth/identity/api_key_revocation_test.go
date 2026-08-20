@@ -1,7 +1,6 @@
 package identity_test
 
 import (
-	"context"
 	"database/sql"
 	"testing"
 	"time"
@@ -27,7 +26,7 @@ func TestExpiredAPIKeyFallsBackToAnonymous(t *testing.T) {
 	stack := newScopeStack(t)
 	admin := stack.registerAdmin(t)
 
-	created, err := stack.apiKeyService.Create(context.Background(), api_key.CreateRequest{
+	created, err := stack.apiKeyService.Create(t.Context(), api_key.CreateRequest{
 		UserID:      admin.ID,
 		Name:        "expiring",
 		Permissions: []rbac.ObjectAction{scopeTestObjectAction},
@@ -36,7 +35,7 @@ func TestExpiredAPIKeyFallsBackToAnonymous(t *testing.T) {
 	require.NoError(t, err)
 
 	// Move the expiry into the past rather than sleeping.
-	_, err = stack.query.WithContext(context.Background()).APIKey.
+	_, err = stack.query.WithContext(t.Context()).APIKey.
 		Where(stack.query.APIKey.ID.Eq(created.ID)).
 		UpdateSimple(stack.query.APIKey.ExpiresAt.Value(sql.NullTime{
 			Time:  time.Now().Add(-time.Hour),
@@ -44,7 +43,7 @@ func TestExpiredAPIKeyFallsBackToAnonymous(t *testing.T) {
 		}))
 	require.NoError(t, err)
 
-	resolved, matched, err := stack.authenticator.Authenticate(context.Background(), created.APIKey)
+	resolved, matched, err := stack.authenticator.Authenticate(t.Context(), created.APIKey)
 
 	require.NoError(t, err, "an expired key must not abort the chain")
 	require.True(t, matched, "the anonymous authenticator must still match")
@@ -70,7 +69,7 @@ func TestUnknownAPIKeyFallsBackToAnonymous(t *testing.T) {
 		Secret: make([]byte, 12),
 	}.Encode()
 
-	resolved, matched, err := stack.authenticator.Authenticate(context.Background(), unknown)
+	resolved, matched, err := stack.authenticator.Authenticate(t.Context(), unknown)
 
 	require.NoError(t, err, "an unknown key must not abort the chain")
 	require.True(t, matched)

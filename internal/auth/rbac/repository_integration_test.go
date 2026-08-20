@@ -1,7 +1,6 @@
 package rbac_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/rbac"
@@ -39,7 +38,7 @@ func newTestRepository(t *testing.T) rbac.Repository {
 func TestPutRoleRevokesAllPermissions(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	repo := newTestRepository(t)
 
 	role := rbac.Role("test_role")
@@ -64,7 +63,7 @@ func TestPutRoleRevokesAllPermissions(t *testing.T) {
 func TestPutRoleWithNoPermissionsReturnsTheRole(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	repo := newTestRepository(t)
 
 	role := rbac.Role("test_role")

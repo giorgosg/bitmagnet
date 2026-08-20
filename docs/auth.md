@@ -166,7 +166,11 @@ outcome for a credential. `go.mod`, the `Dockerfile` and the workflow pins move 
 the error is still checked at the call site rather than discarded, so the guarantee is
 enforced where it is relied upon and not left implied by the `go` directive. The bump also
 retires this document's former note that `next`'s use of `testing.T.Context` was
-unavailable here.
+unavailable here: the `context.Background()` substituted throughout the tests is now
+`t.Context()`, which the `usetesting` linter requires as soon as the module targets 1.24
+and which cancels with the test rather than outliving it. That was 50 call sites across 29
+files, and it is the whole reason the first CI run on this branch went red — the bump is
+not confined to `go.mod`.
 
 ### Resisting anonymous abuse
 

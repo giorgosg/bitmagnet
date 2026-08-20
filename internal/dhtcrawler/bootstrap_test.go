@@ -26,7 +26,7 @@ func TestKTableHealthMonitorDoesNotReseedPopulatedTable(t *testing.T) {
 		reseedRequests: make(chan struct{}, 1),
 	}
 	ticks := make(chan time.Time)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 
 	go func() {
@@ -61,7 +61,7 @@ func TestKTableHealthMonitorRequestsReseedAfterConsecutiveEmptyChecks(t *testing
 		reseedRequests: make(chan struct{}, 1),
 	}
 	ticks := make(chan time.Time)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 
 	defer cancel()
 

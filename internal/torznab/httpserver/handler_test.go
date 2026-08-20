@@ -1,7 +1,6 @@
 package httpserver_test
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -102,7 +101,7 @@ func TestCaps(t *testing.T) {
 
 			h := newTestHarness(t)
 
-			req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, testCase.url, nil)
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, testCase.url, nil)
 			require.NoError(t, err)
 
 			h.engine.ServeHTTP(h.responseRecorder, req)
@@ -203,7 +202,7 @@ func TestSearch(t *testing.T) {
 				testCase.expectedRequest,
 			).Return(result, nil).Times(1)
 
-			req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, testCase.url, nil)
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, testCase.url, nil)
 			require.NoError(t, err)
 
 			h.engine.ServeHTTP(h.responseRecorder, req)

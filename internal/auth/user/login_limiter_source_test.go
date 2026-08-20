@@ -71,7 +71,7 @@ func TestLoginIsThrottledForOneSource(t *testing.T) {
 	service, query := newUserService(t)
 	putInvitation(t, query, "throttlesrc1", sql.NullTime{})
 
-	_, err := service.Register(context.Background(), user.RegisterRequest{
+	_, err := service.Register(t.Context(), user.RegisterRequest{
 		InvitationCode: "throttlesrc1",
 		Username:       "victim",
 		Password:       testPassword,
@@ -104,7 +104,7 @@ func TestLoginThrottleIsNotBypassableByForwardedForHeader(t *testing.T) {
 	service, query := newUserService(t)
 	putInvitation(t, query, "throttlesrc2", sql.NullTime{})
 
-	_, err := service.Register(context.Background(), user.RegisterRequest{
+	_, err := service.Register(t.Context(), user.RegisterRequest{
 		InvitationCode: "throttlesrc2",
 		Username:       "victim",
 		Password:       testPassword,
