@@ -26,7 +26,7 @@ _Avoid_: Account, member, profile
 **API key**:
 A persisted credential belonging to a machine caller rather than a person. It is the only
 credential form \*arr clients and other automation use.
-_Avoid_: Token, secret, api\_key, machine account
+_Avoid_: Token, secret, api_key, machine account
 
 **Invitation**:
 A single-use code granting its bearer the right to register a User.
