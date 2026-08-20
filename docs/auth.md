@@ -1,10 +1,12 @@
 # Authentication
 
-**Status: implemented on `codex/auth-port`
-([PR #28](https://github.com/giorgosg/bitmagnet/pull/28)), not yet merged.** Adapted from
-`upstream/next`. This document records what was built, why, and what is still missing;
-the survey of the alternatives that were considered is kept at the end, because it
-explains the choice and because two of them contributed material.
+The live record for `codex/auth-port`
+([PR #28](https://github.com/giorgosg/bitmagnet/pull/28)), **not yet merged**: what was
+built, how it behaves, and what an operator has to decide. Adapted from `upstream/next`.
+
+[auth-port.md](auth-port.md) covers how it got here — the port method, the defects review
+found and what they teach, and the alternatives that were weighed. Read that one before
+changing a control here, because most of them are shaped by a specific failure.
 
 Upstream `main` has **no authentication at all** — GraphQL, Torznab and the web UI are all
 open. It is also permissive cross-origin by default: `internal/httpserver/config.go` sets
@@ -16,30 +18,31 @@ Cors: CorsConfig{ AllowedOrigins: []string{"*"}, ... }
 so any web page in any browser can query a reachable instance directly. That combination
 is why bitmagnet is normally run on a trusted network only.
 
-## Authentication is opt-in, and off by default
+## The default is off, and nothing changes until an operator says so
 
 `auth.anonymous_access` defaults to **true**, which grants the `anon` role every
 registered object action **except auth administration**. While it is on, every existing
 client keeps working with no credentials: GraphQL, Torznab and the web UI behave exactly
-as they did before.
+as they did before. Setting it to `false` is what turns authentication on.
 
-The exclusion is what makes the default a starting point rather than a trapdoor. Granting
-auth administration to `anon` let an unauthenticated caller give the `anon` role a
-wildcard permission through `putRole` — and since role grants live in the database while
-this one is only in memory, that wildcard survived setting `anonymous_access` to `false`.
-The switch that is supposed to turn authentication on left the instance open, with
-nothing outward to show for it. Nothing is lost by excluding it: the auth surface is new,
-so no previously open installation had it, and the first administrator registers through
-`self.register`, which the baseline grants.
+So this can merge and ship without changing anything for anyone, and an operator opts in
+when they want it. That matters because upstream has no auth, the bundled UI has no login
+flow, and existing deployments are open — enabling it unconditionally would lock out
+every current client.
 
-Setting it to `false` is what turns authentication on. This is the same mechanism
-`upstream/next` uses — its `rbac.ParamAnonymousAccess` also defaults to `true` — except
-that `next` distributes the decision across its plugins, each granting its own object
-actions to `anon`. Without a plugin registry the same effect is produced centrally in
-`authconfig.AnonymousPermissions`.
+**Auth administration is excluded from that grant deliberately, and removing the
+exclusion reopens a trapdoor.** Granting it to `anon` let an unauthenticated caller give
+the `anon` role a wildcard through `putRole`; role grants live in the database while the
+compatibility grant is only in memory, so the wildcard survived setting
+`anonymous_access` to `false`. The switch that turns authentication on left the instance
+open with nothing outward to show for it. Nothing is lost by the exclusion: the auth
+surface is new, so no previously open installation had it, and the first administrator
+registers through `self.register`, which the baseline grants.
 
-The practical consequence: this feature can be merged and shipped without changing
-anything for anyone, and an operator opts in when they want it.
+`upstream/next` uses the same mechanism — its `rbac.ParamAnonymousAccess` also defaults
+to `true` — except that `next` distributes the decision across its plugins, each granting
+its own object actions to `anon`. Without a plugin registry the same effect is produced
+centrally in `authconfig.AnonymousPermissions`.
 
 ## What it consists of
 
@@ -55,39 +58,35 @@ internal/auth/authconfig/  main-lineage config, and the anonymous-access switch
 internal/auth/authfx/      fx wiring and the first-administrator bootstrap
 ```
 
-**Design:** a chain-of-responsibility authenticator resolves an identity from a JWT, an
-API key, or anonymously, and Casbin evaluates that identity against an object action.
+A chain-of-responsibility authenticator resolves an identity from a JWT, an API key, or
+anonymously, and Casbin evaluates that identity against an object action.
 
-The middleware only _resolves_ an identity and attaches it to the request context — it
+## How a request is authorised
+
+**The middleware only resolves.** It attaches an identity to the request context and
 never rejects. Enforcement happens above it: on GraphQL through the `@auth` directive,
 and in the Torznab handler.
 
 **The chain always resolves something.** Every way a credential can fail — unparseable,
 expired, naming a deleted account, naming a disabled one — falls through to the anonymous
 authenticator rather than aborting. Only an infrastructure failure, such as the database
-being unreachable, produces an error and no identity.
+being unreachable, produces an error and no identity. Revocation is expressed as "this
+token no longer resolves to its user", never as "this request is aborted"; the permission
+model does the rest.
 
-It holds for both credential types. The JWT authenticator was fixed first, and the API
-key one kept aborting for every failure except an unparseable key, so an expired or
-unknown key still refused the whole request; `revokedAPIKey` now names the five outcomes
-that mean "not a usable credential" and lets them fall through, leaving only genuine
-repository failures to abort. An expired key is therefore treated exactly like no key at
-all, which is what makes the endpoint's openness a question for the permission model
-alone.
+This is a deliberate invariant and it is load-bearing, so do not "improve" a credential
+path into aborting. A credential that aborts the chain leaves the request with no
+identity at all, so _every_ field is refused — including `self.identity` and `self.login`,
+the two calls the UI needs to notice its token is dead and recover. The session then stays
+wedged across reloads, re-sending the dead token, until the operator clears browser
+storage by hand. It took four separate fixes to hold across both credential types;
+`revokedAPIKey` names the five outcomes that mean "not a usable credential" and lets them
+fall through, leaving only genuine repository failures to abort.
 
-This is a deliberate invariant, and it took four separate fixes to hold. A credential
-that aborts the chain leaves the request with no identity at all, so _every_ field is
-refused — including `self.identity` and `self.login`, the two calls the UI needs to
-notice its token is dead and recover. The session then stays wedged across reloads,
-re-sending the dead token, until the operator clears browser storage by hand. Revocation
-is expressed as "this token no longer resolves to its user", not as "this request is
-aborted"; the permission model does the rest.
-
-### GraphQL enforcement
-
-Every root field carries `@auth(object:, action:)`, and the directive refuses the request
-unless the resolved identity holds that object action. It is **deny by default** — no
-identity, or an identity without the permission, is refused.
+**Deny by default at the directive.** Every GraphQL root field carries
+`@auth(object:, action:)`, and the directive refuses the request unless the resolved
+identity holds that object action. No identity, or an identity without the permission, is
+refused.
 
 The directive is also the source of truth for the permission set: the schema is walked at
 startup and each directive becomes a registered object action in the `graphql` namespace,
@@ -98,19 +97,7 @@ A baseline is granted to `anon` and `user` regardless of the anonymous-access se
 itself a GraphQL mutation. Without it, enabling authentication would be a permanent
 lockout.
 
-### Schema
-
-`migrations/00022_auth.sql`, six tables: `roles`, `role_permissions`, `users`,
-`invitations`, `api_keys`, `api_key_permissions`, seeding four core roles — `admin`,
-`editor`, `user`, `anon`. Renumbered from `next`'s `00021`, which collides with
-`00021_queue_jobs_fetch_index.sql`.
-
-The model and dao types are **gorm-gen output**, not hand-written:
-`internal/database/gen/gen.go` sets `ModelPkgPath` to `internal/model`, so applying the
-migration and running `task gen-gorm` produces them. The generated files came out
-byte-identical to `next`'s, which is the strongest evidence that the extraction is faithful.
-
-### Configuration
+## Configuration
 
 | Key                              | Default        |                                                                   |
 | -------------------------------- | -------------- | ----------------------------------------------------------------- |
@@ -126,21 +113,18 @@ byte-identical to `next`'s, which is the strongest evidence that the extraction 
 | `auth.login_requests_per_minute` | `30`           | per bucket, not per process — see below                           |
 | `auth.login_request_burst`       | `5`            | per bucket, not per process — see below                           |
 
-Defaults match the corresponding parameters on `next`, with one deliberate
-exception: `auth.email_verification` defaults to `false` here and `true` there, because
-neither lineage implements it and a default of `true` advertises a check that never runs.
+Defaults match the corresponding parameters on `next`, except `auth.email_verification`,
+which defaults to `false` here and `true` there because neither lineage implements it and
+a default of `true` advertises a check that never runs.
 
-**The bounds match too, and that took a correction.** `next` declares these parameters
-through its plugin config builder, which carries a validity constraint alongside each
-default — entropy at least 50, hashing cost within bcrypt's own range, the two login
-limiter values greater than zero. Re-expressing them as an ordinary struct for `configfx`
-kept every default and dropped every constraint, which is the kind of omission that leaves
-no trace until someone writes the value: `login_requests_per_minute: 0` reaches
+**Every bound in that table is a `validate:` tag on `authconfig.Config`, and they are
+load-bearing.** `next` carries its constraints in the plugin config builder alongside
+each default; re-expressing the parameters as an ordinary struct for `configfx` kept the
+defaults and silently dropped the constraints. `login_requests_per_minute: 0` reaches
 `rate.Every(time.Minute / 0)` and takes the process down from a config file alone, and
-`password_min_entropy: 0` silently accepts any password at all. The constraints are now
-`validate:` tags on `authconfig.Config`, which `configresolver` already enforces against
-every resolved config struct, plus `jwt_duration` greater than zero — not one of `next`'s,
-but a zero there issues tokens that have already expired.
+`password_min_entropy: 0` accepts any password at all. `configresolver` enforces the tags
+against every resolved config struct. `jwt_duration` greater than zero is not one of
+`next`'s constraints, but a zero there issues tokens that have already expired.
 
 One key outside the `auth.` tree matters as much as any of them:
 
@@ -148,79 +132,73 @@ One key outside the `auth.` tree matters as much as any of them:
 | ----------------------------- | --------- | ------------------------------------------------------ |
 | `http_server.trusted_proxies` | _(empty)_ | whose `X-Forwarded-For` to believe; empty means nobody |
 
+### Secret material
+
 API key secrets are hashed at bcrypt's default cost rather than
 `auth.password_hashing_cost`. They are 12 uniformly random bytes, so an offline attack is
 infeasible at any work factor, and the cost is paid on every request presenting a key.
 Invitation codes are 128 bits for the same reason the bootstrap one needs it: it grants
 admin and never expires.
 
-**Those secrets are only as good as the entropy behind them, and that is why this branch
-raises the module to Go 1.24.** Every one of them — the per-process JWT secret, the
-bootstrap invitation, each API key — comes from `auth.GenerateRandomString`, which reads
-`crypto/rand`. Under the pre-1.24 signature `rand.Read` returns an error and leaves the
-buffer as it found it, so discarding that error converts an entropy failure into an
-all-zero secret: a JWT signing key of zero, an administrator invitation of zero, and
-nothing in the log to say so. Go 1.24 made `crypto/rand.Read` incapable of returning an
-error — it terminates the program if the system source fails — which is the correct
-outcome for a credential. `go.mod`, the `Dockerfile` and the workflow pins move together;
-the error is still checked at the call site rather than discarded, so the guarantee is
-enforced where it is relied upon and not left implied by the `go` directive. The bump also
-retires this document's former note that `next`'s use of `testing.T.Context` was
-unavailable here: the `context.Background()` substituted throughout the tests is now
-`t.Context()`, which the `usetesting` linter requires as soon as the module targets 1.24
-and which cancels with the test rather than outliving it. That was 50 call sites across 29
-files, and it is the whole reason the first CI run on this branch went red — the bump is
-not confined to `go.mod`.
+**Those secrets are why this branch raises the module to Go 1.24.** The per-process JWT
+secret, the bootstrap invitation and every API key come from `auth.GenerateRandomString`,
+which reads `crypto/rand`. Under the pre-1.24 signature `rand.Read` returns an error and
+leaves the buffer as it found it, so discarding that error converts an entropy failure
+into an all-zero secret — a JWT signing key of zero, an administrator invitation of zero,
+and nothing in the log to say so. Go 1.24 made `crypto/rand.Read` incapable of returning
+an error; it terminates the program if the system source fails, which is the correct
+outcome for a credential. `go.mod`, the `Dockerfile` and the workflow pins move together,
+and the error is still checked at the call site rather than left implied by the `go`
+directive. That bump is not confined to `go.mod` — see
+[auth-port.md](auth-port.md#lint-policy).
 
-### Resisting anonymous abuse
+## Resisting anonymous abuse
 
-`self.login` and `self.register` are reachable without credentials by construction —
-they are how anyone gets credentials in the first place — and both do bcrypt work. That
-makes them the two endpoints an unauthenticated caller can aim at.
+`self.login` and `self.register` are reachable without credentials by construction — they
+are how anyone gets credentials in the first place — and both do bcrypt work. That makes
+them the two endpoints an unauthenticated caller can aim at.
 
 **Login is throttled per bucket, and refuses rather than queues.** `next` uses one
-process-wide `rate.Limiter` and calls `Wait` on it. Both halves of that are wrong: the
-budget is shared, so five wrong guesses against usernames that do not exist lock out
-every account on the instance; and waiting holds the request open instead of answering
-it. Attempts are now counted against an LRU of keyed token buckets — one for
-`(account, source)`, one for the source alone with a wider budget — and an attempt that
-cannot be served immediately is refused immediately.
+process-wide `rate.Limiter` and calls `Wait` on it. Both halves are wrong: the budget is
+shared, so five wrong guesses against usernames that do not exist lock out every account
+on the instance; and waiting holds the request open instead of answering it. Attempts are
+counted against an LRU of keyed token buckets — one for `(account, source)`, one for the
+source alone with a wider budget — and an attempt that cannot be served immediately is
+refused immediately.
 
-There is deliberately **no per-account bucket spanning all sources**. It is the one key
-an attacker can fill on someone else's behalf, which would let anyone lock any account
-out from its owner's own address. Keying by `(account, source)` means an attacker's
-guesses only ever exhaust their own budget; the cost is that an attacker holding many
-addresses gets a few guesses from each, which against a password meeting the entropy
-floor is not a threat.
+There is deliberately **no per-account bucket spanning all sources**. It is the one key an
+attacker can fill on someone else's behalf, which would let anyone lock any account out
+from its owner's own address. Keying by `(account, source)` means an attacker's guesses
+only ever exhaust their own budget; the cost is that an attacker holding many addresses
+gets a few guesses from each, which against a password meeting the entropy floor is not a
+threat.
 
 The source comes from the HTTP middleware, so a caller reaching the service by any other
 route has none and is bounded by account alone. The bucket map is size-capped, so it
 cannot be grown without bound by cycling keys; eviction only resets a bucket, which fails
 toward availability rather than lockout.
 
-**All of which depends on the source being something the caller cannot pick.** It is
-gin's `ClientIP()`, and gin reads that from `X-Forwarded-For` or `X-Real-IP` whenever the
-peer is a trusted proxy — where its default is to trust _every_ proxy. Directly reachable,
-that made the client address a header the attacker writes, and rotating it bought a fresh
-bucket per request: 30 guesses against one account from one socket, entirely unthrottled.
-`http_server.trusted_proxies` is therefore empty by default, which means believe nobody
-and take the peer that actually opened the connection. An operator behind a reverse proxy
-must list it there for the real client address to survive the hop — and until they do,
-every request is attributed to the proxy, which the per-source budget's width is there to
-absorb.
+**All of which depends on the source being something the caller cannot pick, which is
+what `http_server.trusted_proxies` is for.** The source is gin's `ClientIP()`, and gin
+reads that from `X-Forwarded-For` or `X-Real-IP` whenever the peer is a trusted proxy —
+where gin's own default is to trust _every_ proxy. Directly reachable, that made the
+client address a header the attacker writes, and rotating it bought a fresh bucket per
+request. The setting is therefore empty by default: believe nobody, and take the peer that
+actually opened the connection. An operator behind a reverse proxy must list it there for
+the real client address to survive the hop — and until they do, every request is
+attributed to the proxy, which the per-source budget's width is there to absorb.
 
 **Registration validates the invitation before it hashes anything.** bcrypt is
-deliberately expensive, and hashing first meant an anonymous caller could spend a full
-hash per request by posting arbitrary invitation codes — a cheap way to saturate every
-core. The transaction that claims the invitation still re-reads it, because anything
-learned before the transaction can be stale by the time the insert runs; the early pass
-only rejects codes that were never going to work.
+deliberately expensive, and hashing first let an anonymous caller spend a full hash per
+request by posting arbitrary invitation codes. The transaction that claims the invitation
+still re-reads it, because anything learned before the transaction can be stale by the
+time the insert runs; the early pass only rejects codes that were never going to work.
 
 Login's own comparison runs against a decoy hash when the account does not exist, so the
-work done for a miss matches the work done for a hit. Returning early there was a
-username-enumeration oracle even though the error text was identical.
+work done for a miss matches the work done for a hit. Returning early was a
+username-enumeration oracle even with identical error text.
 
-### First administrator
+## First administrator
 
 An `auth_initial_invitation` startup worker creates an admin invitation when no enabled
 admin user exists, and logs its code. Without it, an installation that enables
@@ -228,330 +206,96 @@ authentication has no way in. It is idempotent: a second start finds the unclaim
 invitation rather than issuing another.
 
 **The check and the insert are serialized by a Postgres advisory lock** held for the
-transaction. bitmagnet is routinely run as more than one process against one database,
-and without the lock every replica reads the same empty state and inserts its own code: a
+transaction. bitmagnet is routinely run as more than one process against one database, and
+without the lock every replica reads the same empty state and inserts its own code — a
 synchronized 16-replica start produced 16 distinct, non-expiring administrator
-invitations, each a permanent path to an admin account. It has to be a database lock
-rather than a mutex, because the processes racing here do not share memory. The lock
-releases on commit or rollback, so a crashed replica cannot wedge the next start.
+invitations. It has to be a database lock rather than a mutex, because the processes
+racing here do not share memory. The lock releases on commit or rollback, so a crashed
+replica cannot wedge the next start.
 
-### Torznab
+## Torznab
 
-Torznab is the one surface `next` never wired auth into. The approach here is adapted
-from the `kawaii-not-kawaii` fork (`172a784d3`), the only implementation in the fork
-landscape that solved it:
+The one surface `next` never wired auth into. The approach here is adapted from the
+`kawaii-not-kawaii` fork (`172a784d3`), the only implementation in the fork landscape that
+solved it:
 
-- the credential is accepted as the `apikey` query parameter or an `X-Api-Key` header,
-  the query parameter being what \*arr clients actually send;
+- the credential is accepted as the `apikey` query parameter or an `X-Api-Key` header, the
+  query parameter being what \*arr clients actually send;
 - a refusal is a Torznab XML error, code 100 "Incorrect user credentials", not a bare
   status code, because \*arr clients parse the error code;
 - **no network-based bypass.** That fork deliberately excludes Torznab from its
   trusted-network bypass and the same call is made here. Being on the LAN is not a
   credential for machine access.
 
-**Machine credentials only, and that is enforced in both directions.** The handler
-ignores whatever identity the global bearer middleware resolved, and rejects any
-identity that carries a user but no API key — an interactive session, whichever slot it
-arrived in. Reading the ambient identity made a browser session a third credential type
-for this endpoint: an operator with the web UI open had their JWT attached by the
-middleware, so Torznab answered `200` to a request carrying no `apikey` at all. Given
-the permissive default CORS policy, that means any page that could make the browser
-issue the request got Torznab access on the operator's behalf. An absent credential
-resolves the anonymous identity rather than refusing outright, so whether the endpoint
-is open still depends only on the permission model — including when the middleware is
-not mounted at all.
+Two departures. The query-string credential is accepted **only** on this endpoint, where
+the protocol requires it — everywhere else the bearer header remains the only accepted
+form, since query strings leak into access logs, referrers and browser history. And
+authorization goes through rbac rather than that fork's global on/off flag, so Torznab
+contributes an object action, `anon` holds it while anonymous access is enabled, and
+individual keys can be scoped to it.
 
-**The key travels in the URL, so it reaches logs.** This application redacts
-`apikey` (and `token`, `password`, `secret`, `api_key`) from its own request
-logging. Nothing else in the request path does: a reverse proxy, ingress
-controller, CDN or WAF will record the full URL unless configured otherwise, and
-API keys do not expire by default, so read access to those logs is equivalent to
-application access. **If you front bitmagnet with a proxy, redact the `apikey`
-parameter there too.**
+**Machine credentials only, enforced in both directions.** The handler ignores whatever
+identity the global bearer middleware resolved, and rejects any identity carrying a user
+but no API key — an interactive session, whichever slot it arrived in. Reading the ambient
+identity made a browser session a third credential type here: an operator with the web UI
+open had their JWT attached by the middleware, so Torznab answered `200` to a request
+carrying no `apikey` at all, and with the permissive default CORS policy any page that
+could make the browser issue that request got Torznab access on the operator's behalf. An
+absent credential still resolves the anonymous identity rather than refusing outright, so
+whether the endpoint is open depends only on the permission model — including when the
+middleware is not mounted at all.
 
-**Redacting the request logger was not enough, because it is not the only thing that
-logs a request.** The server installed `gin.Recovery()`, whose panic handler dumps the
-request line verbatim — and on the broken-pipe branch it does so in release mode as well,
-which is precisely the branch a Torznab client reaches by disconnecting mid-response. It
-masks the `Authorization` header and nothing else, so `X-Api-Key` went to the log intact
-too. The vendored `ginzap` recovery had the same dump and redacted neither. Recovery now
-runs through `ginzap.RecoveryWithZap` with the same query-string redaction the request
-logger uses, extended to credential-bearing headers, and the middleware stack is built by
-one exported `httpserver.Middleware` so that a test exercises what the server actually
-installs rather than a stack of its own. The lesson generalises past this instance: a
-redaction guarantee holds only over the sinks it was applied to, and a panic path is a
-second sink that no amount of care in the first one covers.
+### The key travels in the URL, so it reaches logs
 
-Two departures from it. The query-string credential is accepted **only** on this
-endpoint, where the protocol requires it — everywhere else the bearer header remains the
-only accepted form, since query strings leak into access logs, referrers and browser
-history. And authorization goes through rbac rather than that fork's global on/off flag,
-so Torznab contributes an object action, `anon` holds it while anonymous access is
-enabled, and individual keys can be scoped to it.
+This application redacts `apikey` — and `token`, `password`, `secret`, `api_key` — from
+its own request logging, in both the request logger and the panic recovery handler.
+**Nothing else in the request path does.** A reverse proxy, ingress controller, CDN or WAF
+will record the full URL unless configured otherwise, and API keys do not expire by
+default, so read access to those logs is equivalent to application access.
 
-### Web UI
+**If you front bitmagnet with a proxy, redact the `apikey` parameter there too.**
+
+Recovery runs through `ginzap.RecoveryWithZap` with the same query-string redaction the
+request logger uses, extended to credential-bearing headers, and the middleware stack is
+built by one exported `httpserver.Middleware` so a test exercises what the server actually
+installs. Both stock `gin.Recovery()` and vendored `ginzap` dump the request line verbatim
+on panic — including on the broken-pipe branch in release mode, which is exactly what a
+Torznab client reaches by disconnecting mid-response. Keep any new logging sink inside
+that redaction.
+
+## Web UI
 
 Login and registration, an account section with API key management, and users, roles and
 invitations screens under `dashboard`. Ported from `next`, whose auth components use no
 Angular syntax newer than this lineage's Angular 18 supports.
 
-The session token is attached by an Apollo link in `app.config.ts`. A token that no
-longer resolves to a user is cleared, and this is the client half of the always-resolves
-invariant above: an expired, revoked or deleted-account token yields a successful
-`self.identity` response with a null user rather than an error, which is the signal the
-UI acts on. Were the server to refuse the query instead, the UI would never reach its
-token-clearing code.
+The session token is attached by an Apollo link in `app.config.ts`. A token that no longer
+resolves to a user is cleared — the client half of the always-resolves invariant above.
+An expired, revoked or deleted-account token yields a successful `self.identity` response
+with a null user rather than an error, which is the signal the UI acts on. Were the server
+to refuse the query instead, the UI would never reach its token-clearing code.
 
-### Endpoints that are not GraphQL
+## Endpoints that are not GraphQL
 
-`/import`, `/metrics` and `/debug/pprof/*` are guarded by object actions in the
-`http` namespace, since the identity middleware only resolves an identity and
-something has to act on it. Before that they stayed open when anonymous access
-was disabled — including the data-mutating importer and `/debug/pprof/cmdline`,
-which discloses the process command line.
+`/import`, `/metrics` and `/debug/pprof/*` are guarded by object actions in the `http`
+namespace, since the identity middleware only resolves and something has to act on it.
+Before that they stayed open when anonymous access was disabled — including the
+data-mutating importer and `/debug/pprof/cmdline`, which discloses the process command
+line.
 
-`/status` is deliberately left public, matching the `health::query` grant in the
-GraphQL baseline: orchestrators poll it, and it reports liveness only.
+`/status` is deliberately public, matching the `health::query` grant in the GraphQL
+baseline: orchestrators poll it, and it reports liveness only.
 
 ## Known gaps
 
 - **No route guards in the UI.** `next`'s `authGuard` was ported and then removed. Now
-  that the GraphQL surface is enforced they would be worth adding back, as a matter of
-  presentation rather than protection: an unauthorised user currently reaches an
-  administrative screen and sees its queries refused, instead of being sent to login.
+  that the GraphQL surface is enforced they would be worth adding back, as presentation
+  rather than protection: an unauthorised user currently reaches an administrative screen
+  and sees its queries refused, instead of being sent to login.
 - **`auth.email_verification` does nothing.** The parameter exists on `next` and is
   carried over for fidelity, but its value is never read and no verification code is ever
   issued — the `users.email_verify_code` column is written nowhere. It is inert on `next`
-  too. Every other user parameter in the table above is consulted. Treat it as a
-  placeholder, not a feature. It therefore **defaults to `false` here**, diverging from
-  `next`: a parameter that defaults to on while doing nothing tells an operator their
-  addresses are verified when they are not, and turning it on changes nothing either. The
-  default follows the behaviour, and it flips back when the behaviour arrives.
-
-## How the port was done
-
-Kept because the method is reusable for the rest of `next`, and because the numbers
-corrected an assumption this document previously recorded.
-
-### Dependency surface
-
-Measured by extracting every import across all 59 files of `internal/auth`, then walking
-the closure — descending only into packages the `main` lineage does not already provide,
-since the port uses `trunk`'s copy of the rest.
-
-`internal/auth` imports just six bitmagnet packages directly: `internal/model`,
-`internal/slice`, `internal/database/dao`, `internal/database`, `internal/config/param`
-and `internal/atomic`. Closing over those, five packages had to be ported alongside it:
-
-| Support package          |     Lines |
-| ------------------------ | --------: |
-| `internal/config/param`  |     1,428 |
-| `pkg/json_schema`        |       915 |
-| `internal/logging/level` |       266 |
-| `internal/ecma262`       |       234 |
-| `internal/atomic`        |       201 |
-| **Total**                | **3,044** |
-
-So about **7,100 lines**: 4,069 of auth plus 3,044 of support. All five compile against
-`trunk` unmodified.
-
-Critically the closure **terminates there** — it reaches nothing in `internal/plugin`,
-`internal/gql`, `internal/wasm`, `internal/workers`, `internal/search` or `proto/`. An
-earlier version of this document claimed auth could not be extracted without taking
-`next` wholesale; that is not so at import level.
-
-(Walking `next`'s own copies of `internal/database` and `internal/model` instead of
-`trunk`'s does drag in `wasm`, `proto` and the plugin registry — an artefact of measuring
-the wrong thing, since those packages already exist on `main`.)
-
-New third-party modules: **casbin/v2**, **golang-jwt/v5**, **go-password-validator** on
-the Go side, **picomatch** in the web UI. Everything else the support packages need was
-already present, including `gin`.
-
-### Adaptations
-
-Where `next`'s design depends on infrastructure this lineage does not have:
-
-- **fx instead of the plugin builder.** `next` assembles auth through
-  `internal/plugin/core/auth/plugin.go`, which needs its plugin registry, worker runner
-  and ref system. `authfx` is written directly against fx, mirroring the same service
-  set, value groups and the lazy indirection that breaks the rbac dependency cycle.
-- **`database.DaoTransactionProvider`.** On `next` this belongs to a provider abstraction
-  built on its worker-runner lifecycle. `internal/database/provider.go` adapts the
-  lineage's own `lazy.Lazy[*dao.Query]` to the same two-method surface, so the seam is in
-  the same place and a future switch to `next`'s provider would not touch
-  `internal/auth`.
-- **Config as a struct.** `next` declares eleven parameters through its plugin config
-  builder; `authconfig.Config` expresses them for `configfx` and converts them to the
-  atomic values the services take.
-- **Apollo Client v3, not v4.** `query` types `data` as non-null while `mutate` does not,
-  so `next`'s assertions are noise on the former and load-bearing on the latter. Its
-  `CombinedGraphQLErrors` handling and `dataState`-based `filterComplete` have no v3
-  equivalent and were rewritten.
-
-### Defects found and fixed on the way
-
-Both were found by porting, not by review, and both had a test written that was observed
-failing first:
-
-- **`rbac.PutRole` could not revoke.** It returned early when handed an empty object
-  action set, **before** the delete, so revoking every permission from a role silently did
-  nothing and returned a zero-valued `RoleInfo` with a `nil` error — indistinguishable
-  from success. It is the only way to change a role's permissions; there is no
-  `DeleteRolePermissions`, which is also why `next`'s rbac test carries a commented-out
-  revocation case: it exercises an API that was never written.
-- **`json_schema.NewValue` returned a document, not a value.** `yaml.Unmarshal` into a
-  `yaml.Node` always yields a `DocumentNode` wrapper annotated with its parse position,
-  while the `param` encoder emits the value node directly — so two constructions of the
-  same value compared unequal. This is the cause of `TestUint32` failing on `next`.
-
-Also removed rather than shipped: an expandable detail row in `next`'s users table whose
-entire content is the literal string `Hello`.
-
-### Defects found by review
-
-Everything above compiled, passed `go vet`, and passed the whole suite before any of the
-below was known. That is the argument for the repo's test-first rule, and each of these
-landed with a test that was watched failing against the unfixed code first. They are
-described where they belong in the sections above; this is the index, in the order the
-fixes landed.
-
-**Authorization was missing rather than wrong.**
-
-| Defect                                               | Effect                                                    |
-| ---------------------------------------------------- | --------------------------------------------------------- |
-| GraphQL surface was unenforced                       | every field reachable regardless of the `@auth` directive |
-| `/import`, `/metrics`, `/debug/pprof` were unguarded | a data-mutating importer and `pprof/cmdline` left open    |
-| `anon` was granted auth administration               | see below — a trapdoor, not merely an open door           |
-| Torznab trusted the ambient bearer identity          | a browser session authenticated an API-key-only endpoint  |
-| API key could mint a second key naming any action    | scope escalation to the owner's full role                 |
-
-**Credentials did not mean what they said.**
-
-| Defect                                        | Effect                                                     |
-| --------------------------------------------- | ---------------------------------------------------------- |
-| Invitation expiry comparison inverted         | expired invitations accepted, valid ones refused           |
-| Invitation claimed by an unconditional update | concurrent registrations all claimed the same invitation   |
-| Disabling a user revoked nothing              | existing tokens and API keys worked until they expired     |
-| Bootstrap did an unlocked check-then-insert   | 16 replicas produced 16 permanent administrator codes      |
-| `SetRole` updated without a `WHERE` clause    | gorm's global-update guard was the only thing stopping it  |
-| Roughly one API key in 256 could not decode   | `decodedLength` used the base32 formula on a 16-byte value |
-
-**Disclosure and abuse.**
-
-| Defect                                     | Effect                                          |
-| ------------------------------------------ | ----------------------------------------------- |
-| Login distinguished missing from wrong     | username enumeration, by message and by timing  |
-| Torznab keys were logged verbatim          | log read access equalled application access     |
-| Registration hashed before validating      | one bcrypt per anonymous request, in parallel   |
-| Login limiter was process-wide, and waited | five wrong guesses locked out every account     |
-| Revoked tokens aborted the chain           | UI wedged, unable to reach the call clearing it |
-
-A second review pass over the fixed branch found five more. The first is the sharpest
-finding on this branch, because the control it defeats is the one the section above spends
-the most words justifying.
-
-| Defect                                           | Effect                                               |
-| ------------------------------------------------ | ---------------------------------------------------- |
-| Login throttle keyed on a spoofable client IP    | rotating `X-Forwarded-For` bought unlimited guesses  |
-| Revoked API keys still aborted the chain         | the always-resolves invariant held for JWTs only     |
-| `UpdatePassword` ignored `password_hashing_cost` | raising the cost silently did not apply to changes   |
-| `NewSecret` discarded its bcrypt error           | a zero-valued hash would be stored as the credential |
-| Invitation codes were 48 bits                    | thin for a non-expiring credential that grants admin |
-
-A third pass found five more. The first three are all cases where a control was correct and
-something outside it was not — the same shape as the four singled out below.
-
-| Defect                                     | Effect                                                     |
-| ------------------------------------------ | ---------------------------------------------------------- |
-| `gin.Recovery` dumped the raw request line | the redaction guarantee did not cover the panic path       |
-| Config validation was dropped in the port  | `login_requests_per_minute: 0` panics; entropy `0` is mute |
-| `GenerateRandomString` discarded its error | an entropy failure minted an all-zero secret before 1.24   |
-| `self.apiKeys` accepted an API key         | a Torznab-scoped key enumerated its owner's other keys     |
-| The JWT issuer was emitted, never checked  | a reused secret let another service's token be accepted    |
-
-The last two are narrower, and both are the same mistake: a check written in one place and
-not the neighbouring one. `CreateAPIKey` and `DeleteAPIKey` require an interactive session
-through `UserSessionFromContext`, while `APIKeys` asked only for a user — so listing, the
-third key-management operation, was the one a machine credential could reach, returning the
-owner's other key IDs, names, creation times and expirations. `Generate` set
-`Issuer: "bitmagnet"` and `Parse` never looked at it, which costs nothing while the signing
-key is unique to the instance and everything when an operator reuses one across services.
-
-Also removed: `rbac.repository.DeleteRolePermissions`, dead on arrival — absent from the
-`Repository` interface, called by nothing, and carrying a copy-paste bug that compared the
-object column against the namespace. `jwt.Parse` now pins HS256 rather than accepting
-whatever algorithm a token nominates; it was not exploitable against a symmetric key, but
-the parser built for exactly this purpose was being constructed and then ignored.
-
-Four are worth singling out, because in each the security control worked and something
-around it did not — the failure mode least likely to be caught by a test written after
-the fix.
-
-The **anonymous-access trapdoor** was the worst of them. Granting `anon` every registered
-object action included auth administration, so an unauthenticated caller could call
-`putRole` and give the `anon` role a wildcard. Role grants live in the database while the
-compatibility grant is only in memory, so the wildcard **survived setting
-`anonymous_access` to `false`**: the switch documented as "this is how you turn
-authentication on" left the instance wide open, with nothing visible to show for it.
-
-The **chain-abort lockout** and the **login limiter** were both failures of the recovery
-path. In each case the control did its job and made the way back out unreachable: a dead
-token refused the query that would have cleared it, and a shared login budget refused the
-login that would have replaced it.
-
-The **spoofable throttle key** is the one to learn from, because it was introduced by a
-fix. Replacing the global limiter with keyed buckets was right, and the keys were chosen
-carefully — the reasoning about which bucket an attacker can fill on someone else's behalf
-still stands. What went unexamined was whether the attacker controls the key itself, and
-they did: the value came from a framework whose default is to believe a request header.
-A control is only as good as the least trustworthy input to it, and that input was two
-dependencies away from the code doing the reasoning.
-
-### Lint policy
-
-`trunk` adopted `next`'s `var-naming` `skipPackageNameChecks` relaxation, needed for
-underscored package names such as `json_schema`. `next` also switches `wsl` to `wsl_v5`
-and drops the `if-return` and `nested-structs` revive rules; **`wsl_v5` does not exist in
-golangci-lint v2.1.6**, which both repositories pin, and `golangci-lint config verify`
-rejects it — so that part cannot be adopted and the affected code was fixed by hand
-instead.
-
----
-
-## Alternatives considered
-
-### `upstream/next` — chosen
-
-The maintainer's design, on the dormant [`next` branch](upstream-status.md#the-next-branch).
-Most complete, most likely to match upstream's eventual direction, and the only one with
-a real permission model. Still a draft: `next` HEAD is 2026-01-31 and `internal/auth/`
-was last touched 2026-01-24 (`93dd4c623`).
-
-### `gabriel20xx` (`internal/auth`, 5 files)
-
-Single-user session auth on the `main` lineage: `auth_users` (bcrypt, singleton unique
-index) and `auth_sessions` (sha256 token hash, expiry, cascade delete), with an
-`@authenticated` directive. Small enough to read end to end, and its first-run flow suits
-a self-hosted app — but **no API key support**, so no authenticated Torznab, and no
-permission model. Not used.
-
-### `kawaii-not-kawaii` (`internal/gql/auth`) — contributed the Torznab design
-
-An independent implementation on the `main` lineage: first-run setup through the fork's
-config writer, signed browser sessions, a machine API key accepted by GraphQL and
-Torznab, and a trusted-network bypass. Coupled to that fork's live config reader/writer
-and stores credentials in application config rather than database tables, so it was not a
-design basis — but it is the only fork that wired auth into Torznab, and that part was
-adapted here with attribution.
-
-### Build a focused implementation
-
-Rejected: security-sensitive code written from scratch, diverging from upstream if `next`
-lands.
-
-### Front it with a proxy
-
-Still a valid deployment option, and the least work: do auth at the gateway and bind
-bitmagnet to localhost. It leaves Torznab unauthenticated unless the proxy covers that
-too, and it does not give per-key scoping.
+  too, and every other user parameter in the table above is consulted. It defaults to
+  `false` here, diverging from `next`, because a parameter that defaults to on while doing
+  nothing tells an operator their addresses are verified when they are not. The default
+  follows the behaviour, and flips back when the behaviour arrives.

@@ -41,8 +41,9 @@ review in [porting.md](porting.md) and a test seen **red**.
 
 - **The `upstream/next` auth port**, on `codex/auth-port` as
   [#28](https://github.com/giorgosg/bitmagnet/pull/28). [auth.md](auth.md) is the live
-  record for it — the dependency map, the port order, and what is still open. Leave both
-  the branch and that page to it.
+  record of what was built and how to run it; [auth-port.md](auth-port.md) covers the port
+  method, what review found, and the alternatives. Leave both the branch and those pages
+  to it.
 
 ## Next candidate
 
