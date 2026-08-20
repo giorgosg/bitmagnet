@@ -78,8 +78,12 @@ Where `next`'s design depends on infrastructure this lineage does not have:
 
 ## Lint policy
 
-`trunk` adopted `next`'s `var-naming` `skipPackageNameChecks` relaxation, needed for
-underscored package names such as `json_schema`. `next` also switches `wsl` to `wsl_v5`
+**This branch** adopts `next`'s `var-naming` `skipPackageNameChecks` relaxation, needed
+for underscored package names such as `json_schema`; `trunk` still carries a bare
+`var-naming`, so the relaxation arrives with the merge rather than preceding it. A
+path-scoped exclusion covering only `pkg/json_schema` would have been tighter, and was
+weighed and passed over: the relaxation is already committed and commented, and churning
+it buys nothing. `next` also switches `wsl` to `wsl_v5`
 and drops the `if-return` and `nested-structs` revive rules; **`wsl_v5` does not exist in
 golangci-lint v2.1.6**, which both repositories pin, and `golangci-lint config verify`
 rejects it — so that part cannot be adopted and the affected code was fixed by hand.
