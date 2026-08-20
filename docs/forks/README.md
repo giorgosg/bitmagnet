@@ -1,14 +1,18 @@
 # Fork triage
 
-Surveyed 2026-08-18. Of 258 forks, all but a handful are unmodified mirrors.
-This is the survey snapshot; see [integration status](../integration-status.md) for the
-patches subsequently accepted into `trunk` and the current evaluation queue.
+Which downstream repo a change should come from, and which ones to leave alone. Of 258
+forks, all but a handful are unmodified mirrors; the seven with real work get a page
+each.
+
+**Snapshot:** surveyed 2026-08-18. [integration-status.md](../integration-status.md)
+records what has happened to these candidates since.
 
 ## Real divergence
 
 Counts are patch-equivalence based (`git cherry`), not GitHub's ahead/behind — see
-[../git-workflow.md](../git-workflow.md) for why that distinction matters. Diffstats
-are two-dot, whitespace/CRLF-normalized, excluding generated code and `webui/dist`.
+[../porting.md](../porting.md#the-three-measurements-that-lie) for why that distinction
+matters. Diffstats are two-dot, whitespace/CRLF-**normalized**, excluding generated code
+and `webui/dist`.
 
 | Fork                                      | Unique commits | Real Go diff          | Up to date?     | Theme                                    |
 | ----------------------------------------- | -------------- | --------------------- | --------------- | ---------------------------------------- |
@@ -21,9 +25,18 @@ are two-dot, whitespace/CRLF-normalized, excluding generated code and `webui/dis
 
 ## Ranked pick list
 
-**1. lodestone's performance commits** — highest value, lowest risk. Self-contained,
-no product opinion attached, addresses real bottlenecks. Only complication is the
-module rename churn, which `-w` filtering handles.
+Ordered at survey time. Where integration has since contradicted the ranking, the entry
+says so — [integration-status.md](../integration-status.md) is the authority.
+
+**1. lodestone's performance commits** — highest value. Self-contained, no product
+opinion attached, addresses real bottlenecks. Only complication is the module rename
+churn, which `-w` filtering handles.
+
+> **The survey also called this the lowest-risk pick, and that was wrong.** Working
+> through it produced two accepted changes and five rejections, and the pre-rename
+> `perf:` commits contained a deadlock in `request_meta_info.go` that compiled, vetted
+> and passed the whole suite. Highest value, yes. Lowest risk, no — see
+> [lodestone.md](lodestone.md#assessment).
 
 **2. o51r15's DHT and DB fixes** — bootstrap node reseeding, queue backpressure,
 concurrency semaphore, the `queue_jobs` expression index. Plus it already carries

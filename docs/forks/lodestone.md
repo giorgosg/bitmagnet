@@ -2,6 +2,8 @@
 
 <https://github.com/ghobs91/lodestone> · remote `lodestone` · branch `main`
 
+**Snapshot:** surveyed 2026-08-18. See [integration-status.md](../integration-status.md) for what has been taken from it since.
+
 **41 unique commits, 1 upstream commit missing** (`e31b30d`, the go-resty/TMDB fix).
 Active through 2026-08-06 — the most recently active fork with substantive work.
 
@@ -77,10 +79,26 @@ opinion attached — no new dependencies, no schema changes, no UI coupling. The
 exactly the parts of bitmagnet people complain about: DHT crawl throughput, queue
 contention, and search query cost.
 
-Caveats: none of it appears to have benchmarks or tests attached, so the claims are
-unverified. The concurrency changes in particular (ticker race, worker pool, non-blocking
-sends) deserve careful review before trusting — they are the kind of change that is easy
-to get subtly wrong. Take them one at a time on separate topic branches.
+The caveat has since been settled by measurement rather than suspicion. The survey warned
+that none of this carried benchmarks or tests, so the claims were unverified. Working
+through it found worse than unverified:
+
+- **A deadlock** in `dhtcrawler/request_meta_info.go` — `break` inside a `select` leaves
+  the select, not the enclosing `for`, so on cancellation goroutines launch without
+  acquiring the semaphore and then block on `<-sem` forever. All ten pre-rename `perf:`
+  commits cherry-picked without conflict, compiled, vetted, and passed the full suite
+  with this in them.
+- **Behavioural changes wearing a `perf:` prefix** — summing seeders across sources,
+  "rotating" a filter that is stable by construction, and moving a Levenshtein threshold
+  are classification and ranking policy changes, not optimisations.
+
+Of the commits evaluated so far, two were accepted (in modified form), one needs
+redesigning, and five were rejected. [integration-status.md](../integration-status.md)
+carries the reasoning for each.
+
+Still worth mining — the accepted ones addressed real bottlenecks. Take them one at a
+time on separate topic branches, read the whole diff, and treat a `perf:` subject as a
+claim about intent rather than behaviour.
 
 Note the overlap: lodestone's global DHT rate limiter, o51r15's concurrency semaphore,
 and open PR #514's configurable rate limit are three answers to the same problem.

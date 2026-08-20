@@ -1,157 +1,165 @@
 # Working on bitmagnet
 
-Repository instructions for coding agents. This is the short operational guide; use the
-documents under [`docs/`](docs/README.md) for the reasoning and longer examples.
+Operational instructions for anyone changing this repo, human or agent. Everything that
+does not belong in every session lives under [`docs/`](docs/README.md), reached by the
+pointers below.
 
-## Before changing anything
+## Which doc, and when
 
-1. Run `git status --short` and `git branch --show-current`. Preserve unrelated and
-   untracked work.
-2. Read the task-relevant documentation:
-   - [`docs/hacking.md`](docs/hacking.md) for the toolchain, generators, and feature work.
-   - [`docs/architecture.md`](docs/architecture.md) for packages and `uber-go/fx` wiring.
-   - [`docs/git-workflow.md`](docs/git-workflow.md) before reviewing forks or PRs.
-   - [`docs/upstream-status.md`](docs/upstream-status.md) and
-     [`docs/forks/`](docs/forks/README.md) before choosing or porting community work.
-   - [`docs/auth.md`](docs/auth.md) for anything that exposes or protects an interface.
-3. If `CLAUDE.local.md` exists, read it for checkout-specific environment details and
-   operator authority. Consult other `*.local.md` files only when relevant. These files
-   are private working notes: never stage, commit, quote, or copy them into tracked files.
+| Read                                                     | When                                                                                  |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| [docs/hacking.md](docs/hacking.md)                       | Making a change: toolchain, feature shape, GraphQL, migrations, testing at real scale |
+| [docs/architecture.md](docs/architecture.md)             | Working out what a package does, or how `fx` assembles the binary                     |
+| [docs/porting.md](docs/porting.md)                       | Measuring, reviewing, or cherry-picking from a fork or an upstream PR                 |
+| [docs/forks/](docs/forks/README.md)                      | Choosing which downstream repo a change should come from                              |
+| [docs/upstream-status.md](docs/upstream-status.md)       | Sending a change upstream, or weighing whether the `next` rewrite makes it moot       |
+| [docs/integration-status.md](docs/integration-status.md) | Checking whether a candidate is already merged, queued, or rejected                   |
+| [docs/auth.md](docs/auth.md)                             | Adding or protecting an externally reachable interface                                |
+| [docs/agents/](docs/agents/issue-tracker.md)             | Filing an issue, applying a triage label, or looking for domain docs                  |
 
-The dated fork and upstream surveys are snapshots. Re-run the commands in
-[`docs/git-workflow.md`](docs/git-workflow.md) before relying on their counts or status.
+Several of those pages are dated **snapshots** — the fork survey, the upstream survey,
+every divergence count. Re-measure with the commands in [docs/porting.md](docs/porting.md)
+before acting on a number.
 
-## Generated files: change the source, never the output
+`*.local.md` is gitignored at any depth and holds this checkout's private notes:
+environment details, and whatever authority the operator has granted. Read
+`CLAUDE.local.md` if it exists, and consult the others when the topic matches. Leave all
+of them unstaged, unquoted, and uncopied into tracked files.
 
-The generated-files CI job regenerates everything, formats Go, extracts translations,
-builds the web UI, and fails if the worktree changes. Use the narrow generator while
-iterating and `task gen` when several outputs are involved.
+## Before the first edit
 
-| Do not hand-edit                           | Authoritative source                               | Refresh with                 |
+Run `git status --short` and `git branch --show-current`, and preserve unrelated and
+untracked work you find.
+
+## Trap 1: most of this repo is generated
+
+Change the source and regenerate. Editing the output _looks_ like it worked — it
+compiles, it passes locally — and the next `task gen` reverts it. CI regenerates
+everything and fails on any resulting diff.
+
+| Generated output                           | Source                                             | Regenerate with              |
 | ------------------------------------------ | -------------------------------------------------- | ---------------------------- |
-| `internal/gql/gql.gen.go`                  | `graphql/**/*.graphqls`, `internal/gql/gqlgen.yml` | `task gen-gql`               |
-| `internal/database/dao/*.gen.go`           | `internal/model` and DAO generator config          | `task gen-gorm`              |
+| `internal/gql/gql.gen.go` (~24k lines)     | `graphql/**/*.graphqls`, `internal/gql/gqlgen.yml` | `task gen-gql`               |
+| `internal/database/dao/*.gen.go`           | `internal/model`                                   | `task gen-gorm`              |
 | `internal/gql/enums/enums.go`              | Go enum types                                      | `task gen-gql-enums`         |
 | `internal/protobuf/bitmagnet.pb.go`        | `internal/protobuf/bitmagnet.proto`                | `task gen-protoc`            |
-| `internal/**/mocks/*.go`                   | Interfaces and `.mockery.yml`                      | `task gen-mockery`           |
-| `bitmagnet.io/schemas/classifier-0.1.json` | Classifier types                                   | `task gen-classifier-schema` |
-| `webui/src/app/graphql/generated/**`       | GraphQL schema and web UI operations               | `task gen-webui-graphql`     |
+| `internal/**/mocks/*.go`                   | interfaces and `.mockery.yml`                      | `task gen-mockery`           |
+| `bitmagnet.io/schemas/classifier-0.1.json` | classifier types                                   | `task gen-classifier-schema` |
+| `webui/src/app/graphql/generated/**`       | the GraphQL schema and web UI operations           | `task gen-webui-graphql`     |
 | `webui/src/app/i18n/translations/*.json`   | `i18n` markup in web UI templates                  | `task i18n-extract`          |
-| `webui/dist/**`                            | `webui/src`                                        | `task build-webui`           |
+| `webui/dist/**` — **committed to git**     | `webui/src`                                        | `task build-webui`           |
 
-`webui/dist/**` is both ignored for new files and already committed to Git. Every web UI
-change therefore needs a rebuilt `dist` committed. Its noisy diff, along with generated
-GraphQL, translations, mocks, protobufs, and `*.gen.go`, should be excluded during the
-first pass of a review but checked separately for consistency.
+`task gen` runs every generator in order; use the narrow target while iterating.
 
-Markdown is checked by the repository's pinned Prettier. Use the installed copy, not a
-fresh `npx prettier@3` resolution:
+`webui/dist` being tracked is the second half of this trap: every web UI change ships a
+rebuilt `dist`, and that rebuild produces a huge, meaningless-looking diff. Exclude it,
+the translations, and the rest of the generated output on a first review pass, then check
+them separately for consistency.
+
+## Trap 2: Prettier is pinned
+
+`task lint` runs `prettier --check .`, and `.prettierignore` does not exclude `*.md`, so
+markdown is linted too. Use the repo's own copy: `npx prettier@3` resolves to a later 3.x
+that formats markdown differently, passes locally, and fails CI.
 
 ```bash
-./webui/node_modules/.bin/prettier --write AGENTS.md
-./webui/node_modules/.bin/prettier --check AGENTS.md
+./webui/node_modules/.bin/prettier --write AGENTS.md 'docs/**/*.md'
 ```
 
-## Implementation workflow
+## Trap 3: migration numbers collide across forks
 
-Every observable behaviour change must ship with a test that was seen failing against
-the unfixed code. Follow red, green, refactor: reproduce first, apply the smallest fix,
-then run the focused test and the relevant broader suite. Do not weaken a test to make a
-port or cherry-pick pass.
+Upstream is at `00020`; forks in circulation add `00023` and `00033`. Renumber anything
+cherry-picked to the next free slot — `ls migrations/` for the current high-water mark,
+which moves as this tree adds its own — and keep every number that has already been
+applied to a live database.
 
-Large, lightly covered areas (`dhtcrawler`, `importer`, `processor`, and `blocking`) need
-particular care. A clean cherry-pick, successful compile, or green existing suite is not
-evidence that a concurrency or cache change is correct; add a focused regression test or
+```bash
+task create-migration NAME=add_my_thing   # goose -s create, in ./migrations
+```
+
+That target shells out to a `goose` binary, which the Nix shell does **not** provide —
+install it separately. `task migrate` needs no binary; it runs goose as a library through
+`./internal/dev`.
+
+Run `task gen-gorm` afterwards when the change also touches `internal/model`.
+
+## Every change lands with a test seen **red**
+
+An observable behaviour change ships with a test that was watched failing against the
+unfixed code. Reproduce first, apply the smallest fix, then run the focused test and the
+suite around it. A test written after the fix and never seen red proves nothing, and
+weakening an existing test to make a port pass is not an option.
+
+This bar exists because it has already been earned: cherry-picks in this repo have
+compiled, vetted, and passed the whole suite while carrying a shutdown deadlock and a
+cache that answered the wrong question. `dhtcrawler`, `importer`, `processor`, and
+`blocking` have little coverage, so a change there gets a focused regression test or a
 standalone reproduction.
 
-For PostgreSQL integration tests, use `internal/database/dbtest`:
+PostgreSQL tests use `internal/database/dbtest`, which creates and drops an isolated,
+fully migrated database per test:
 
 ```go
 db := dbtest.New(t) // db.Gorm, db.Query, db.Pool, db.DSN, db.Name
 ```
 
-It creates and drops an isolated, fully migrated database. Tests skip when
-`TEST_POSTGRES_DSN` is unset; CI supplies a PostgreSQL 16 service so they run there.
+They **skip** when `TEST_POSTGRES_DSN` is unset, so a bare `go test ./...` stays offline
+and proves less than it appears to. CI supplies a PostgreSQL 16 service.
 
 ```bash
 TEST_POSTGRES_DSN='postgres://postgres:postgres@localhost:5432/postgres' go test ./...
 ```
 
-### Project shapes to preserve
+## Shapes to follow
 
-- A new subsystem normally consists of `internal/<feature>/config.go`, `factory.go`, its
-  implementation, and `<feature>fx/module.go`, then one registration in
-  `internal/app/appfx/module.go`. Copy `internal/tmdb`, `internal/torznab`, or
-  `internal/worker` according to the feature shape.
-- For GraphQL changes, edit `graphql/schema/*.graphqls`, run `task gen-gql`, implement the
-  resolver under `internal/gql/resolvers`, and run `task gen-webui-graphql` if the UI
-  consumes the change.
-- Create migrations with `task create-migration NAME=<name>`. Never reuse a migration
-  number already applied to a live database; fork migrations frequently collide. Run
-  `task gen-gorm` when model changes affect generated DAOs.
-- Upstream `main` has no authentication and permits `*` CORS. Treat any new HTTP,
-  GraphQL, or Torznab surface as externally reachable unless the deployment provides a
-  separate boundary.
+- **A subsystem** is `internal/<feature>/` with `config.go`, `factory.go`, the
+  implementation, and `<feature>fx/module.go`, plus one registration line in
+  `internal/app/appfx/module.go`. Copy `internal/tmdb` (external API client),
+  `internal/torznab` (HTTP surface), or `internal/worker` (long-running).
+- **A GraphQL change** edits `graphql/schema/*.graphqls`, runs `task gen-gql`, implements
+  the resolver in `internal/gql/resolvers/`, then runs `task gen-webui-graphql` if the web
+  UI consumes it.
+- **A new interface is externally reachable.** Upstream `main` has no authentication and
+  allows `*` CORS, so treat any new HTTP, GraphQL, or Torznab surface as open unless the
+  deployment supplies its own boundary. See [docs/auth.md](docs/auth.md).
 
-## Commands and checks
+## Commands
 
-`Taskfile.yml` is authoritative. `flake.nix` supplies Go, Node 22, golangci-lint, protoc,
-Chromium on Linux, and the documentation toolchain; use `nix develop` or `direnv allow`
-when the host lacks them. PostgreSQL is separate. Install web dependencies with
-`task install-webui` before web checks.
+[`Taskfile.yml`](Taskfile.yml) is authoritative — this lists only the behaviour it will
+not tell you.
 
 ```bash
-task build            # Go build with version ldflags
-task test-go          # go test -v ./...; DB tests skip without TEST_POSTGRES_DSN
-task test-webui       # Angular tests; expects Chromium
-task test             # Go and web UI tests
-task lint             # web UI ESLint and Prettier
-task lint-golangci    # separate; not included in task lint
-task gen              # all code generators
-task i18n-extract     # regenerate translations
-task build-webui      # refresh committed webui/dist
-task migrate          # apply Goose migrations; requires PostgreSQL
-go build ./... && go vet ./...  # quick Go sanity check
+task test-go          # DB tests skip silently without TEST_POSTGRES_DSN
+task test-webui       # Angular; needs Chromium and `task install-webui` first
+task lint             # web UI ESLint and Prettier — golangci-lint is NOT included
+task lint-golangci    # separate, and must end in "0 issues." — a clean tree reports zero
+task migrate          # needs a running PostgreSQL; docker-compose.yml brings one up
+go build ./... && go vet ./...   # quickest Go sanity check
 ```
 
-Before handing off, run the smallest relevant checks plus all checks for the touched
-area. For changes affecting generators, reproduce CI's clean-tree expectation after
-generation (`git diff --exit-code`, excluding only
-`webui/dist/bitmagnet/3rdpartylicenses.txt` as CI does). Report tests that could not run
-or that skipped because PostgreSQL, Chromium, Node modules, or generator tooling was
-unavailable.
+`flake.nix` supplies Go, go-task, Node 22, golangci-lint, prettier, protoc, and Chromium
+on Linux; reach for `nix develop` or `direnv allow` when the host lacks them. PostgreSQL
+and `goose` are separate.
 
-CI additionally runs golangci-lint v2.1.6. A newer local version can report pre-existing
-findings, so compare the changed-file or branch delta rather than "fixing" unrelated
-code.
+Before handing off, run the smallest relevant checks plus everything covering the touched
+area. After running a generator, reproduce CI's clean-tree expectation with `git diff
+--exit-code`, excluding only `webui/dist/bitmagnet/3rdpartylicenses.txt` as CI does.
+Report every check that skipped or could not run, and why.
 
-## Branches, ports, and reviews
+## Branches
 
-- The current work is integration on `trunk`: evaluate selected commits from external
-  forks and repositories, port each coherent change through a focused PR, and merge the
-  reviewed result into `trunk`.
-- Treat imported commits as candidates, not trusted patches. Review the substantive
-  diff, verify the claimed behaviour, and add regression or integration tests whenever
-  needed. Every observable behaviour change still follows the red-green requirement
-  above.
-- `main` is a pristine mirror of `upstream/main`; never commit directly to it.
-- `trunk` is this fork's integration branch.
-- Cut upstreamable topic branches from `main`, not `trunk`, so they contain only the
-  intended change. Use `git cherry-pick -x` to retain provenance.
-- Do not commit, push, or merge unless the user asks or grants standing authority in a
-  local instruction file. Merge policy for this checkout, if any, is recorded in
-  `CLAUDE.local.md`; absent explicit authority, stop before merging.
-- For fork review, use patch equivalence (`git cherry`) and a whitespace-normalized,
-  two-dot diff. GitHub ahead/behind, three-dot diffs, and raw diffstats are misleading
-  for the rebased and CRLF-converted forks in this checkout.
+- **`main` is a pristine mirror of `upstream/main`.** Leave it untouched so
+  `git merge --ff-only upstream/main` always works.
+- **`trunk` is this fork's integration branch** — docs plus accepted patches. Current work
+  is integration: evaluate selected commits from forks and upstream PRs, port each
+  coherent change through a focused PR, merge the reviewed result here.
+- **Cut a topic branch from `main`**, not `trunk`, so anything destined for an upstream PR
+  contains only that change. `git cherry-pick -x` records provenance.
+- **Committing, pushing, and merging wait for the user to ask**, or for standing authority
+  recorded in a `*.local.md` file. Absent that, stop before merging and say so.
 
-```bash
-git cherry upstream/main FORK/main
-git diff -w --ignore-cr-at-eol upstream/main FORK/main -- \
-  . ':(exclude)webui/dist' ':(exclude)webui/src/app/i18n/translations' \
-  ':(exclude)go.sum' ':(exclude)*package-lock.json'
-```
-
-Read the entire substantive diff, not just commit messages. Keep ports focused, preserve
-original attribution, renumber colliding migrations, and test each behavioural change
-independently before integration.
+Treat an imported commit as a candidate, not a trusted patch: a fork's commit message
+describes intent, not behaviour, and `perf:` has been observed on changes that alter
+semantics. Read the whole substantive diff, verify the claimed behaviour, and give it the
+red test above. [docs/porting.md](docs/porting.md) has the commands that make that diff
+readable.

@@ -2,6 +2,8 @@
 
 <https://github.com/kawaii-not-kawaii/bitmagnet> · remote `kawaii-not-kawaii` · branch `main`
 
+**Snapshot:** surveyed 2026-08-18. See [integration-status.md](../integration-status.md) for what has been taken from it since.
+
 **340 unique commits, 0 missing from upstream.** Active through 2026-08-02.
 Real Go diff: 157 files. Go module path unchanged.
 

@@ -2,6 +2,8 @@
 
 <https://github.com/niklas2233/bitmagnet> · remote `niklas2233` · branch `main`
 
+**Snapshot:** surveyed 2026-08-18. See [integration-status.md](../integration-status.md) for what has been taken from it since.
+
 **44 unique commits, 0 missing from upstream.** Active Jun–Jul 2026.
 Real diff: **38 Go files, +2,022 / −23** — almost entirely additive, no line-ending or
 rename churn.

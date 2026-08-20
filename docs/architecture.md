@@ -1,23 +1,25 @@
 # Architecture
 
-Notes on how upstream `main` is put together. Accurate as of `e31b30d` (2026-05-21).
+How upstream `main` is put together — the map to consult when you need to know what a
+package does or where a new one goes. **Snapshot:** accurate as of `e31b30d`
+(2026-05-21).
 
 ## Shape
 
-A single Go binary (`main.go`) that runs several long-lived workers plus an HTTP
-server, backed by PostgreSQL. The Angular web UI is compiled and embedded into the
-binary via `webui/embed.go`.
+A single Go binary (`main.go`) that runs several long-lived workers plus an HTTP server,
+backed by PostgreSQL. The Angular web UI is compiled and embedded into the binary via
+`webui/embed.go`.
 
 ## Dependency injection: uber-go/fx
 
-Everything is wired with [`uber-go/fx`](https://github.com/uber-go/fx). The convention
-is rigid and worth internalising, because every fork that adds a feature follows it:
+Everything is wired with [`uber-go/fx`](https://github.com/uber-go/fx). The convention is
+rigid and worth internalising, because every fork that adds a feature follows it:
 
 ```
 internal/<feature>/
-    config.go          # config struct + defaults, registered with configfx
-    factory.go         # fx.Provide constructors
-    <feature>.go       # the actual implementation
+    config.go               # config struct + defaults, registered with configfx
+    factory.go              # fx.Provide constructors
+    <feature>.go            # the actual implementation
     <feature>fx/module.go   # fx.Module("<feature>", ...) — the public entry point
 ```
 
@@ -30,10 +32,9 @@ metricsfx   processorfx   queuefx     telemetryfx tmdbfx        torznabfx
 validationfx versionfx    workerfx
 ```
 
-**Adding a feature = adding a `<feature>fx` module and one line in `appfx/module.go`.**
-This is why fork features cherry-pick more cleanly than the raw diff sizes suggest —
-they tend to be new directories plus a one-line registration, not edits threaded
-through existing code.
+The consequence worth carrying into a review: **fork features cherry-pick far more
+cleanly than their raw diff sizes suggest.** A feature is usually a new directory plus a
+one-line registration, not edits threaded through existing code.
 
 ## Packages
 
@@ -60,20 +61,8 @@ through existing code.
 | `concurrency`  | Channel and limiter helpers — batching, keyed limiters, buffered channels         |
 | `lazy`         | `lazy.Lazy[T]` — deferred construction, used heavily by fx factories              |
 
-## Generated code
-
-Do not hand-edit; regenerate instead. These files dominate diffs and are the main
-source of review noise:
-
-- `internal/gql/gql.gen.go` (~24k lines) — gqlgen
-- `internal/database/dao/*.gen.go` — gorm/gen
-- `internal/protobuf/bitmagnet.pb.go` — protoc
-- `internal/**/mocks/*.go` — mockery (`.mockery.yml`)
-- `webui/dist/**` — **65 build artifacts are committed to git**
-- `webui/src/app/i18n/translations/*.json` — transloco extraction output
-
-Exclude the last two from every fork diff or they drown everything else. See
-[git-workflow.md](git-workflow.md).
+The generated packages above are listed with their sources and regenerate commands in
+[AGENTS.md](../AGENTS.md#trap-1-most-of-this-repo-is-generated).
 
 ## Interfaces
 
@@ -82,17 +71,16 @@ Exclude the last two from every fork diff or they drown everything else. See
 - **Torznab** — the \*arr integration surface.
 - **Web UI** — Angular 18, embedded in the binary.
 
-There is **no authentication of any kind** on upstream `main`. Every interface is
-open. See [auth.md](auth.md).
+None of the three is authenticated on upstream `main`, and CORS allows `*`. See
+[auth.md](auth.md).
 
 ## Database
 
 PostgreSQL only. Goose migrations in `migrations/` — 20 on upstream `main`, latest
-`00020_bloom_filters_large_object.sql`.
-
-⚠️ **Forks number migrations independently and they collide.** o51r15 adds `00023`,
-gabriel20xx adds `00033`. Any two forks you merge will need their migrations
-renumbered.
+`00020_bloom_filters_large_object.sql`. `trunk` adds its own on top, so `ls migrations/`
+rather than this page for the current count. Forks number theirs independently and they
+collide; [AGENTS.md](../AGENTS.md#trap-3-migration-numbers-collide-across-forks) has the
+renumbering rule.
 
 ## CLI
 
