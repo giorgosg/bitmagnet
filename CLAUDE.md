@@ -3,6 +3,21 @@
 Guidance for AI assistants and new contributors. The long form lives in
 [docs/](docs/README.md); this file is the part worth loading every time.
 
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in GitHub Issues using the `gh` CLI. See
+`docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Triage uses the five canonical default labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Domain documentation uses a single-context layout. See `docs/agents/domain.md`.
+
 ## Read first
 
 - [docs/hacking.md](docs/hacking.md) — toolchain, generated code, adding a feature

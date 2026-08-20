@@ -48,6 +48,10 @@ Thumbs.db
 /.claude
 /skills-lock.json
 
+# Agent skill docs, held back while their content settles. CLAUDE.md already
+# points at these paths, so drop this rule once they are ready to publish.
+/docs/agents/
+
 # Local notes. This is a fork of a public repo, so personal deployment detail and
 # private plans stay untracked. Any file named *.local.md is ignored at any depth —
 # name a note `<topic>.local.md` and it stays out of git. See docs/README.md.
