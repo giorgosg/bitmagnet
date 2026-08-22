@@ -15,15 +15,16 @@ The sort is load-bearing: `"auth"` sorts before `"graphql"`, `"import"`, `"torzn
 `"webui"`, which is what guarantees the identity middleware is mounted before any handler
 that reads an identity back out.
 
-| Key          | Package                         | Route(s)                                     |
-| ------------ | ------------------------------- | -------------------------------------------- |
-| `auth`       | `internal/auth/http_auth`       | middleware only, no route                    |
-| `graphql`    | `internal/gql/httpserver`       | `POST /graphql`, `GET /graphql` (playground) |
-| `import`     | `internal/importer/httpserver`  | `POST /import`                               |
-| `prometheus` | `internal/telemetry/httpserver` | `/metrics`                                   |
-| `pprof`      | `internal/telemetry/httpserver` | `/debug/pprof/*`                             |
-| `torznab`    | `internal/torznab/httpserver`   | `/torznab/*`                                 |
-| `webui`      | `internal/webui`                | the embedded Angular app                     |
+| Key          | Package                         | Route(s)                                                              |
+| ------------ | ------------------------------- | --------------------------------------------------------------------- |
+| `auth`       | `internal/auth/http_auth`       | middleware only, no route                                             |
+| `graphql`    | `internal/gql/httpserver`       | `POST /graphql`, `GET /graphql` (playground)                          |
+| `import`     | `internal/importer/httpserver`  | `POST /import`                                                        |
+| `prometheus` | `internal/telemetry/httpserver` | `/metrics`                                                            |
+| `pprof`      | `internal/telemetry/httpserver` | `/debug/pprof/*`                                                      |
+| `static`     | `internal/httpserver/static`    | a configured directory, default `/ui`; off unless `static.dir` is set |
+| `torznab`    | `internal/torznab/httpserver`   | `/torznab/*`                                                          |
+| `webui`      | `internal/webui`                | the embedded Angular app                                              |
 
 Before the options run, `httpserver.NewEngine` sets `SetTrustedProxies(config.TrustedProxies)`
 — empty by default, meaning `X-Forwarded-For` is not believed and `ClientIP()` is the real
@@ -86,8 +87,22 @@ Angular, built into `webui/dist` — **which is committed to git** — and embed
 diff; exclude it on a first review pass. It is out of scope for these notes and is
 expected to be replaced.
 
+Because it is embedded, it cannot be swapped without rebuilding the binary. The `static`
+option is the seam for an alternative: set `http_server.static.dir` to a built UI on disk
+and it is served at `http_server.static.path` (default `/ui`), from the same origin as the
+API — which takes CORS out of the picture entirely for that UI, and lets it send
+credentials the way a same-origin page does. It refuses `/` and `/webui`, because two
+options claiming one route make gin panic at startup rather than report a conflict. The
+bundled UI can be turned off independently by omitting `webui` from `http_server.options`.
+
 ## CORS
 
-`httpserver.NewDefaultConfig` still ships `AllowedOrigins: ["*"]`, `AllowedHeaders: ["*"]`
-and `Debug: true`, carried over from before this lineage had authentication at all. The
-`// todo review` on it is upstream's, and it has not been reviewed.
+`httpserver.NewDefaultConfig` still ships `AllowedOrigins: ["*"]`, carried over from
+before this lineage had authentication at all. `AllowedHeaders` and `Debug` have since
+been reviewed: the headers are now the four the server actually reads (`Content-Type`,
+`Authorization`, `X-Api-Key`, `X-Import-Id`) and debug logging is off.
+
+The origins default is deliberately left permissive, because narrowing it to same-origin
+breaks any UI served from another origin — which includes a separately hosted web UI, a
+supported deployment, and any alternative UI not served through the `static` option above.
+See [docs/auth.md](../auth.md) for what an operator should weigh.

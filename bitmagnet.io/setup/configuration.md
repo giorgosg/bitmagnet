@@ -20,7 +20,9 @@ nav_order: 2
 - `log.development` (default: `false`): If you're developing you may want to enable this flag to enable more verbose output such as stack traces.
 - `log.json` (default: `false`): By default logs are output in a pretty format with colors; enable this flag if you'd prefer plain JSON.
 - `log.file_rotator.enabled` (default: `false`): If true, logs will be output to rotating log files at level `log.file_rotator.level` in the `log.file_rotator.path` directory, allowing forwarding to a logs aggregator (see [the observability guide](/guides/observability-telemetry.html)).
-- `http_server.options` (default `["*"]`): A list of enabled HTTP server components. By default all are enabled. Components include: `cors`, `pprof`, `graphql`, `import`, `prometheus`, `torznab`, `status`, `webui`.
+- `http_server.options` (default `["*"]`): A list of enabled HTTP server components. By default all are enabled. Components are: `auth`, `cors`, `graphql`, `health`, `import`, `pprof`, `prometheus`, `static`, `torznab`, `webui`.
+- `http_server.static.dir` (default: empty): A directory of static files to serve, for running a web UI other than the bundled one. Empty disables it. A configured directory that does not exist is a startup error.
+- `http_server.static.path` (default: `/ui`): Where `http_server.static.dir` is mounted. Unknown paths beneath it fall back to `index.html`, so a single-page app keeps its own routing. It cannot be `/` or `/webui`, which the bundled web UI already claims; omit `webui` from `http_server.options` to free those up.
 - `dht_crawler.scaling_factor` (default: `10`): There are various rate and concurrency limits associated with the DHT crawler. This parameter is a rough proxy for resource usage of the crawler; concurrency and buffer size of the various pipeline channels are multiplied by this value. Diminishing returns may result from exceeding the default value of 10. Since the software has not been tested on a wide variety of hardware and network conditions your mileage may vary here...
 
 To see a full list of available configuration options using the CLI, run:

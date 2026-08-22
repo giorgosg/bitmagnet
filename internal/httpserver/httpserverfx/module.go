@@ -4,6 +4,7 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/config/configfx"
 	"github.com/bitmagnet-io/bitmagnet/internal/httpserver"
 	"github.com/bitmagnet-io/bitmagnet/internal/httpserver/cors"
+	"github.com/bitmagnet-io/bitmagnet/internal/httpserver/static"
 	"go.uber.org/fx"
 )
 
@@ -14,6 +15,7 @@ func New() fx.Option {
 		fx.Provide(
 			httpserver.New,
 			cors.New,
+			static.New,
 		),
 	)
 }

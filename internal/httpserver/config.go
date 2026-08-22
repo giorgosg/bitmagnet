@@ -4,6 +4,7 @@ type Config struct {
 	LocalAddress string
 	GinMode      string
 	Cors         CorsConfig
+	Static       StaticConfig
 	Options      []string
 	// TrustedProxies lists the CIDRs whose X-Forwarded-For and X-Real-IP headers
 	// may be believed. Empty means believe nobody, and the client address is the
@@ -58,6 +59,20 @@ type CorsConfig struct {
 	Debug bool
 }
 
+// StaticConfig mounts a directory of static files, for serving a web UI that is
+// not the bundled one. The bundled UI is compiled into the binary and cannot be
+// replaced without rebuilding it; this is the seam for an alternative.
+type StaticConfig struct {
+	// Dir is the directory to serve. Empty - the default - disables the mount
+	// entirely, which is why an absent directory is not an error and a configured
+	// one that does not exist is.
+	Dir string
+	// Path is where it mounts. It cannot be "/", because the bundled web UI already
+	// redirects the root, and two options claiming the same route make gin panic at
+	// startup rather than report a conflict.
+	Path string
+}
+
 func NewDefaultConfig() Config {
 	return Config{
 		LocalAddress: ":3333",
@@ -78,6 +93,9 @@ func NewDefaultConfig() Config {
 				"X-Api-Key",     // torznab api key header
 				"X-Import-Id",   // importer/httpserver.ImportIDHeader
 			},
+		},
+		Static: StaticConfig{
+			Path: "/ui",
 		},
 		Options: []string{"*"},
 	}
