@@ -46,34 +46,42 @@ func New() fx.Option {
 						if err != nil {
 							return nil, err
 						}
+
 						s, err := p.Search.Get()
 						if err != nil {
 							return nil, err
 						}
+
 						d, err := p.Dao.Get()
 						if err != nil {
 							return nil, err
 						}
+
 						qmc, err := p.QueueMetricsClient.Get()
 						if err != nil {
 							return nil, err
 						}
+
 						qm, err := p.QueueManager.Get()
 						if err != nil {
 							return nil, err
 						}
+
 						tm, err := p.TorrentMetricsClient.Get()
 						if err != nil {
 							return nil, err
 						}
+
 						pr, err := p.Processor.Get()
 						if err != nil {
 							return nil, err
 						}
+
 						bm, err := p.BlockingManager.Get()
 						if err != nil {
 							return nil, err
 						}
+
 						return &resolvers.Resolver{
 							Dao:                  d,
 							Search:               s,

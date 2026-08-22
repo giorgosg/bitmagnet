@@ -38,18 +38,22 @@ func New(p Params) Result {
 					if err != nil {
 						return err
 					}
+
 					query, err := p.Query.Get()
 					if err != nil {
 						return err
 					}
+
 					handlers := make([]handler.Handler, 0, len(p.Handlers))
 					for _, lh := range p.Handlers {
 						h, err := lh.Get()
 						if err != nil {
 							return err
 						}
+
 						handlers = append(handlers, h)
 					}
+
 					srv := server{
 						stopped:    stopped,
 						query:      query,

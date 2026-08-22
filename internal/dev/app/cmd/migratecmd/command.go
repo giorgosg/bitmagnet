@@ -34,10 +34,12 @@ func New(p Params) (r Result, err error) {
 					if err != nil {
 						return err
 					}
+
 					version := ctx.Int64("version")
 					if version == 0 {
 						return m.Up(ctx.Context)
 					}
+
 					return m.UpTo(ctx.Context, version)
 				},
 			},
@@ -54,10 +56,12 @@ func New(p Params) (r Result, err error) {
 					if err != nil {
 						return err
 					}
+
 					version := ctx.Int64("version")
 					if version == 0 {
 						return m.Down(ctx.Context)
 					}
+
 					return m.DownTo(ctx.Context, version)
 				},
 			},

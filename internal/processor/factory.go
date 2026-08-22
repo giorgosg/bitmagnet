@@ -32,14 +32,17 @@ func New(p Params) Result {
 			if err != nil {
 				return nil, err
 			}
+
 			d, err := p.Dao.Get()
 			if err != nil {
 				return nil, err
 			}
+
 			bm, err := p.BlockingManager.Get()
 			if err != nil {
 				return nil, err
 			}
+
 			w, err := p.Workflow.Get()
 			if err != nil {
 				return nil, err

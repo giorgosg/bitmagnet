@@ -43,6 +43,7 @@ var _ interface {
 
 func (ni NodeInfo) MarshalBinary() ([]byte, error) {
 	var w bytes.Buffer
+
 	_, _ = w.Write(ni.ID[:])
 	_, _ = w.Write(ni.Addr.IP)
 

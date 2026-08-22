@@ -51,13 +51,16 @@ func (findMatchAction) compileAction(ctx compilerContext) (action, error) {
 					if errors.Is(err, classification.ErrUnmatched) {
 						continue
 					}
+
 					return classification.Result{}, classification.RuntimeError{
 						Cause: err,
 						Path:  path,
 					}
 				}
+
 				return result, nil
 			}
+
 			return ctx.result, nil
 		},
 	}, nil

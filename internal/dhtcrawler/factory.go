@@ -66,19 +66,24 @@ func New(params Params) Result {
 			fx.Hook{
 				OnStart: func(context.Context) error {
 					active.Set(true)
+
 					scalingFactor := int(params.Config.ScalingFactor)
+
 					cl, err := params.Client.Get()
 					if err != nil {
 						return err
 					}
+
 					query, err := params.Dao.Get()
 					if err != nil {
 						return err
 					}
+
 					blockingManager, err := params.BlockingManager.Get()
 					if err != nil {
 						return err
 					}
+
 					c = crawler{
 						kTable:                       params.KTable,
 						client:                       cl,
@@ -138,13 +143,16 @@ func New(params Params) Result {
 					// todo: Fix!
 					//nolint:contextcheck
 					go c.start()
+
 					return nil
 				},
 				OnStop: func(context.Context) error {
 					active.Set(false)
+
 					if c.stopped != nil {
 						close(c.stopped)
 					}
+
 					return nil
 				},
 			},

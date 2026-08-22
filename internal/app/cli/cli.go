@@ -64,10 +64,12 @@ func New(p Params) (Result, error) {
 				if len(args) == 2 && (args[1] == "-h" || args[1] == "--help") {
 					args = []string{args[0]}
 				}
+
 				if err := app.RunContext(context.Background(), args); err != nil {
 					panic(err)
 				}
 			})()
+
 			return nil
 		},
 	})

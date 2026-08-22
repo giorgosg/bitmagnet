@@ -84,6 +84,7 @@ func (f features) JSONSchema() JSONSchema {
 								schemaKeyRef: "#/definitions/action__" + def.name(),
 							})
 						}
+
 						return result
 					}(),
 				},
@@ -95,6 +96,7 @@ func (f features) JSONSchema() JSONSchema {
 								schemaKeyRef: "#/definitions/condition__" + def.name(),
 							})
 						}
+
 						return result
 					}(),
 				},
@@ -102,9 +104,11 @@ func (f features) JSONSchema() JSONSchema {
 			for _, def := range f.actions {
 				defs["action__"+def.name()] = def.JSONSchema()
 			}
+
 			for _, def := range f.conditions {
 				defs["condition__"+def.name()] = def.JSONSchema()
 			}
+
 			return defs
 		}(),
 	}

@@ -44,6 +44,7 @@ func (runWorkflowAction) compileAction(ctx compilerContext) (action, error) {
 	return action{
 		func(ctx executionContext) (classification.Result, error) {
 			var err error
+
 			cl := ctx.result
 			for _, name := range names {
 				cl, err = ctx.workflows[name].run(ctx.withResult(cl))
@@ -51,6 +52,7 @@ func (runWorkflowAction) compileAction(ctx compilerContext) (action, error) {
 					return cl, err
 				}
 			}
+
 			return cl, nil
 		},
 	}, nil

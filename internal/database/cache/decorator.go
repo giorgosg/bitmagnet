@@ -25,9 +25,11 @@ func NewDecorator(p DecoratorParams) DecoratorResult {
 			if err != nil {
 				return nil, err
 			}
+
 			if err := db.Use(p.Plugin); err != nil {
 				return nil, err
 			}
+
 			return db, nil
 		}),
 	}

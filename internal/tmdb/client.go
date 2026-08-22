@@ -50,6 +50,7 @@ func (c client) SearchMovie(ctx context.Context, request SearchMovieRequest) (Se
 	}
 
 	var response SearchMovieResponse
+
 	_, err := c.requester.Request(ctx, "/search/movie", queryParams, &response)
 
 	return response, err
@@ -66,6 +67,7 @@ func (c client) MovieDetails(ctx context.Context, request MovieDetailsRequest) (
 	}
 
 	var response MovieDetailsResponse
+
 	_, err := c.requester.Request(ctx, "/movie/"+strconv.FormatInt(request.ID, 10), queryParams, &response)
 
 	return response, err
@@ -88,6 +90,7 @@ func (c client) SearchTv(ctx context.Context, request SearchTvRequest) (SearchTv
 	}
 
 	var response SearchTvResponse
+
 	_, err := c.requester.Request(ctx, "/search/tv", queryParams, &response)
 
 	return response, err
@@ -104,6 +107,7 @@ func (c client) TvDetails(ctx context.Context, request TvDetailsRequest) (TvDeta
 	}
 
 	var response TvDetailsResponse
+
 	_, err := c.requester.Request(ctx, "/tv/"+strconv.FormatInt(request.SeriesID, 10), queryParams, &response)
 
 	return response, err
@@ -118,6 +122,7 @@ func (c client) FindByID(ctx context.Context, request FindByIDRequest) (FindByID
 	}
 
 	var response FindByIDResponse
+
 	_, err := c.requester.Request(ctx, "/find/"+request.ExternalID, queryParams, &response)
 
 	return response, err

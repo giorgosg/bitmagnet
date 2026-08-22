@@ -68,10 +68,12 @@ func New(params Params) Result {
 			if err != nil {
 				return nil, err
 			}
+
 			c, err := lc.Get()
 			if err != nil {
 				return nil, err
 			}
+
 			r, err := c.Compile(src)
 			if err != nil {
 				return nil, err

@@ -120,9 +120,11 @@ func (i *activeImport) run(ctx context.Context) {
 	go (func() {
 		iCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
+
 		i.ctx = iCtx
 		i.stop = cancel
 		i.mutex.Unlock()
+
 		for {
 			select {
 			case <-iCtx.Done():
@@ -132,6 +134,7 @@ func (i *activeImport) run(ctx context.Context) {
 				if !ok {
 					return
 				}
+
 				go i.buffer(item)
 			case <-time.After(i.maxWaitTime):
 				go i.flush()
@@ -142,6 +145,7 @@ func (i *activeImport) run(ctx context.Context) {
 
 func (i *activeImport) buffer(item Item) {
 	defer i.wg.Done()
+
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
 
@@ -154,6 +158,7 @@ func (i *activeImport) buffer(item Item) {
 func (i *activeImport) flush() {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
+
 	i.flushLocked()
 }
 
@@ -343,6 +348,7 @@ func (i *activeImport) Closed() bool {
 func (i *activeImport) Close() error {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
+
 	i.flushLocked()
 
 	if !i.stopped {

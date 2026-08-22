@@ -83,6 +83,7 @@ func (ifElseAction) compileAction(ctx compilerContext) (action, error) {
 					return elseAction.run(ctx)
 				}
 			}
+
 			return ctx.result, nil
 		},
 	}, nil

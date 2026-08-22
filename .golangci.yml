@@ -72,8 +72,14 @@ linters:
     - usetesting
     - wastedassign
     - whitespace
-    - wsl
+    - wsl_v5
   settings:
+    wsl_v5:
+      # Carried over from wsl v4's defaults, as the v5 migration notice suggests,
+      # so the rules that fire stay the same as before the rename.
+      allow-first-in-block: true
+      allow-whole-block: false
+      branch-max-lines: 2
     revive:
       rules:
         - name: argument-limit

@@ -29,8 +29,10 @@ func (parseDateAction) compileAction(ctx compilerContext) (action, error) {
 			if parsed.IsNil() {
 				return ctx.result, classification.ErrUnmatched
 			}
+
 			cl := ctx.result
 			cl.Date = parsed
+
 			return cl, nil
 		},
 	}, nil

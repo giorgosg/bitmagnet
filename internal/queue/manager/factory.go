@@ -25,10 +25,12 @@ func New(params Params) Result {
 			if err != nil {
 				return nil, err
 			}
+
 			db, err := params.DB.Get()
 			if err != nil {
 				return nil, err
 			}
+
 			return manager{
 				dao: d,
 				db:  db,

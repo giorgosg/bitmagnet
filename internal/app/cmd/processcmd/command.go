@@ -52,28 +52,37 @@ func New(p Params) (Result, error) {
 				if err != nil {
 					return err
 				}
+
 				var flags classifier.Flags
+
 				strFlags := ctx.String("classifierFlags")
 				if err := json.Unmarshal([]byte(strFlags), &flags); err != nil {
 					return cli.Exit("invalid flags", 1)
 				}
+
 				if ctx.Bool("apisDisabled") {
 					flags["apis_enabled"] = false
 				}
+
 				if ctx.Bool("localSearchDisabled") {
 					flags["local_search_enabled"] = false
 				}
+
 				var infoHashes []protocol.ID
+
 				for _, infoHash := range ctx.StringSlice("infoHash") {
 					id, err := protocol.ParseID(infoHash)
 					if err != nil {
 						return err
 					}
+
 					infoHashes = append(infoHashes, id)
 				}
+
 				if err != nil {
 					return err
 				}
+
 				return pr.Process(ctx.Context, processor.MessageParams{
 					ClassifyMode:    processor.ClassifyModeRematch,
 					ClassifierFlags: flags,

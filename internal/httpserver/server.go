@@ -37,39 +37,47 @@ func New(p Params) Result {
 			fx.Hook{
 				OnStart: func(ctx context.Context) error {
 					gin.SetMode(p.Config.GinMode)
+
 					g := gin.New()
 					g.Use(ginzap.Ginzap(p.Logger.Named("gin"), time.RFC3339, true), gin.Recovery())
+
 					options, optionsErr := resolveOptions(p.Config.Options, p.Options)
 					if optionsErr != nil {
 						return optionsErr
 					}
+
 					for _, o := range options {
 						if buildErr := o.Apply(g); buildErr != nil {
 							return buildErr
 						}
 					}
+
 					s = &http.Server{
 						Addr:    p.Config.LocalAddress,
 						Handler: g.Handler(),
 					}
+
 					var lc net.ListenConfig
 
 					ln, listenErr := lc.Listen(ctx, "tcp", s.Addr)
 					if listenErr != nil {
 						return listenErr
 					}
+
 					go (func() {
 						serveErr := s.Serve(ln)
 						if !errors.Is(serveErr, http.ErrServerClosed) {
 							panic(serveErr)
 						}
 					})()
+
 					return nil
 				},
 				OnStop: func(ctx context.Context) error {
 					if s == nil {
 						return nil
 					}
+
 					return s.Shutdown(ctx)
 				},
 			},

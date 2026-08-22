@@ -43,6 +43,7 @@ func New(p Params) (Result, error) {
 					if srcErr != nil {
 						return srcErr
 					}
+
 					return write(ctx.App.Writer, src, ctx.String("format"))
 				},
 			},

@@ -14,6 +14,7 @@ func (c *crawler) runScrape(ctx context.Context) {
 		if pfhErr != nil {
 			return
 		}
+
 		select {
 		case <-ctx.Done():
 		case c.persistSources.In() <- infoHashWithScrape{

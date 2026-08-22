@@ -41,10 +41,13 @@ func New(p Params) (Result, error) {
 							return err
 						}
 					}
+
 					if err := p.Workers.Start(ctx.Context); err != nil {
 						return err
 					}
+
 					<-ctx.Done()
+
 					return nil
 				},
 				After: func(ctx *cli.Context) error {
@@ -57,6 +60,7 @@ func New(p Params) (Result, error) {
 					for _, w := range p.Workers.Workers() {
 						_, _ = fmt.Fprintln(ctx.App.Writer, w.Key())
 					}
+
 					return nil
 				},
 			},

@@ -30,12 +30,15 @@ func New(p Params) Result {
 			if err != nil {
 				return nil, err
 			}
+
 			db, err := g.DB()
 			if err != nil {
 				return nil, err
 			}
+
 			logger := p.Logger.Named("migrator")
 			initGoose(logger)
+
 			return &migrator{
 				db:     db,
 				logger: logger,

@@ -261,10 +261,12 @@ var contentTypePayloadSpec = payloadTransformer[string, model.NullContentType]{
 		if str == "unknown" {
 			return model.NullContentType{}, nil
 		}
+
 		contentType, err := model.ParseContentType(str)
 		if err != nil {
 			return model.NullContentType{}, err
 		}
+
 		return model.NullContentType{ContentType: contentType, Valid: true}, nil
 	},
 }

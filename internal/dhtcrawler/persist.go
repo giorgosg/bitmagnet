@@ -126,6 +126,7 @@ func (c *crawler) persistTorrentBatch(ctx context.Context, is []infoHashWithMeta
 		}).CreateInBatches(torrentsToPersist, 100); err != nil {
 			return err
 		}
+
 		if len(torrentFilesToPersist) > 0 {
 			if err := tx.WithContext(ctx).TorrentFile.Clauses(clause.OnConflict{
 				DoNothing: true,
@@ -133,11 +134,13 @@ func (c *crawler) persistTorrentBatch(ctx context.Context, is []infoHashWithMeta
 				return err
 			}
 		}
+
 		if err := tx.WithContext(ctx).TorrentsTorrentSource.Clauses(clause.OnConflict{
 			DoNothing: true,
 		}).CreateInBatches(torrentSourcesToPersist, 100); err != nil {
 			return err
 		}
+
 		if c.savePieces {
 			if err := tx.WithContext(ctx).TorrentPieces.Clauses(clause.OnConflict{
 				DoNothing: true,
