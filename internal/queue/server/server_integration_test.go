@@ -64,7 +64,7 @@ func TestRunGCBatchDeletesOnlyExpiredTerminalJobs(t *testing.T) {
 	t.Parallel()
 
 	srv, db := newTestServer(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	expired := time.Now().Add(-2 * time.Hour)
 
 	// Should be collected: terminal status, archival window elapsed.
@@ -105,7 +105,7 @@ func TestRunGCBatchCollectsMoreThanOneBatch(t *testing.T) {
 	t.Parallel()
 
 	srv, db := newTestServer(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	total := gcBatchSize + 250
 
 	_, err := db.Pool.Exec(ctx, `
@@ -125,7 +125,7 @@ func TestRunGCBatchStopsOnCancelledContext(t *testing.T) {
 	t.Parallel()
 
 	srv, db := newTestServer(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	insertJob(ctx, t, db, "q", model.QueueJobStatusProcessed, time.Now().Add(-2*time.Hour), "1 hour")
 
@@ -155,7 +155,7 @@ func TestListenLoopRoutesNotificationsToTheRightQueue(t *testing.T) {
 
 	srv, db := newTestServer(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	chans := map[string]chan pgconn.Notification{
@@ -194,7 +194,7 @@ func TestListenLoopUnsubscribesBeforeReleasingTheConnection(t *testing.T) {
 	t.Parallel()
 
 	db := dbtest.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	cfg, err := pgxpool.ParseConfig(db.DSN)
 	require.NoError(t, err)

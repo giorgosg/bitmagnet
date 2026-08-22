@@ -1,7 +1,6 @@
 package adapter
 
 import (
-	"context"
 	"testing"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
@@ -17,7 +16,7 @@ func TestSearchIncludesBooksAlongsideOtherCategories(t *testing.T) {
 	t.Parallel()
 
 	db := dbtest.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for _, torrent := range []struct {
 		infoHash    []byte
@@ -73,7 +72,7 @@ func TestSearchIgnoresQueryWhenTMDBIDProvided(t *testing.T) {
 	t.Parallel()
 
 	db := dbtest.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	infoHash := []byte("01234567890123456789")
 
 	_, err := db.Pool.Exec(ctx, `

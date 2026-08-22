@@ -28,7 +28,7 @@ func TestProcessPreservesRuleDerivedTypeWithoutStoredFiles(t *testing.T) {
 			t.Parallel()
 
 			db := dbtest.New(t)
-			ctx := context.Background()
+			ctx := t.Context()
 			now := time.Now().UTC()
 			infoHash := protocol.ID{1}
 

@@ -1,7 +1,6 @@
 package queue
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -20,7 +19,7 @@ func TestBatchReprocessNullContentTypeQueuesOnlyUnclassifiedTorrents(t *testing.
 	t.Parallel()
 
 	db := dbtest.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	now := time.Now().UTC()
 	unclassified := protocol.ID{1}
 	classified := protocol.ID{2}

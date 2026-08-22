@@ -61,7 +61,7 @@ func TestCachedClientServesRepeatedRequestsFromCache(t *testing.T) {
 
 	inner := &countingClient{}
 	c := newCachedClient(inner)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	first, err := c.SearchMovie(ctx, SearchMovieRequest{Query: testQueryMovie})
 	require.NoError(t, err)
@@ -88,7 +88,7 @@ func TestCachedClientKeysOnEveryRequestField(t *testing.T) {
 
 		inner := &countingClient{}
 		c := newCachedClient(inner)
-		ctx := context.Background()
+		ctx := t.Context()
 
 		base := SearchMovieRequest{Query: testQueryMovie}
 
@@ -116,7 +116,7 @@ func TestCachedClientKeysOnEveryRequestField(t *testing.T) {
 
 		inner := &countingClient{}
 		c := newCachedClient(inner)
-		ctx := context.Background()
+		ctx := t.Context()
 
 		reqs := []MovieDetailsRequest{
 			{ID: 42},
@@ -138,7 +138,7 @@ func TestCachedClientKeysOnEveryRequestField(t *testing.T) {
 
 		inner := &countingClient{}
 		c := newCachedClient(inner)
-		ctx := context.Background()
+		ctx := t.Context()
 
 		base := SearchTvRequest{Query: "dark"}
 
@@ -158,7 +158,7 @@ func TestCachedClientKeysOnEveryRequestField(t *testing.T) {
 
 		inner := &countingClient{}
 		c := newCachedClient(inner)
-		ctx := context.Background()
+		ctx := t.Context()
 
 		reqs := []TvDetailsRequest{
 			{SeriesID: 7},
@@ -178,7 +178,7 @@ func TestCachedClientKeysOnEveryRequestField(t *testing.T) {
 
 		inner := &countingClient{}
 		c := newCachedClient(inner)
-		ctx := context.Background()
+		ctx := t.Context()
 
 		reqs := []FindByIDRequest{
 			{ExternalSource: testExternalSource, ExternalID: "tt0000001"},
@@ -200,7 +200,7 @@ func TestCachedClientDoesNotCollideAcrossDistinctRequests(t *testing.T) {
 
 	inner := &countingClient{}
 	c := newCachedClient(inner)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	reqs := []SearchMovieRequest{
 		{Query: "a|b"},
