@@ -31,6 +31,7 @@ func TestKTableHealthMonitorDoesNotReseedPopulatedTable(t *testing.T) {
 
 	go func() {
 		defer close(done)
+
 		c.monitorKTableHealth(ctx, ticks, 3)
 	}()
 
@@ -45,6 +46,7 @@ func TestKTableHealthMonitorDoesNotReseedPopulatedTable(t *testing.T) {
 	}
 
 	cancel()
+
 	select {
 	case <-done:
 	case <-time.After(time.Second):
@@ -70,6 +72,7 @@ func TestKTableHealthMonitorRequestsReseedAfterConsecutiveEmptyChecks(t *testing
 	for range 2 {
 		ticks <- time.Now()
 	}
+
 	select {
 	case <-c.reseedRequests:
 		t.Fatal("requested a reseed before the empty-table threshold")
@@ -77,6 +80,7 @@ func TestKTableHealthMonitorRequestsReseedAfterConsecutiveEmptyChecks(t *testing
 	}
 
 	ticks <- time.Now()
+
 	select {
 	case <-c.reseedRequests:
 	case <-time.After(time.Second):

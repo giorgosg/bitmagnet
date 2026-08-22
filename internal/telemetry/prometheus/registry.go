@@ -23,6 +23,7 @@ func New(p Params) (Result, error) {
 	return Result{
 		Registry: lazy.New[*prometheus.Registry](func() (*prometheus.Registry, error) {
 			registry := prometheus.NewRegistry()
+
 			cs := append(
 				[]prometheus.Collector{
 					collectors.NewGoCollector(),
@@ -37,6 +38,7 @@ func New(p Params) (Result, error) {
 					return nil, err
 				}
 			}
+
 			return registry, nil
 		}),
 	}, nil

@@ -30,6 +30,7 @@ func New(p Params) Result {
 			if err != nil {
 				return nil, err
 			}
+
 			return clientLogger{
 				client: serverAdapter{
 					nodeID: p.NodeID,

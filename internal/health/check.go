@@ -225,6 +225,7 @@ func (ck *defaultChecker) Start() {
 		ck.cancel = cancel
 
 		ck.started = true
+
 		ck.startedAt = time.Now()
 		defer ck.startPeriodicChecks(ctx)
 
@@ -460,6 +461,7 @@ func withCheckContext(ctx context.Context, check *Check, f func(checkCtx context
 	}
 
 	defer cancel()
+
 	f(ctx)
 }
 

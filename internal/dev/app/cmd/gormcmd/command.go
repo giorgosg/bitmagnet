@@ -29,8 +29,10 @@ func New(p Params) (r Result, err error) {
 					if err != nil {
 						return err
 					}
+
 					g := gen.BuildGenerator(db)
 					g.Execute()
+
 					return nil
 				},
 			},

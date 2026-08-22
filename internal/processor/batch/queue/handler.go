@@ -33,6 +33,7 @@ func New(p Params) Result {
 			if err != nil {
 				return handler.Handler{}, err
 			}
+
 			return handler.New(
 				batch.MessageName,
 				func(ctx context.Context, job model.QueueJob) (err error) {
@@ -40,10 +41,12 @@ func New(p Params) Result {
 					if err := json.Unmarshal([]byte(job.Payload), msg); err != nil {
 						return err
 					}
+
 					var scopes []func(gen.Dao) gen.Dao
 					if len(msg.ContentTypes) > 0 {
 						scopes = append(scopes, contentTypeScope(d, msg.ContentTypes))
 					}
+
 					if msg.Orphans {
 						scopes = append(scopes, func(tx gen.Dao) gen.Dao {
 							return tx.Not(
@@ -57,15 +60,19 @@ func New(p Params) Result {
 							)
 						})
 					}
+
 					priority := 10
 					// prioritise jobs where API calls are disabled as they will run faster:
 					if msg.ApisDisabled() {
 						priority = 4
 					}
+
 					maxInfoHash := msg.InfoHashGreaterThan
 					chunkSize := uint(0)
 					done := false
+
 					var queueJobs []*model.QueueJob
+
 					for {
 						torrents, findErr := d.Torrent.WithContext(ctx).
 							Scopes(scopes...).
@@ -80,16 +87,20 @@ func New(p Params) Result {
 						if findErr != nil {
 							return findErr
 						}
+
 						if len(torrents) == 0 {
 							done = true
 							break
 						}
+
 						var infoHashes []protocol.ID
+
 						for _, t := range torrents {
 							maxInfoHash = t.InfoHash
 							infoHashes = append(infoHashes, t.InfoHash)
 							chunkSize++
 						}
+
 						job, jobErr := processor.NewQueueJob(processor.MessageParams{
 							ClassifyMode:       msg.ClassifyMode,
 							ClassifierWorkflow: msg.ClassifierWorkflow,
@@ -99,15 +110,19 @@ func New(p Params) Result {
 						if jobErr != nil {
 							return jobErr
 						}
+
 						queueJobs = append(queueJobs, &job)
+
 						if len(torrents) < int(msg.BatchSize) {
 							done = true
 							break
 						}
+
 						if chunkSize >= msg.ChunkSize {
 							break
 						}
 					}
+
 					if !done {
 						job, jobErr := batch.NewQueueJob(batch.MessageParams{
 							InfoHashGreaterThan: maxInfoHash,
@@ -123,8 +138,10 @@ func New(p Params) Result {
 						if jobErr != nil {
 							return jobErr
 						}
+
 						queueJobs = append(queueJobs, &job)
 					}
+
 					if len(queueJobs) > 0 {
 						if createErr := d.QueueJob.
 							WithContext(ctx).
@@ -132,6 +149,7 @@ func New(p Params) Result {
 							return createErr
 						}
 					}
+
 					return nil
 				},
 				handler.JobTimeout(time.Second*60*10),

@@ -28,13 +28,16 @@ func NewDecorator(p DecoratorParams) DecoratorResult {
 			if err != nil {
 				return nil, err
 			}
+
 			m, err := p.Migrator.Get()
 			if err != nil {
 				return nil, err
 			}
+
 			if migrateErr := m.Up(context.TODO()); migrateErr != nil {
 				return nil, migrateErr
 			}
+
 			return db, nil
 		}),
 	}

@@ -39,6 +39,7 @@ func (ch bufferedConcurrentChannel[T]) Run(ctx context.Context, f func(T)) error
 
 			go func() {
 				defer ch.sem.Release(1)
+
 				f(next)
 			}()
 		}

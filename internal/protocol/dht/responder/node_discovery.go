@@ -21,6 +21,7 @@ func (r responderNodeDiscovery) Respond(ctx context.Context, msg dht.RecvMsg) (d
 			// wait for up to a second
 			cancelCtx, cancel := context.WithTimeout(ctx, time.Second)
 			defer cancel()
+
 			select {
 			case <-cancelCtx.Done():
 			case r.discoveredNodes <- ktable.NewNode(msg.Msg.A.ID, msg.From):

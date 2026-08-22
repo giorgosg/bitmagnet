@@ -41,6 +41,7 @@ func Options(options ...Option) Option {
 					return err
 				}
 			}
+
 			return nil
 		},
 	}

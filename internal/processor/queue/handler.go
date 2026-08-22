@@ -29,6 +29,7 @@ func New(p Params) Result {
 			if err != nil {
 				return handler.Handler{}, err
 			}
+
 			return handler.New(
 				processor.MessageName,
 				func(ctx context.Context, job model.QueueJob) (err error) {

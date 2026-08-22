@@ -46,6 +46,7 @@ func (andCondition) compileCondition(ctx compilerContext) (condition, error) {
 					return false, nil
 				}
 			}
+
 			return true, nil
 		},
 	}, nil

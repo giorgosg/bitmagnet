@@ -16,6 +16,7 @@ func (c *crawler) runRequestMetaInfo(ctx context.Context) {
 		if reqErr != nil {
 			return
 		}
+
 		select {
 		case <-ctx.Done():
 		case c.persistTorrents.In() <- infoHashWithMetaInfo{
@@ -36,6 +37,7 @@ func (c *crawler) doRequestMetaInfo(
 	errsMutex := sync.Mutex{}
 	addErr := func(err error) {
 		errsMutex.Lock()
+
 		errs = append(errs, err)
 		errsMutex.Unlock()
 	}

@@ -135,6 +135,7 @@ func TestRunGCBatchStopsOnCancelledContext(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+
 		srv.runGCBatch(cancelled)
 	}()
 
@@ -168,6 +169,7 @@ func TestListenLoopRoutesNotificationsToTheRightQueue(t *testing.T) {
 	// Give the listener time to issue its LISTEN statements before notifying.
 	require.Eventually(t, func() bool {
 		var n int
+
 		err := db.Pool.QueryRow(ctx,
 			"select count(*) from pg_stat_activity where query like 'LISTEN%' and datname = $1", db.Name,
 		).Scan(&n)
@@ -228,6 +230,7 @@ func TestListenLoopUnsubscribesBeforeReleasingTheConnection(t *testing.T) {
 	// only connection `pool` has, so querying it here would deadlock.
 	require.Eventually(t, func() bool {
 		var n int
+
 		err := db.Pool.QueryRow(ctx,
 			"select count(*) from pg_stat_activity where query like 'LISTEN%' and datname = $1", db.Name,
 		).Scan(&n)

@@ -25,8 +25,10 @@ func New() fx.Option {
 						if err != nil {
 							panic(err)
 						}
+
 						addrs = append(addrs, addr.AddrPort())
 					}
+
 					return addrs
 				},
 			},

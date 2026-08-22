@@ -70,5 +70,6 @@ func (ch *batchingChannel[T]) flush() {
 	batch := ch.buffer
 	ch.buffer = nil
 	ch.ticker.Reset(ch.maxWaitTime)
+
 	ch.output <- batch
 }

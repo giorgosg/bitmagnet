@@ -33,8 +33,8 @@ func New(p Params) (Result, error) {
 	waitGroup := &sync.WaitGroup{}
 	lazyPool := lazy.New(func() (*pgxpool.Pool, error) {
 		ctx, cancel := context.WithCancel(context.Background())
-		poolConfig, parseErr := pgxpool.ParseConfig(p.Config.CreateDSN())
 
+		poolConfig, parseErr := pgxpool.ParseConfig(p.Config.CreateDSN())
 		if parseErr != nil {
 			cancel()
 			return nil, parseErr
@@ -49,7 +49,6 @@ func New(p Params) (Result, error) {
 		}
 
 		pl, plErr := pgxpool.NewWithConfig(ctx, poolConfig)
-
 		if plErr != nil {
 			cancel()
 			return nil, plErr
@@ -78,6 +77,7 @@ func New(p Params) (Result, error) {
 			if err != nil {
 				return nil, err
 			}
+
 			return stdlib.OpenDBFromPool(pool), nil
 		}),
 		PgxPoolWait: waitGroup,
@@ -110,6 +110,7 @@ func waitForPing(ctx context.Context, logger *zap.SugaredLogger, pool *pgxpool.P
 		if i > 10 {
 			break
 		}
+
 		select {
 		case <-ctx.Done():
 			break

@@ -29,6 +29,7 @@ func NewConfigModule[T any](key string, defaultValue interface{}) fx.Option {
 						err = errors.New("unexpected config type")
 						return
 					}
+
 					return v, nil
 				},
 			},

@@ -90,8 +90,8 @@ func (c compiler) Compile(source Source) (Runner, error) {
 		source:        source,
 		workflowNames: source.workflowNames(),
 	}
-	source, sourceErr := decode[Source](*ctx)
 
+	source, sourceErr := decode[Source](*ctx)
 	if sourceErr != nil {
 		return nil, ctx.fatal(sourceErr)
 	}
@@ -149,6 +149,7 @@ func decodeTo[T any](ctx compilerContext, target *T) error {
 
 func decode[T any](ctx compilerContext) (T, error) {
 	var target T
+
 	err := decodeTo(ctx, &target)
 
 	return target, err
