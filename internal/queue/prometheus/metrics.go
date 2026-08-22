@@ -3,6 +3,7 @@ package prometheus
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
@@ -14,11 +15,18 @@ import (
 // namespace used in fully-qualified metrics names.
 const namespace = "bitmagnet_queue"
 
+// collectTimeout bounds the aggregate over queue_jobs. Prometheus gives up on a
+// scrape after its own scrape_timeout (10s by default) but that does not stop the
+// query, so without a deadline here a slow GROUP BY keeps running - and keeps its
+// connection - long after the scrape that asked for it has gone.
+const collectTimeout = 10 * time.Second
+
 // queueMetricsCollector gathers queue metrics.
 // It implements prometheus.Collector interface.
 type queueMetricsCollector struct {
-	query  lazy.Lazy[*dao.Query]
-	logger *zap.SugaredLogger
+	query   lazy.Lazy[*dao.Query]
+	logger  *zap.SugaredLogger
+	timeout time.Duration
 }
 
 var tasksQueuedDesc = prometheus.NewDesc(
@@ -60,9 +68,19 @@ func (qmc *queueMetricsCollector) collectQueueStatusInfos() ([]*queueStatusInfo,
 		return nil, fmt.Errorf("failed to get query: %w", err)
 	}
 
+	timeout := qmc.timeout
+	if timeout <= 0 {
+		timeout = collectTimeout
+	}
+
+	// prometheus.Collector.Collect takes no context, so there is none to inherit;
+	// a bounded one is the most that can be done here.
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
 	var queueInfos []*queueStatusInfo
 
-	err = q.QueueJob.WithContext(context.Background()).UnderlyingDB().Raw(
+	err = q.QueueJob.WithContext(ctx).UnderlyingDB().Raw(
 		"SELECT queue, status, count(*) FROM queue_jobs GROUP BY queue, status",
 	).Find(&queueInfos).Error
 	if err != nil {

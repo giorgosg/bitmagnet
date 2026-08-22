@@ -22,8 +22,9 @@ type Result struct {
 func New(p Params) Result {
 	return Result{
 		Collector: &queueMetricsCollector{
-			query:  p.Query,
-			logger: p.Logger.Named("queue_metrics_collector"),
+			query:   p.Query,
+			logger:  p.Logger.Named("queue_metrics_collector"),
+			timeout: collectTimeout,
 		},
 	}
 }
