@@ -17,7 +17,7 @@ These are _working notes_. The user documentation lives in `bitmagnet.io/` and a
 | Read                                           | When                                                                                  |
 | ---------------------------------------------- | ------------------------------------------------------------------------------------- |
 | [hacking.md](hacking.md)                       | Making a change: toolchain, feature shape, GraphQL, migrations, testing at real scale |
-| [architecture.md](architecture.md)             | Working out what a package does, or how `fx` assembles the binary                     |
+| [architecture/](architecture/README.md)        | Getting oriented: what each subsystem is, how it connects, where a change goes        |
 | [porting.md](porting.md)                       | Measuring, reviewing, or cherry-picking from a fork or an upstream PR                 |
 | [forks/](forks/README.md)                      | Choosing which downstream repo a change should come from                              |
 | [upstream-status.md](upstream-status.md)       | Sending a change upstream, or weighing whether the `next` rewrite makes it moot       |

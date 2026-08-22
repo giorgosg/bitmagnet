@@ -2,7 +2,7 @@
 
 Orientation for a first change. [AGENTS.md](../AGENTS.md) has the rules — the generated
 files, the pinned Prettier, the migration numbers, the red test — and this page has the
-detail behind them. [architecture.md](architecture.md) covers _what_ the pieces are;
+detail behind them. [architecture/](architecture/README.md) covers _what_ the pieces are;
 this covers _how to work on them_.
 
 ## Toolchain

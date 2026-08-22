@@ -1,15 +1,31 @@
 # Working on bitmagnet
 
-Operational instructions for anyone changing this repo, human or agent. Everything that
-does not belong in every session lives under [`docs/`](docs/README.md), reached by the
-pointers below.
+**This file is the single source of truth for working in this repo** — for a human, and
+for any coding agent regardless of which one. Read it before changing anything: it is
+short, and it carries the traps that decide whether a change survives `task gen` and CI,
+the ones that look like they worked locally and are silently undone later.
+
+Everything that does not belong in every session lives under [`docs/`](docs/README.md),
+reached by the pointers below.
+
+Agent harnesses look for different filenames — `AGENTS.md`, `CLAUDE.md`, and others. In
+this repo **only this file has content**; every other such file is a one-line pointer
+here. If you are adding or correcting an instruction, add it here. Do not copy guidance
+into a harness-specific file, and do not let one drift into holding rules of its own: two
+files that disagree are worse than one file nobody read.
 
 ## Which doc, and when
+
+**Starting cold, or coming back to a part of the tree you have not touched?** Read
+[docs/architecture/](docs/architecture/README.md) first. It is the map: one page per
+subsystem, describing what each one does, how the pieces connect, and where a new thing
+goes. It is written to get an agent oriented in one pass, and it is kept current with the
+code.
 
 | Read                                                     | When                                                                                  |
 | -------------------------------------------------------- | ------------------------------------------------------------------------------------- |
 | [docs/hacking.md](docs/hacking.md)                       | Making a change: toolchain, feature shape, GraphQL, migrations, testing at real scale |
-| [docs/architecture.md](docs/architecture.md)             | Working out what a package does, or how `fx` assembles the binary                     |
+| [docs/architecture/](docs/architecture/README.md)        | Getting oriented: what each subsystem is, how it connects, where a change goes        |
 | [docs/porting.md](docs/porting.md)                       | Measuring, reviewing, or cherry-picking from a fork or an upstream PR                 |
 | [docs/forks/](docs/forks/README.md)                      | Choosing which downstream repo a change should come from                              |
 | [docs/upstream-status.md](docs/upstream-status.md)       | Sending a change upstream, or weighing whether the `next` rewrite makes it moot       |
@@ -23,9 +39,12 @@ every divergence count. Re-measure with the commands in [docs/porting.md](docs/p
 before acting on a number.
 
 `*.local.md` is gitignored at any depth and holds this checkout's private notes:
-environment details, and whatever authority the operator has granted. Read
-`CLAUDE.local.md` if it exists, and consult the others when the topic matches. Leave all
-of them unstaged, unquoted, and uncopied into tracked files.
+environment details, unreviewed findings, and whatever authority the operator has granted.
+At the repo root, look for a local counterpart to this file — `AGENTS.local.md` or
+`CLAUDE.local.md`, whichever the checkout uses — and read it if it exists; it is where
+standing permissions such as "you may merge a reviewed PR" are recorded, and nothing
+grants those in tracked files. Consult the others under `docs/` when the topic matches.
+Leave all of them unstaged, unquoted, and uncopied into tracked files.
 
 ## Before the first edit
 

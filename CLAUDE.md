@@ -1,7 +1,6 @@
 # bitmagnet
 
-Every instruction for working in this repo lives in [AGENTS.md](AGENTS.md).
+See [AGENTS.md](AGENTS.md). It is the single source of truth for working in this repo,
+and this file exists only to point at it.
 
-**Read it before changing anything.** It is short, and it carries the traps that decide
-whether a change survives `task gen` and CI — the ones that look like they worked
-locally and are silently undone later.
+Add instructions there, not here.
