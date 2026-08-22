@@ -37,8 +37,8 @@ func (m *manager) Filter(ctx context.Context, hashes []protocol.ID) ([]protocol.
 	defer m.mutex.Unlock()
 
 	if m.filter == nil || m.shouldFlush() {
-		if flushErr := m.flush(ctx); flushErr != nil {
-			return nil, flushErr
+		if refreshErr := m.refresh(ctx); refreshErr != nil {
+			return nil, refreshErr
 		}
 	}
 
@@ -68,8 +68,8 @@ func (m *manager) Block(ctx context.Context, hashes []protocol.ID, flush bool) e
 	}
 
 	if flush || m.shouldFlush() {
-		if flushErr := m.flush(ctx); flushErr != nil {
-			return flushErr
+		if refreshErr := m.refresh(ctx); refreshErr != nil {
+			return refreshErr
 		}
 	}
 
@@ -88,6 +88,72 @@ func (m *manager) Flush(ctx context.Context) error {
 }
 
 const blockedTorrentsBloomFilterKey = "blocked_torrents"
+
+// refresh brings the in-memory filter up to date. It does two jobs that look like
+// one: persisting buffered hashes, and picking up blocks made by another process.
+// Only the first needs to write, and Filter - a read on the crawler's triage path -
+// reaches here with an empty buffer every maxFlushWait. Rewriting a multi-megabyte
+// large object to persist nothing costs a read-modify-write and the WAL for it,
+// under the process-global mutex.
+func (m *manager) refresh(ctx context.Context) error {
+	if len(m.buffer) == 0 {
+		return m.reload(ctx)
+	}
+
+	return m.flush(ctx)
+}
+
+// reload replaces the in-memory filter with the stored one, without writing.
+// A missing or null OID means nothing has been blocked yet, which is not an error:
+// the empty filter it starts with is the right answer, and flush creates the large
+// object when there is finally something to store.
+func (m *manager) reload(ctx context.Context) error {
+	tx, err := m.pool.BeginTx(ctx, pgx.TxOptions{
+		AccessMode: pgx.ReadOnly,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	bf := bloom.NewDefaultStableBloomFilter()
+
+	var nullOid sql.NullInt32
+
+	err = tx.QueryRow(ctx, "SELECT oid FROM bloom_filters WHERE key = $1", blockedTorrentsBloomFilterKey).
+		Scan(&nullOid)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("failed to get bloom filter object ID: %w", err)
+	}
+
+	if err == nil && nullOid.Valid {
+		lobs := tx.LargeObjects()
+
+		obj, openErr := lobs.Open(ctx, uint32(nullOid.Int32), pgx.LargeObjectModeRead)
+		if openErr != nil {
+			return fmt.Errorf("failed to open large object for reading: %w", openErr)
+		}
+
+		_, readErr := bf.ReadFrom(obj)
+		obj.Close()
+
+		if readErr != nil {
+			return fmt.Errorf("failed to read current bloom filter: %w", readErr)
+		}
+	}
+
+	if commitErr := tx.Commit(ctx); commitErr != nil {
+		return fmt.Errorf("failed to commit transaction: %w", commitErr)
+	}
+
+	m.filter = bf
+	m.lastFlushedAt = time.Now()
+
+	return nil
+}
 
 func (m *manager) flush(ctx context.Context) error {
 	hashes := slices.Collect(maps.Keys(m.buffer))
