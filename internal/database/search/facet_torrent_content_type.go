@@ -20,7 +20,10 @@ func TorrentContentTypeFacet(options ...query.FacetOption) query.Facet {
 				}, options...)...,
 			),
 			field: func(q *dao.Query) field.Field {
-				return field.Field(q.TorrentContent.ContentType)
+				return field.NewField(
+					model.TableNameTorrentContent,
+					q.TorrentContent.ContentType.ColumnName().String(),
+				)
 			},
 			parse: model.ParseContentType,
 		},

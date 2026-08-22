@@ -6,6 +6,7 @@ package dao
 
 import (
 	"context"
+	"database/sql"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -242,11 +243,17 @@ func (t *torrentContent) fillFieldMap() {
 
 func (t torrentContent) clone(db *gorm.DB) torrentContent {
 	t.torrentContentDo.ReplaceConnPool(db.Statement.ConnPool)
+	t.Torrent.db = db.Session(&gorm.Session{Initialized: true})
+	t.Torrent.db.Statement.ConnPool = db.Statement.ConnPool
+	t.Content.db = db.Session(&gorm.Session{Initialized: true})
+	t.Content.db.Statement.ConnPool = db.Statement.ConnPool
 	return t
 }
 
 func (t torrentContent) replaceDB(db *gorm.DB) torrentContent {
 	t.torrentContentDo.ReplaceDB(db)
+	t.Torrent.db = db.Session(&gorm.Session{})
+	t.Content.db = db.Session(&gorm.Session{})
 	return t
 }
 
@@ -305,6 +312,11 @@ func (a torrentContentBelongsToTorrent) Model(m *model.TorrentContent) *torrentC
 	return &torrentContentBelongsToTorrentTx{a.db.Model(m).Association(a.Name())}
 }
 
+func (a torrentContentBelongsToTorrent) Unscoped() *torrentContentBelongsToTorrent {
+	a.db = a.db.Unscoped()
+	return &a
+}
+
 type torrentContentBelongsToTorrentTx struct{ tx *gorm.Association }
 
 func (a torrentContentBelongsToTorrentTx) Find() (result *model.Torrent, err error) {
@@ -341,6 +353,11 @@ func (a torrentContentBelongsToTorrentTx) Clear() error {
 
 func (a torrentContentBelongsToTorrentTx) Count() int64 {
 	return a.tx.Count()
+}
+
+func (a torrentContentBelongsToTorrentTx) Unscoped() *torrentContentBelongsToTorrentTx {
+	a.tx = a.tx.Unscoped()
+	return &a
 }
 
 type torrentContentBelongsToContent struct {
@@ -392,6 +409,11 @@ func (a torrentContentBelongsToContent) Model(m *model.TorrentContent) *torrentC
 	return &torrentContentBelongsToContentTx{a.db.Model(m).Association(a.Name())}
 }
 
+func (a torrentContentBelongsToContent) Unscoped() *torrentContentBelongsToContent {
+	a.db = a.db.Unscoped()
+	return &a
+}
+
 type torrentContentBelongsToContentTx struct{ tx *gorm.Association }
 
 func (a torrentContentBelongsToContentTx) Find() (result *model.Content, err error) {
@@ -428,6 +450,11 @@ func (a torrentContentBelongsToContentTx) Clear() error {
 
 func (a torrentContentBelongsToContentTx) Count() int64 {
 	return a.tx.Count()
+}
+
+func (a torrentContentBelongsToContentTx) Unscoped() *torrentContentBelongsToContentTx {
+	a.tx = a.tx.Unscoped()
+	return &a
 }
 
 type torrentContentDo struct{ gen.DO }
@@ -487,6 +514,8 @@ type ITorrentContentDo interface {
 	FirstOrCreate() (*model.TorrentContent, error)
 	FindByPage(offset int, limit int) (result []*model.TorrentContent, count int64, err error)
 	ScanByPage(result interface{}, offset int, limit int) (count int64, err error)
+	Rows() (*sql.Rows, error)
+	Row() *sql.Row
 	Scan(result interface{}) (err error)
 	Returning(value interface{}, columns ...string) ITorrentContentDo
 	UnderlyingDB() *gorm.DB

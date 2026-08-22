@@ -6,6 +6,7 @@ package dao
 
 import (
 	"context"
+	"database/sql"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -113,11 +114,14 @@ func (c *contentAttribute) fillFieldMap() {
 
 func (c contentAttribute) clone(db *gorm.DB) contentAttribute {
 	c.contentAttributeDo.ReplaceConnPool(db.Statement.ConnPool)
+	c.MetadataSource.db = db.Session(&gorm.Session{Initialized: true})
+	c.MetadataSource.db.Statement.ConnPool = db.Statement.ConnPool
 	return c
 }
 
 func (c contentAttribute) replaceDB(db *gorm.DB) contentAttribute {
 	c.contentAttributeDo.ReplaceDB(db)
+	c.MetadataSource.db = db.Session(&gorm.Session{})
 	return c
 }
 
@@ -152,6 +156,11 @@ func (a contentAttributeBelongsToMetadataSource) Session(session *gorm.Session) 
 
 func (a contentAttributeBelongsToMetadataSource) Model(m *model.ContentAttribute) *contentAttributeBelongsToMetadataSourceTx {
 	return &contentAttributeBelongsToMetadataSourceTx{a.db.Model(m).Association(a.Name())}
+}
+
+func (a contentAttributeBelongsToMetadataSource) Unscoped() *contentAttributeBelongsToMetadataSource {
+	a.db = a.db.Unscoped()
+	return &a
 }
 
 type contentAttributeBelongsToMetadataSourceTx struct{ tx *gorm.Association }
@@ -190,6 +199,11 @@ func (a contentAttributeBelongsToMetadataSourceTx) Clear() error {
 
 func (a contentAttributeBelongsToMetadataSourceTx) Count() int64 {
 	return a.tx.Count()
+}
+
+func (a contentAttributeBelongsToMetadataSourceTx) Unscoped() *contentAttributeBelongsToMetadataSourceTx {
+	a.tx = a.tx.Unscoped()
+	return &a
 }
 
 type contentAttributeDo struct{ gen.DO }
@@ -249,6 +263,8 @@ type IContentAttributeDo interface {
 	FirstOrCreate() (*model.ContentAttribute, error)
 	FindByPage(offset int, limit int) (result []*model.ContentAttribute, count int64, err error)
 	ScanByPage(result interface{}, offset int, limit int) (count int64, err error)
+	Rows() (*sql.Rows, error)
+	Row() *sql.Row
 	Scan(result interface{}) (err error)
 	Returning(value interface{}, columns ...string) IContentAttributeDo
 	UnderlyingDB() *gorm.DB

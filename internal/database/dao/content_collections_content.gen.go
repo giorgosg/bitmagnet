@@ -6,6 +6,7 @@ package dao
 
 import (
 	"context"
+	"database/sql"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -149,11 +150,17 @@ func (c *contentCollectionContent) fillFieldMap() {
 
 func (c contentCollectionContent) clone(db *gorm.DB) contentCollectionContent {
 	c.contentCollectionContentDo.ReplaceConnPool(db.Statement.ConnPool)
+	c.Content.db = db.Session(&gorm.Session{Initialized: true})
+	c.Content.db.Statement.ConnPool = db.Statement.ConnPool
+	c.Collection.db = db.Session(&gorm.Session{Initialized: true})
+	c.Collection.db.Statement.ConnPool = db.Statement.ConnPool
 	return c
 }
 
 func (c contentCollectionContent) replaceDB(db *gorm.DB) contentCollectionContent {
 	c.contentCollectionContentDo.ReplaceDB(db)
+	c.Content.db = db.Session(&gorm.Session{})
+	c.Collection.db = db.Session(&gorm.Session{})
 	return c
 }
 
@@ -206,6 +213,11 @@ func (a contentCollectionContentBelongsToContent) Model(m *model.ContentCollecti
 	return &contentCollectionContentBelongsToContentTx{a.db.Model(m).Association(a.Name())}
 }
 
+func (a contentCollectionContentBelongsToContent) Unscoped() *contentCollectionContentBelongsToContent {
+	a.db = a.db.Unscoped()
+	return &a
+}
+
 type contentCollectionContentBelongsToContentTx struct{ tx *gorm.Association }
 
 func (a contentCollectionContentBelongsToContentTx) Find() (result *model.Content, err error) {
@@ -242,6 +254,11 @@ func (a contentCollectionContentBelongsToContentTx) Clear() error {
 
 func (a contentCollectionContentBelongsToContentTx) Count() int64 {
 	return a.tx.Count()
+}
+
+func (a contentCollectionContentBelongsToContentTx) Unscoped() *contentCollectionContentBelongsToContentTx {
+	a.tx = a.tx.Unscoped()
+	return &a
 }
 
 type contentCollectionContentBelongsToCollection struct {
@@ -281,6 +298,11 @@ func (a contentCollectionContentBelongsToCollection) Model(m *model.ContentColle
 	return &contentCollectionContentBelongsToCollectionTx{a.db.Model(m).Association(a.Name())}
 }
 
+func (a contentCollectionContentBelongsToCollection) Unscoped() *contentCollectionContentBelongsToCollection {
+	a.db = a.db.Unscoped()
+	return &a
+}
+
 type contentCollectionContentBelongsToCollectionTx struct{ tx *gorm.Association }
 
 func (a contentCollectionContentBelongsToCollectionTx) Find() (result *model.ContentCollection, err error) {
@@ -317,6 +339,11 @@ func (a contentCollectionContentBelongsToCollectionTx) Clear() error {
 
 func (a contentCollectionContentBelongsToCollectionTx) Count() int64 {
 	return a.tx.Count()
+}
+
+func (a contentCollectionContentBelongsToCollectionTx) Unscoped() *contentCollectionContentBelongsToCollectionTx {
+	a.tx = a.tx.Unscoped()
+	return &a
 }
 
 type contentCollectionContentDo struct{ gen.DO }
@@ -376,6 +403,8 @@ type IContentCollectionContentDo interface {
 	FirstOrCreate() (*model.ContentCollectionContent, error)
 	FindByPage(offset int, limit int) (result []*model.ContentCollectionContent, count int64, err error)
 	ScanByPage(result interface{}, offset int, limit int) (count int64, err error)
+	Rows() (*sql.Rows, error)
+	Row() *sql.Row
 	Scan(result interface{}) (err error)
 	Returning(value interface{}, columns ...string) IContentCollectionContentDo
 	UnderlyingDB() *gorm.DB
