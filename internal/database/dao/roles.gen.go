@@ -6,6 +6,7 @@ package dao
 
 import (
 	"context"
+	"database/sql"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -97,11 +98,14 @@ func (r *role) fillFieldMap() {
 
 func (r role) clone(db *gorm.DB) role {
 	r.roleDo.ReplaceConnPool(db.Statement.ConnPool)
+	r.Permissions.db = db.Session(&gorm.Session{Initialized: true})
+	r.Permissions.db.Statement.ConnPool = db.Statement.ConnPool
 	return r
 }
 
 func (r role) replaceDB(db *gorm.DB) role {
 	r.roleDo.ReplaceDB(db)
+	r.Permissions.db = db.Session(&gorm.Session{})
 	return r
 }
 
@@ -136,6 +140,11 @@ func (a roleHasManyPermissions) Session(session *gorm.Session) *roleHasManyPermi
 
 func (a roleHasManyPermissions) Model(m *model.Role) *roleHasManyPermissionsTx {
 	return &roleHasManyPermissionsTx{a.db.Model(m).Association(a.Name())}
+}
+
+func (a roleHasManyPermissions) Unscoped() *roleHasManyPermissions {
+	a.db = a.db.Unscoped()
+	return &a
 }
 
 type roleHasManyPermissionsTx struct{ tx *gorm.Association }
@@ -174,6 +183,11 @@ func (a roleHasManyPermissionsTx) Clear() error {
 
 func (a roleHasManyPermissionsTx) Count() int64 {
 	return a.tx.Count()
+}
+
+func (a roleHasManyPermissionsTx) Unscoped() *roleHasManyPermissionsTx {
+	a.tx = a.tx.Unscoped()
+	return &a
 }
 
 type roleDo struct{ gen.DO }
@@ -233,6 +247,8 @@ type IRoleDo interface {
 	FirstOrCreate() (*model.Role, error)
 	FindByPage(offset int, limit int) (result []*model.Role, count int64, err error)
 	ScanByPage(result interface{}, offset int, limit int) (count int64, err error)
+	Rows() (*sql.Rows, error)
+	Row() *sql.Row
 	Scan(result interface{}) (err error)
 	Returning(value interface{}, columns ...string) IRoleDo
 	UnderlyingDB() *gorm.DB

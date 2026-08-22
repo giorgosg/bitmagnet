@@ -6,6 +6,7 @@ package dao
 
 import (
 	"context"
+	"database/sql"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -113,11 +114,14 @@ func (t *torrentsTorrentSource) fillFieldMap() {
 
 func (t torrentsTorrentSource) clone(db *gorm.DB) torrentsTorrentSource {
 	t.torrentsTorrentSourceDo.ReplaceConnPool(db.Statement.ConnPool)
+	t.TorrentSource.db = db.Session(&gorm.Session{Initialized: true})
+	t.TorrentSource.db.Statement.ConnPool = db.Statement.ConnPool
 	return t
 }
 
 func (t torrentsTorrentSource) replaceDB(db *gorm.DB) torrentsTorrentSource {
 	t.torrentsTorrentSourceDo.ReplaceDB(db)
+	t.TorrentSource.db = db.Session(&gorm.Session{})
 	return t
 }
 
@@ -152,6 +156,11 @@ func (a torrentsTorrentSourceHasOneTorrentSource) Session(session *gorm.Session)
 
 func (a torrentsTorrentSourceHasOneTorrentSource) Model(m *model.TorrentsTorrentSource) *torrentsTorrentSourceHasOneTorrentSourceTx {
 	return &torrentsTorrentSourceHasOneTorrentSourceTx{a.db.Model(m).Association(a.Name())}
+}
+
+func (a torrentsTorrentSourceHasOneTorrentSource) Unscoped() *torrentsTorrentSourceHasOneTorrentSource {
+	a.db = a.db.Unscoped()
+	return &a
 }
 
 type torrentsTorrentSourceHasOneTorrentSourceTx struct{ tx *gorm.Association }
@@ -190,6 +199,11 @@ func (a torrentsTorrentSourceHasOneTorrentSourceTx) Clear() error {
 
 func (a torrentsTorrentSourceHasOneTorrentSourceTx) Count() int64 {
 	return a.tx.Count()
+}
+
+func (a torrentsTorrentSourceHasOneTorrentSourceTx) Unscoped() *torrentsTorrentSourceHasOneTorrentSourceTx {
+	a.tx = a.tx.Unscoped()
+	return &a
 }
 
 type torrentsTorrentSourceDo struct{ gen.DO }
@@ -249,6 +263,8 @@ type ITorrentsTorrentSourceDo interface {
 	FirstOrCreate() (*model.TorrentsTorrentSource, error)
 	FindByPage(offset int, limit int) (result []*model.TorrentsTorrentSource, count int64, err error)
 	ScanByPage(result interface{}, offset int, limit int) (count int64, err error)
+	Rows() (*sql.Rows, error)
+	Row() *sql.Row
 	Scan(result interface{}) (err error)
 	Returning(value interface{}, columns ...string) ITorrentsTorrentSourceDo
 	UnderlyingDB() *gorm.DB

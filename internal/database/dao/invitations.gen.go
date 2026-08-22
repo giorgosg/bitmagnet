@@ -6,6 +6,7 @@ package dao
 
 import (
 	"context"
+	"database/sql"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -157,11 +158,17 @@ func (i *invitation) fillFieldMap() {
 
 func (i invitation) clone(db *gorm.DB) invitation {
 	i.invitationDo.ReplaceConnPool(db.Statement.ConnPool)
+	i.CreatedByUser.db = db.Session(&gorm.Session{Initialized: true})
+	i.CreatedByUser.db.Statement.ConnPool = db.Statement.ConnPool
+	i.ClaimedByUser.db = db.Session(&gorm.Session{Initialized: true})
+	i.ClaimedByUser.db.Statement.ConnPool = db.Statement.ConnPool
 	return i
 }
 
 func (i invitation) replaceDB(db *gorm.DB) invitation {
 	i.invitationDo.ReplaceDB(db)
+	i.CreatedByUser.db = db.Session(&gorm.Session{})
+	i.ClaimedByUser.db = db.Session(&gorm.Session{})
 	return i
 }
 
@@ -208,6 +215,11 @@ func (a invitationBelongsToCreatedByUser) Model(m *model.Invitation) *invitation
 	return &invitationBelongsToCreatedByUserTx{a.db.Model(m).Association(a.Name())}
 }
 
+func (a invitationBelongsToCreatedByUser) Unscoped() *invitationBelongsToCreatedByUser {
+	a.db = a.db.Unscoped()
+	return &a
+}
+
 type invitationBelongsToCreatedByUserTx struct{ tx *gorm.Association }
 
 func (a invitationBelongsToCreatedByUserTx) Find() (result *model.User, err error) {
@@ -244,6 +256,11 @@ func (a invitationBelongsToCreatedByUserTx) Clear() error {
 
 func (a invitationBelongsToCreatedByUserTx) Count() int64 {
 	return a.tx.Count()
+}
+
+func (a invitationBelongsToCreatedByUserTx) Unscoped() *invitationBelongsToCreatedByUserTx {
+	a.tx = a.tx.Unscoped()
+	return &a
 }
 
 type invitationBelongsToClaimedByUser struct {
@@ -289,6 +306,11 @@ func (a invitationBelongsToClaimedByUser) Model(m *model.Invitation) *invitation
 	return &invitationBelongsToClaimedByUserTx{a.db.Model(m).Association(a.Name())}
 }
 
+func (a invitationBelongsToClaimedByUser) Unscoped() *invitationBelongsToClaimedByUser {
+	a.db = a.db.Unscoped()
+	return &a
+}
+
 type invitationBelongsToClaimedByUserTx struct{ tx *gorm.Association }
 
 func (a invitationBelongsToClaimedByUserTx) Find() (result *model.User, err error) {
@@ -325,6 +347,11 @@ func (a invitationBelongsToClaimedByUserTx) Clear() error {
 
 func (a invitationBelongsToClaimedByUserTx) Count() int64 {
 	return a.tx.Count()
+}
+
+func (a invitationBelongsToClaimedByUserTx) Unscoped() *invitationBelongsToClaimedByUserTx {
+	a.tx = a.tx.Unscoped()
+	return &a
 }
 
 type invitationDo struct{ gen.DO }
@@ -384,6 +411,8 @@ type IInvitationDo interface {
 	FirstOrCreate() (*model.Invitation, error)
 	FindByPage(offset int, limit int) (result []*model.Invitation, count int64, err error)
 	ScanByPage(result interface{}, offset int, limit int) (count int64, err error)
+	Rows() (*sql.Rows, error)
+	Row() *sql.Row
 	Scan(result interface{}) (err error)
 	Returning(value interface{}, columns ...string) IInvitationDo
 	UnderlyingDB() *gorm.DB

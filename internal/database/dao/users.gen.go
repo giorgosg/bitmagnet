@@ -6,6 +6,7 @@ package dao
 
 import (
 	"context"
+	"database/sql"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -138,11 +139,17 @@ func (u *user) fillFieldMap() {
 
 func (u user) clone(db *gorm.DB) user {
 	u.userDo.ReplaceConnPool(db.Statement.ConnPool)
+	u.Role.db = db.Session(&gorm.Session{Initialized: true})
+	u.Role.db.Statement.ConnPool = db.Statement.ConnPool
+	u.Permissions.db = db.Session(&gorm.Session{Initialized: true})
+	u.Permissions.db.Statement.ConnPool = db.Statement.ConnPool
 	return u
 }
 
 func (u user) replaceDB(db *gorm.DB) user {
 	u.userDo.ReplaceDB(db)
+	u.Role.db = db.Session(&gorm.Session{})
+	u.Permissions.db = db.Session(&gorm.Session{})
 	return u
 }
 
@@ -183,6 +190,11 @@ func (a userBelongsToRole) Model(m *model.User) *userBelongsToRoleTx {
 	return &userBelongsToRoleTx{a.db.Model(m).Association(a.Name())}
 }
 
+func (a userBelongsToRole) Unscoped() *userBelongsToRole {
+	a.db = a.db.Unscoped()
+	return &a
+}
+
 type userBelongsToRoleTx struct{ tx *gorm.Association }
 
 func (a userBelongsToRoleTx) Find() (result *model.Role, err error) {
@@ -221,6 +233,11 @@ func (a userBelongsToRoleTx) Count() int64 {
 	return a.tx.Count()
 }
 
+func (a userBelongsToRoleTx) Unscoped() *userBelongsToRoleTx {
+	a.tx = a.tx.Unscoped()
+	return &a
+}
+
 type userHasManyPermissions struct {
 	db *gorm.DB
 
@@ -252,6 +269,11 @@ func (a userHasManyPermissions) Session(session *gorm.Session) *userHasManyPermi
 
 func (a userHasManyPermissions) Model(m *model.User) *userHasManyPermissionsTx {
 	return &userHasManyPermissionsTx{a.db.Model(m).Association(a.Name())}
+}
+
+func (a userHasManyPermissions) Unscoped() *userHasManyPermissions {
+	a.db = a.db.Unscoped()
+	return &a
 }
 
 type userHasManyPermissionsTx struct{ tx *gorm.Association }
@@ -290,6 +312,11 @@ func (a userHasManyPermissionsTx) Clear() error {
 
 func (a userHasManyPermissionsTx) Count() int64 {
 	return a.tx.Count()
+}
+
+func (a userHasManyPermissionsTx) Unscoped() *userHasManyPermissionsTx {
+	a.tx = a.tx.Unscoped()
+	return &a
 }
 
 type userDo struct{ gen.DO }
@@ -349,6 +376,8 @@ type IUserDo interface {
 	FirstOrCreate() (*model.User, error)
 	FindByPage(offset int, limit int) (result []*model.User, count int64, err error)
 	ScanByPage(result interface{}, offset int, limit int) (count int64, err error)
+	Rows() (*sql.Rows, error)
+	Row() *sql.Row
 	Scan(result interface{}) (err error)
 	Returning(value interface{}, columns ...string) IUserDo
 	UnderlyingDB() *gorm.DB

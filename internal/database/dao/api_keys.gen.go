@@ -6,6 +6,7 @@ package dao
 
 import (
 	"context"
+	"database/sql"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -131,11 +132,17 @@ func (a *aPIKey) fillFieldMap() {
 
 func (a aPIKey) clone(db *gorm.DB) aPIKey {
 	a.aPIKeyDo.ReplaceConnPool(db.Statement.ConnPool)
+	a.User.db = db.Session(&gorm.Session{Initialized: true})
+	a.User.db.Statement.ConnPool = db.Statement.ConnPool
+	a.Permissions.db = db.Session(&gorm.Session{Initialized: true})
+	a.Permissions.db.Statement.ConnPool = db.Statement.ConnPool
 	return a
 }
 
 func (a aPIKey) replaceDB(db *gorm.DB) aPIKey {
 	a.aPIKeyDo.ReplaceDB(db)
+	a.User.db = db.Session(&gorm.Session{})
+	a.Permissions.db = db.Session(&gorm.Session{})
 	return a
 }
 
@@ -182,6 +189,11 @@ func (a aPIKeyBelongsToUser) Model(m *model.APIKey) *aPIKeyBelongsToUserTx {
 	return &aPIKeyBelongsToUserTx{a.db.Model(m).Association(a.Name())}
 }
 
+func (a aPIKeyBelongsToUser) Unscoped() *aPIKeyBelongsToUser {
+	a.db = a.db.Unscoped()
+	return &a
+}
+
 type aPIKeyBelongsToUserTx struct{ tx *gorm.Association }
 
 func (a aPIKeyBelongsToUserTx) Find() (result *model.User, err error) {
@@ -220,6 +232,11 @@ func (a aPIKeyBelongsToUserTx) Count() int64 {
 	return a.tx.Count()
 }
 
+func (a aPIKeyBelongsToUserTx) Unscoped() *aPIKeyBelongsToUserTx {
+	a.tx = a.tx.Unscoped()
+	return &a
+}
+
 type aPIKeyHasManyPermissions struct {
 	db *gorm.DB
 
@@ -251,6 +268,11 @@ func (a aPIKeyHasManyPermissions) Session(session *gorm.Session) *aPIKeyHasManyP
 
 func (a aPIKeyHasManyPermissions) Model(m *model.APIKey) *aPIKeyHasManyPermissionsTx {
 	return &aPIKeyHasManyPermissionsTx{a.db.Model(m).Association(a.Name())}
+}
+
+func (a aPIKeyHasManyPermissions) Unscoped() *aPIKeyHasManyPermissions {
+	a.db = a.db.Unscoped()
+	return &a
 }
 
 type aPIKeyHasManyPermissionsTx struct{ tx *gorm.Association }
@@ -289,6 +311,11 @@ func (a aPIKeyHasManyPermissionsTx) Clear() error {
 
 func (a aPIKeyHasManyPermissionsTx) Count() int64 {
 	return a.tx.Count()
+}
+
+func (a aPIKeyHasManyPermissionsTx) Unscoped() *aPIKeyHasManyPermissionsTx {
+	a.tx = a.tx.Unscoped()
+	return &a
 }
 
 type aPIKeyDo struct{ gen.DO }
@@ -348,6 +375,8 @@ type IAPIKeyDo interface {
 	FirstOrCreate() (*model.APIKey, error)
 	FindByPage(offset int, limit int) (result []*model.APIKey, count int64, err error)
 	ScanByPage(result interface{}, offset int, limit int) (count int64, err error)
+	Rows() (*sql.Rows, error)
+	Row() *sql.Row
 	Scan(result interface{}) (err error)
 	Returning(value interface{}, columns ...string) IAPIKeyDo
 	UnderlyingDB() *gorm.DB

@@ -6,6 +6,7 @@ package dao
 
 import (
 	"context"
+	"database/sql"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -162,11 +163,29 @@ func (t *torrent) fillFieldMap() {
 
 func (t torrent) clone(db *gorm.DB) torrent {
 	t.torrentDo.ReplaceConnPool(db.Statement.ConnPool)
+	t.Hint.db = db.Session(&gorm.Session{Initialized: true})
+	t.Hint.db.Statement.ConnPool = db.Statement.ConnPool
+	t.Contents.db = db.Session(&gorm.Session{Initialized: true})
+	t.Contents.db.Statement.ConnPool = db.Statement.ConnPool
+	t.Sources.db = db.Session(&gorm.Session{Initialized: true})
+	t.Sources.db.Statement.ConnPool = db.Statement.ConnPool
+	t.Files.db = db.Session(&gorm.Session{Initialized: true})
+	t.Files.db.Statement.ConnPool = db.Statement.ConnPool
+	t.Pieces.db = db.Session(&gorm.Session{Initialized: true})
+	t.Pieces.db.Statement.ConnPool = db.Statement.ConnPool
+	t.Tags.db = db.Session(&gorm.Session{Initialized: true})
+	t.Tags.db.Statement.ConnPool = db.Statement.ConnPool
 	return t
 }
 
 func (t torrent) replaceDB(db *gorm.DB) torrent {
 	t.torrentDo.ReplaceDB(db)
+	t.Hint.db = db.Session(&gorm.Session{})
+	t.Contents.db = db.Session(&gorm.Session{})
+	t.Sources.db = db.Session(&gorm.Session{})
+	t.Files.db = db.Session(&gorm.Session{})
+	t.Pieces.db = db.Session(&gorm.Session{})
+	t.Tags.db = db.Session(&gorm.Session{})
 	return t
 }
 
@@ -201,6 +220,11 @@ func (a torrentHasOneHint) Session(session *gorm.Session) *torrentHasOneHint {
 
 func (a torrentHasOneHint) Model(m *model.Torrent) *torrentHasOneHintTx {
 	return &torrentHasOneHintTx{a.db.Model(m).Association(a.Name())}
+}
+
+func (a torrentHasOneHint) Unscoped() *torrentHasOneHint {
+	a.db = a.db.Unscoped()
+	return &a
 }
 
 type torrentHasOneHintTx struct{ tx *gorm.Association }
@@ -241,6 +265,11 @@ func (a torrentHasOneHintTx) Count() int64 {
 	return a.tx.Count()
 }
 
+func (a torrentHasOneHintTx) Unscoped() *torrentHasOneHintTx {
+	a.tx = a.tx.Unscoped()
+	return &a
+}
+
 type torrentHasManyContents struct {
 	db *gorm.DB
 
@@ -272,6 +301,11 @@ func (a torrentHasManyContents) Session(session *gorm.Session) *torrentHasManyCo
 
 func (a torrentHasManyContents) Model(m *model.Torrent) *torrentHasManyContentsTx {
 	return &torrentHasManyContentsTx{a.db.Model(m).Association(a.Name())}
+}
+
+func (a torrentHasManyContents) Unscoped() *torrentHasManyContents {
+	a.db = a.db.Unscoped()
+	return &a
 }
 
 type torrentHasManyContentsTx struct{ tx *gorm.Association }
@@ -312,6 +346,11 @@ func (a torrentHasManyContentsTx) Count() int64 {
 	return a.tx.Count()
 }
 
+func (a torrentHasManyContentsTx) Unscoped() *torrentHasManyContentsTx {
+	a.tx = a.tx.Unscoped()
+	return &a
+}
+
 type torrentHasManySources struct {
 	db *gorm.DB
 
@@ -347,6 +386,11 @@ func (a torrentHasManySources) Session(session *gorm.Session) *torrentHasManySou
 
 func (a torrentHasManySources) Model(m *model.Torrent) *torrentHasManySourcesTx {
 	return &torrentHasManySourcesTx{a.db.Model(m).Association(a.Name())}
+}
+
+func (a torrentHasManySources) Unscoped() *torrentHasManySources {
+	a.db = a.db.Unscoped()
+	return &a
 }
 
 type torrentHasManySourcesTx struct{ tx *gorm.Association }
@@ -387,6 +431,11 @@ func (a torrentHasManySourcesTx) Count() int64 {
 	return a.tx.Count()
 }
 
+func (a torrentHasManySourcesTx) Unscoped() *torrentHasManySourcesTx {
+	a.tx = a.tx.Unscoped()
+	return &a
+}
+
 type torrentHasManyFiles struct {
 	db *gorm.DB
 
@@ -418,6 +467,11 @@ func (a torrentHasManyFiles) Session(session *gorm.Session) *torrentHasManyFiles
 
 func (a torrentHasManyFiles) Model(m *model.Torrent) *torrentHasManyFilesTx {
 	return &torrentHasManyFilesTx{a.db.Model(m).Association(a.Name())}
+}
+
+func (a torrentHasManyFiles) Unscoped() *torrentHasManyFiles {
+	a.db = a.db.Unscoped()
+	return &a
 }
 
 type torrentHasManyFilesTx struct{ tx *gorm.Association }
@@ -458,6 +512,11 @@ func (a torrentHasManyFilesTx) Count() int64 {
 	return a.tx.Count()
 }
 
+func (a torrentHasManyFilesTx) Unscoped() *torrentHasManyFilesTx {
+	a.tx = a.tx.Unscoped()
+	return &a
+}
+
 type torrentHasOnePieces struct {
 	db *gorm.DB
 
@@ -489,6 +548,11 @@ func (a torrentHasOnePieces) Session(session *gorm.Session) *torrentHasOnePieces
 
 func (a torrentHasOnePieces) Model(m *model.Torrent) *torrentHasOnePiecesTx {
 	return &torrentHasOnePiecesTx{a.db.Model(m).Association(a.Name())}
+}
+
+func (a torrentHasOnePieces) Unscoped() *torrentHasOnePieces {
+	a.db = a.db.Unscoped()
+	return &a
 }
 
 type torrentHasOnePiecesTx struct{ tx *gorm.Association }
@@ -529,6 +593,11 @@ func (a torrentHasOnePiecesTx) Count() int64 {
 	return a.tx.Count()
 }
 
+func (a torrentHasOnePiecesTx) Unscoped() *torrentHasOnePiecesTx {
+	a.tx = a.tx.Unscoped()
+	return &a
+}
+
 type torrentHasManyTags struct {
 	db *gorm.DB
 
@@ -560,6 +629,11 @@ func (a torrentHasManyTags) Session(session *gorm.Session) *torrentHasManyTags {
 
 func (a torrentHasManyTags) Model(m *model.Torrent) *torrentHasManyTagsTx {
 	return &torrentHasManyTagsTx{a.db.Model(m).Association(a.Name())}
+}
+
+func (a torrentHasManyTags) Unscoped() *torrentHasManyTags {
+	a.db = a.db.Unscoped()
+	return &a
 }
 
 type torrentHasManyTagsTx struct{ tx *gorm.Association }
@@ -598,6 +672,11 @@ func (a torrentHasManyTagsTx) Clear() error {
 
 func (a torrentHasManyTagsTx) Count() int64 {
 	return a.tx.Count()
+}
+
+func (a torrentHasManyTagsTx) Unscoped() *torrentHasManyTagsTx {
+	a.tx = a.tx.Unscoped()
+	return &a
 }
 
 type torrentDo struct{ gen.DO }
@@ -657,6 +736,8 @@ type ITorrentDo interface {
 	FirstOrCreate() (*model.Torrent, error)
 	FindByPage(offset int, limit int) (result []*model.Torrent, count int64, err error)
 	ScanByPage(result interface{}, offset int, limit int) (count int64, err error)
+	Rows() (*sql.Rows, error)
+	Row() *sql.Row
 	Scan(result interface{}) (err error)
 	Returning(value interface{}, columns ...string) ITorrentDo
 	UnderlyingDB() *gorm.DB

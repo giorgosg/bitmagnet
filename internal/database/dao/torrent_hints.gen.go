@@ -6,6 +6,7 @@ package dao
 
 import (
 	"context"
+	"database/sql"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -203,6 +204,8 @@ type ITorrentHintDo interface {
 	FirstOrCreate() (*model.TorrentHint, error)
 	FindByPage(offset int, limit int) (result []*model.TorrentHint, count int64, err error)
 	ScanByPage(result interface{}, offset int, limit int) (count int64, err error)
+	Rows() (*sql.Rows, error)
+	Row() *sql.Row
 	Scan(result interface{}) (err error)
 	Returning(value interface{}, columns ...string) ITorrentHintDo
 	UnderlyingDB() *gorm.DB
