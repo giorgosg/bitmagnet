@@ -1,6 +1,9 @@
 package httpserver
 
 import (
+	"net/http"
+
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/http_auth"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
@@ -9,6 +12,7 @@ import (
 
 type prometheusBuilder struct {
 	registry lazy.Lazy[*prometheus.Registry]
+	guard    http_auth.Guard
 }
 
 func (prometheusBuilder) Key() string {
@@ -26,6 +30,12 @@ func (b prometheusBuilder) Apply(e *gin.Engine) error {
 	})
 
 	e.Any("/metrics", func(c *gin.Context) {
+		if !b.guard.Allow(c, http_auth.ObjectActionMetrics) {
+			c.AbortWithStatus(http.StatusUnauthorized)
+
+			return
+		}
+
 		h.ServeHTTP(c.Writer, c.Request)
 	})
 

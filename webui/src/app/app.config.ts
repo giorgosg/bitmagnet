@@ -14,8 +14,10 @@ import { provideTransloco } from "@jsverse/transloco";
 import { provideCharts, withDefaultRegisterables } from "ng2-charts";
 import { provideApollo } from "apollo-angular";
 import { HttpLink } from "apollo-angular/http";
-import { InMemoryCache } from "@apollo/client/core";
+import { ApolloLink, InMemoryCache } from "@apollo/client/core";
+import { HttpHeaders } from "@angular/common/http";
 import { graphqlEndpoint } from "../environments/environment";
+import { AuthTokenService } from "./auth/auth-token.service";
 import { TranslocoImportLoader } from "./i18n/transloco.loader";
 import { routes } from "./app.routes";
 
@@ -28,8 +30,24 @@ export const appConfig: ApplicationConfig = {
     provideHttpClient(),
     provideApollo(() => {
       const httpLink = inject(HttpLink);
+      const tokenService = inject(AuthTokenService);
+
+      // Attaches the session token to every request. Without this the token
+      // obtained at login is never presented and every request stays anonymous.
+      const authLink = new ApolloLink((operation, forward) => {
+        const token = tokenService.getToken();
+
+        if (token) {
+          operation.setContext({
+            headers: new HttpHeaders().set("Authorization", `Bearer ${token}`),
+          });
+        }
+
+        return forward(operation);
+      });
+
       return {
-        link: httpLink.create({ uri: graphqlEndpoint }),
+        link: authLink.concat(httpLink.create({ uri: graphqlEndpoint })),
         cache: new InMemoryCache({
           typePolicies: {
             Query: {

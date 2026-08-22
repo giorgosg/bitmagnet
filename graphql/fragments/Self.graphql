@@ -1,0 +1,15 @@
+#import "./User"
+#import "./APIKey"
+#import "./AuthObjectAction"
+
+fragment Self on Self {
+  user {
+    ...User
+  }
+  apiKey {
+    ...APIKey
+  }
+  permissions {
+    ...AuthObjectAction
+  }
+}

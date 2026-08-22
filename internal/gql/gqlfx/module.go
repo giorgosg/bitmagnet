@@ -2,11 +2,16 @@ package gqlfx
 
 import (
 	"github.com/99designs/gqlgen/graphql"
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/api_key"
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/rbac"
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/user"
 	"github.com/bitmagnet-io/bitmagnet/internal/blocking"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/search"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql"
+	gqlauth "github.com/bitmagnet-io/bitmagnet/internal/gql/auth"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql/config"
+	"github.com/bitmagnet-io/bitmagnet/internal/gql/directive"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql/httpserver"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql/resolvers"
 	"github.com/bitmagnet-io/bitmagnet/internal/health"
@@ -25,6 +30,33 @@ func New() fx.Option {
 		fx.Provide(
 			config.New,
 			httpserver.New,
+
+			// The @auth directives in the schema are the authoritative list of
+			// GraphQL object actions, so they are extracted rather than restated.
+			//
+			// Deliberately built from an empty config: the schema AST is static,
+			// so this needs no resolvers. Resolving the real ExecutableSchema here
+			// would drag the entire resolver graph — database included — into
+			// every command that happens to construct the auth module.
+			func() directive.AuthDirectives {
+				return directive.ExtractAuthDirectives(
+					directive.ExtractSchemaDirectives(
+						gql.NewExecutableSchema(gql.Config{}).Schema(),
+					),
+				)
+			},
+			fx.Annotate(
+				func(directives directive.AuthDirectives) rbac.ObjectActionProvider {
+					return func() []rbac.ObjectAction {
+						return gqlauth.ObjectActions(directives)
+					}
+				},
+				fx.ResultTags(`group:"auth_object_actions"`),
+			),
+			fx.Annotate(
+				func() rbac.PermissionProvider { return gqlauth.Permissions },
+				fx.ResultTags(`group:"auth_permissions"`),
+			),
 			func(
 				lcfg lazy.Lazy[gql.Config],
 			) lazy.Lazy[graphql.ExecutableSchema] {
@@ -91,6 +123,9 @@ func New() fx.Option {
 							TorrentMetricsClient: tm,
 							Processor:            pr,
 							BlockingManager:      bm,
+							UserService:          p.UserService,
+							APIKeyService:        p.APIKeyService,
+							RBACService:          p.RBACService,
 						}, nil
 					}),
 				}
@@ -119,6 +154,9 @@ type Params struct {
 	TorrentMetricsClient lazy.Lazy[torrentmetrics.Client]
 	Processor            lazy.Lazy[processor.Processor]
 	BlockingManager      lazy.Lazy[blocking.Manager]
+	UserService          user.Service
+	APIKeyService        api_key.Service
+	RBACService          rbac.Service
 }
 
 type Result struct {

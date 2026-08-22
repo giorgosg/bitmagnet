@@ -150,6 +150,21 @@ models:
     model:
       - github.com/bitmagnet-io/bitmagnet/internal/model.VideoModifier
       - github.com/bitmagnet-io/bitmagnet/internal/model.NullVideoModifier
+  SelfQuery:
+    model:
+      - github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel.SelfQuery
+  SelfMutation:
+    model:
+      - github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel.SelfMutation
+  AuthQuery:
+    model:
+      - github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel.AuthQuery
+  AuthMutation:
+    model:
+      - github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel.AuthMutation
+  Role:
+    model:
+      - github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel.Role
   SearchQueryInput:
     model:
       - github.com/bitmagnet-io/bitmagnet/internal/database/query.SearchParams

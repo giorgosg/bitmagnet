@@ -15,6 +15,7 @@ pointers below.
 | [docs/upstream-status.md](docs/upstream-status.md)       | Sending a change upstream, or weighing whether the `next` rewrite makes it moot       |
 | [docs/integration-status.md](docs/integration-status.md) | Checking whether a candidate is already merged, queued, or rejected                   |
 | [docs/auth.md](docs/auth.md)                             | Adding or protecting an externally reachable interface                                |
+| [docs/auth-port.md](docs/auth-port.md)                   | Porting more of `next`, or reviewing a security-sensitive change                      |
 | [docs/agents/](docs/agents/issue-tracker.md)             | Filing an issue, applying a triage label, or looking for domain docs                  |
 
 Several of those pages are dated **snapshots** — the fork survey, the upstream survey,

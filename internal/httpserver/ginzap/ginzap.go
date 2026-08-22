@@ -5,7 +5,6 @@ package ginzap
 import (
 	"net"
 	"net/http"
-	"net/http/httputil"
 	"os"
 	"runtime/debug"
 	"strings"
@@ -56,7 +55,8 @@ func WithConfig(logger ZapLogger, conf *Config) gin.HandlerFunc {
 		start := time.Now()
 		// some evil middlewares modify this values
 		path := c.Request.URL.Path
-		query := c.Request.URL.RawQuery
+		// Credentials can travel in the query string; do not log them.
+		query := redactQuery(c.Request.URL.RawQuery)
 		c.Next()
 
 		if _, ok := skipPaths[path]; !ok {
@@ -136,7 +136,9 @@ func CustomRecoveryWithZap(logger ZapLogger, stack bool, recovery gin.RecoveryFu
 					}
 				}
 
-				httpRequest, _ := httputil.DumpRequest(c.Request, false)
+				// Redacted, not raw: this dump reaches the log on a path the
+				// request logger's own redaction never sees.
+				httpRequest := dumpRequest(c.Request)
 				if brokenPipe {
 					logger.Error(c.Request.URL.Path,
 						zap.Any("error", err),

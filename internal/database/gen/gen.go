@@ -15,6 +15,7 @@ const (
 	tagForeignKey = "foreignKey"
 	tagReferences = "references"
 	colInfoHash   = "InfoHash"
+	colRoleName   = "RoleName"
 	colSource     = "Source"
 )
 
@@ -439,6 +440,169 @@ func BuildGenerator(db *gorm.DB) *gen.Generator {
 		createdAtReadOnly,
 	)
 
+	rolePermissions := g.GenerateModel(
+		"role_permissions",
+		gen.FieldGORMTag("role", func(tag field.GormTag) field.GormTag {
+			tag.Set("<-", "create")
+			return tag
+		}),
+		gen.FieldGORMTag("namespace", func(tag field.GormTag) field.GormTag {
+			tag.Set("<-", "create")
+			return tag
+		}),
+		gen.FieldGORMTag("object", func(tag field.GormTag) field.GormTag {
+			tag.Set("<-", "create")
+			return tag
+		}),
+		gen.FieldGORMTag("action", func(tag field.GormTag) field.GormTag {
+			tag.Set("<-", "create")
+			return tag
+		}),
+		createdAtReadOnly,
+	)
+	roles := g.GenerateModel(
+		"roles",
+		gen.FieldGORMTag("name", func(tag field.GormTag) field.GormTag {
+			tag.Set("<-", "create")
+			return tag
+		}),
+		gen.FieldGORMTag("core", func(tag field.GormTag) field.GormTag {
+			tag.Set("<-", "false")
+			return tag
+		}),
+		gen.FieldRelate(
+			field.HasMany,
+			"Permissions",
+			rolePermissions,
+			&field.RelateConfig{
+				RelateSlice: true,
+				GORMTag: field.GormTag{
+					tagForeignKey: {colRoleName},
+					tagReferences: {"Name"},
+				},
+			},
+		),
+		createdAtReadOnly,
+	)
+	users := g.GenerateModel(
+		"users",
+		gen.FieldType("id", "int"),
+		gen.FieldGORMTag("id", func(tag field.GormTag) field.GormTag {
+			tag.Set("<-", "false")
+			return tag
+		}),
+		gen.FieldJSONTag("password", "-"),
+		gen.FieldRelate(
+			field.BelongsTo,
+			"Role",
+			roles,
+			&field.RelateConfig{
+				GORMTag: field.GormTag{
+					tagForeignKey: {"Name"},
+					tagReferences: {colRoleName},
+				},
+			},
+		),
+		gen.FieldRelate(
+			field.HasMany,
+			"Permissions",
+			rolePermissions,
+			&field.RelateConfig{
+				RelateSlice: true,
+				GORMTag: field.GormTag{
+					tagForeignKey: {colRoleName},
+					tagReferences: {colRoleName},
+				},
+			},
+		),
+		gen.FieldType("last_login_at", "sql.NullTime"),
+		createdAtReadOnly,
+	)
+	invitations := g.GenerateModel(
+		"invitations",
+		gen.FieldType("created_by", "NullInt"),
+		gen.FieldType("claimed_by", "NullInt"),
+		gen.FieldRelate(
+			field.BelongsTo,
+			"CreatedByUser",
+			users,
+			&field.RelateConfig{
+				GORMTag: field.GormTag{
+					tagForeignKey: {"ID"},
+					tagReferences: {"CreatedBy"},
+				},
+			},
+		),
+		gen.FieldRelate(
+			field.BelongsTo,
+			"ClaimedByUser",
+			users,
+			&field.RelateConfig{
+				GORMTag: field.GormTag{
+					tagForeignKey: {"ID"},
+					tagReferences: {"ClaimedBy"},
+				},
+			},
+		),
+		gen.FieldType("expires_at", "sql.NullTime"),
+	)
+	apiKeyPermissions := g.GenerateModel(
+		"api_key_permissions",
+		gen.FieldType("api_key_id", "int"),
+		gen.FieldRename("api_key_id", "APIKeyID"),
+		gen.FieldGORMTag("api_key_id", func(tag field.GormTag) field.GormTag {
+			tag.Set("<-", "create")
+			return tag
+		}),
+		gen.FieldGORMTag("namespace", func(tag field.GormTag) field.GormTag {
+			tag.Set("<-", "create")
+			return tag
+		}),
+		gen.FieldGORMTag("object", func(tag field.GormTag) field.GormTag {
+			tag.Set("<-", "create")
+			return tag
+		}),
+		gen.FieldGORMTag("action", func(tag field.GormTag) field.GormTag {
+			tag.Set("<-", "create")
+			return tag
+		}),
+	)
+	apiKeys := g.GenerateModel(
+		"api_keys",
+		gen.FieldType("id", "int"),
+		gen.FieldType("user_id", "int"),
+		gen.FieldGORMTag("name", func(tag field.GormTag) field.GormTag {
+			tag.Set("<-", "create")
+			return tag
+		}),
+		gen.FieldRelate(
+			field.BelongsTo,
+			"User",
+			users,
+			&field.RelateConfig{
+				GORMTag: field.GormTag{
+					tagForeignKey: {"ID"},
+					tagReferences: {"UserID"},
+				},
+			},
+		),
+		gen.FieldRelate(
+			field.HasMany,
+			"Permissions",
+			apiKeyPermissions,
+			&field.RelateConfig{
+				RelateSlice: true,
+				GORMTag: field.GormTag{
+					tagForeignKey: {"APIKeyID"},
+					tagReferences: {"ID"},
+				},
+			},
+		),
+		gen.FieldJSONTag("hash", "-"),
+		gen.FieldType("expires_at", "sql.NullTime"),
+		createdAtReadOnly,
+	)
+
 	g.ApplyBasic(
 		torrentSources,
 		torrentFiles,
@@ -455,6 +619,12 @@ func BuildGenerator(db *gorm.DB) *gen.Generator {
 		contentAttributes,
 		keyValues,
 		queueJobs,
+		rolePermissions,
+		roles,
+		users,
+		invitations,
+		apiKeyPermissions,
+		apiKeys,
 	)
 
 	return g

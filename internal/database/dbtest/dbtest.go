@@ -63,8 +63,8 @@ func New(t *testing.T) *DB {
 		t.Skipf("%s is not set; skipping database integration test", DSNEnvVar)
 	}
 
-	// Derived from t.Context so the context is cancelled if the test ends early.
-	// Cleanup cannot use it — see drop, which builds its own.
+	// Cancelled when the test ends, which is before cleanup runs — hence drop's
+	// own context below.
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 

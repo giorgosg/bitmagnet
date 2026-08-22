@@ -132,7 +132,10 @@ linters:
         - name: unused-parameter
         - name: unused-receiver
         - name: var-declaration
+        # skipPackageNameChecks matches upstream/next, whose auth stack and its
+        # supporting packages use underscored package names such as json_schema.
         - name: var-naming
+          arguments: [[], [], [{ skipPackageNameChecks: true }]]
   exclusions:
     generated: lax
     presets:

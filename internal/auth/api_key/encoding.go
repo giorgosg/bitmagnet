@@ -1,0 +1,128 @@
+package api_key
+
+import (
+	"crypto/rand"
+	"encoding/binary"
+	"math/big"
+	"strings"
+	"unicode"
+
+	"golang.org/x/crypto/bcrypt"
+)
+
+const (
+	secretLength = 12
+	keyLength    = 22
+	// decodedLength is the exact payload width: the secret plus a uint32 id.
+	// It was previously derived as (keyLength*5+7)/8, which is the base32
+	// formula and yields 14 — narrower than the 16 bytes actually encoded. Since
+	// base62 drops leading zero bytes, any secret starting with 0x00 decoded
+	// short and was rejected, losing roughly one generated key in 256.
+	decodedLength = secretLength + 4
+)
+
+type Secret struct {
+	Secret []byte
+	Hash   []byte
+}
+
+// NewSecret generates an API key secret and its hash.
+//
+// bcrypt's default cost is deliberate here and is not the configured password
+// cost: the secret is 12 uniformly random bytes, so an offline attack against
+// the hash is infeasible at any work factor, and the cost is paid on every
+// request that presents a key.
+//
+// The errors are returned rather than dropped. Discarding the bcrypt error
+// yielded a zero-valued hash that would be stored as the credential.
+func NewSecret() (Secret, error) {
+	bytes := make([]byte, secretLength)
+	if _, err := rand.Read(bytes); err != nil {
+		return Secret{}, err
+	}
+
+	hash, err := bcrypt.GenerateFromPassword(
+		bytes,
+		bcrypt.DefaultCost,
+	)
+	if err != nil {
+		return Secret{}, err
+	}
+
+	return Secret{
+		Secret: bytes,
+		Hash:   hash,
+	}, nil
+}
+
+type KeyData struct {
+	ID     int
+	Secret []byte
+}
+
+func (k KeyData) Encode() string {
+	bytes := make([]byte, 0, secretLength+4)
+	bytes = append(bytes, k.Secret...)
+	idBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(idBytes, uint32(k.ID))
+	bytes = append(bytes, idBytes...)
+
+	return base62Encode(bytes)
+}
+
+func (k *KeyData) Decode(key string) error {
+	bytes, err := base62Decode(key)
+	if err != nil {
+		return err
+	}
+
+	if len(bytes) != secretLength+4 {
+		return ErrDecode
+	}
+
+	k.Secret = bytes[:secretLength]
+	k.ID = int(binary.LittleEndian.Uint32(bytes[secretLength:]))
+
+	return nil
+}
+
+var maxLen = len(new(big.Int).Exp(big.NewInt(256), big.NewInt(int64(secretLength+4)), nil).Text(62))
+
+func base62Encode(data []byte) string {
+	bi := new(big.Int).SetBytes(data)
+	// Pad with leading zeros
+	s := bi.Text(62)
+	if len(s) < maxLen {
+		s = strings.Repeat("0", maxLen-len(s)) + s
+	}
+
+	return s
+}
+
+func base62Decode(s string) ([]byte, error) {
+	if len(s) != keyLength {
+		return nil, ErrDecode
+	}
+
+	for _, c := range s {
+		if !unicode.IsLetter(c) && !unicode.IsDigit(c) {
+			return nil, ErrDecode
+		}
+	}
+
+	bi, ok := new(big.Int).SetString(s, 62)
+	if !ok {
+		return nil, ErrDecode
+	}
+
+	b := bi.Bytes()
+	if len(b) > decodedLength {
+		return nil, ErrDecode
+	}
+
+	// Restore the leading zero bytes that big.Int dropped.
+	padded := make([]byte, decodedLength)
+	copy(padded[decodedLength-len(b):], b)
+
+	return padded, nil
+}

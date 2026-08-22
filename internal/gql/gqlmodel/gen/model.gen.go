@@ -16,6 +16,23 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol"
 )
 
+type AuthObjectAction struct {
+	Namespace string `json:"namespace"`
+	Object    string `json:"object"`
+	Action    string `json:"action"`
+}
+
+type AuthObjectActionInput struct {
+	Namespace string `json:"namespace"`
+	Object    string `json:"object"`
+	Action    string `json:"action"`
+}
+
+type AuthSubject struct {
+	Type AuthSubjectType `json:"type"`
+	Name string          `json:"name"`
+}
+
 type ContentTypeAgg struct {
 	Value      *model.ContentType `json:"value,omitempty"`
 	Label      string             `json:"label"`
@@ -26,6 +43,19 @@ type ContentTypeAgg struct {
 type ContentTypeFacetInput struct {
 	Aggregate graphql.Omittable[*bool]                `json:"aggregate,omitempty"`
 	Filter    graphql.Omittable[[]*model.ContentType] `json:"filter,omitempty"`
+}
+
+type CreateAPIKeyInput struct {
+	Name        string                            `json:"name"`
+	Permissions []AuthObjectActionInput           `json:"permissions"`
+	Expiry      graphql.Omittable[*time.Duration] `json:"expiry,omitempty"`
+}
+
+type CreateAPIKeyResult struct {
+	ID        int        `json:"id"`
+	APIKey    string     `json:"apiKey"`
+	Name      string     `json:"name"`
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 }
 
 type GenreAgg struct {
@@ -53,6 +83,12 @@ type HealthQuery struct {
 	Checks []HealthCheck `json:"checks"`
 }
 
+type InviteInput struct {
+	Email  graphql.Omittable[*string]        `json:"email,omitempty"`
+	Role   graphql.Omittable[*string]        `json:"role,omitempty"`
+	Expiry graphql.Omittable[*time.Duration] `json:"expiry,omitempty"`
+}
+
 type LanguageAgg struct {
 	Value      model.Language `json:"value"`
 	Label      string         `json:"label"`
@@ -65,7 +101,50 @@ type LanguageFacetInput struct {
 	Filter    graphql.Omittable[[]model.Language] `json:"filter,omitempty"`
 }
 
+type ListInvitationsInput struct {
+	Pagination graphql.Omittable[*PaginationInput] `json:"pagination,omitempty"`
+}
+
+type ListInvitationsResult struct {
+	Invitations []model.Invitation `json:"invitations"`
+	TotalCount  int                `json:"totalCount"`
+}
+
+type ListUsersInput struct {
+	Pagination   graphql.Omittable[*PaginationInput] `json:"pagination,omitempty"`
+	UsernameLike graphql.Omittable[*string]          `json:"usernameLike,omitempty"`
+}
+
+type ListUsersResult struct {
+	Users      []model.User `json:"users"`
+	TotalCount int          `json:"totalCount"`
+}
+
+type LoginResult struct {
+	Token       string       `json:"token"`
+	User        model.User   `json:"user"`
+	Permissions []Permission `json:"permissions"`
+}
+
 type Mutation struct {
+}
+
+type PaginationInput struct {
+	Limit  graphql.Omittable[*int] `json:"limit,omitempty"`
+	Page   graphql.Omittable[*int] `json:"page,omitempty"`
+	Offset graphql.Omittable[*int] `json:"offset,omitempty"`
+}
+
+type PasswordEntropyResult struct {
+	Entropy    float64 `json:"entropy"`
+	MinEntropy float64 `json:"minEntropy"`
+	Valid      bool    `json:"valid"`
+}
+
+type Permission struct {
+	Subject      AuthSubject      `json:"subject"`
+	ObjectAction AuthObjectAction `json:"objectAction"`
+	Core         bool             `json:"core"`
 }
 
 type Query struct {
@@ -120,6 +199,17 @@ type QueueMetricsQueryResult struct {
 	Buckets []queuemetrics.Bucket `json:"buckets"`
 }
 
+type RegisterInput struct {
+	InvitationCode graphql.Omittable[*string] `json:"invitationCode,omitempty"`
+	Username       string                     `json:"username"`
+	Password       string                     `json:"password"`
+	Email          graphql.Omittable[*string] `json:"email,omitempty"`
+}
+
+type RegisterResult struct {
+	User model.User `json:"user"`
+}
+
 type ReleaseYearAgg struct {
 	Value      *model.Year `json:"value,omitempty"`
 	Label      string      `json:"label"`
@@ -130,6 +220,12 @@ type ReleaseYearAgg struct {
 type ReleaseYearFacetInput struct {
 	Aggregate graphql.Omittable[*bool]         `json:"aggregate,omitempty"`
 	Filter    graphql.Omittable[[]*model.Year] `json:"filter,omitempty"`
+}
+
+type Self struct {
+	User        *model.User        `json:"user,omitempty"`
+	APIKey      *model.APIKey      `json:"apiKey,omitempty"`
+	Permissions []AuthObjectAction `json:"permissions"`
 }
 
 type SuggestTagsQueryInput struct {
@@ -268,6 +364,59 @@ type WorkersListAllQueryResult struct {
 
 type WorkersQuery struct {
 	ListAll WorkersListAllQueryResult `json:"listAll"`
+}
+
+type AuthSubjectType string
+
+const (
+	AuthSubjectTypeRole AuthSubjectType = "role"
+)
+
+var AllAuthSubjectType = []AuthSubjectType{
+	AuthSubjectTypeRole,
+}
+
+func (e AuthSubjectType) IsValid() bool {
+	switch e {
+	case AuthSubjectTypeRole:
+		return true
+	}
+	return false
+}
+
+func (e AuthSubjectType) String() string {
+	return string(e)
+}
+
+func (e *AuthSubjectType) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = AuthSubjectType(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid AuthSubjectType", str)
+	}
+	return nil
+}
+
+func (e AuthSubjectType) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *AuthSubjectType) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e AuthSubjectType) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
 }
 
 type HealthStatus string

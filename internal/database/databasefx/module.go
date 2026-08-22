@@ -22,6 +22,7 @@ func New() fx.Option {
 			cache.NewPlugin,
 			dao.New,
 			database.New,
+			database.NewDaoTransactionProvider,
 			healthcheck.New,
 			migrations.New,
 			postgres.New,

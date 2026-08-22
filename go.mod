@@ -13,12 +13,14 @@ require (
 	github.com/anacrolix/missinggo/v2 v2.11.0
 	github.com/anacrolix/torrent v1.61.0
 	github.com/bits-and-blooms/bloom/v3 v3.7.1
+	github.com/casbin/casbin/v2 v2.121.0
 	github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb
 	github.com/frankban/quicktest v1.14.6
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-playground/validator/v10 v10.30.3
 	github.com/go-resty/resty/v2 v2.17.2
 	github.com/go-viper/mapstructure/v2 v2.5.0
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/grafana/pyroscope-go/godeltaprof v0.1.12
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/hedhyw/rex v1.1.0
@@ -39,6 +41,7 @@ require (
 	github.com/urfave/cli/v2 v2.27.7
 	github.com/vektah/gqlparser/v2 v2.5.36
 	github.com/vektra/mockery/v2 v2.53.6
+	github.com/wagslane/go-password-validator v0.3.0
 	github.com/xeipuuv/gojsonschema v1.2.0
 	go.uber.org/fx v1.24.0
 	go.uber.org/zap v1.28.0
@@ -56,7 +59,9 @@ require (
 )
 
 require (
+	github.com/bmatcuk/doublestar/v4 v4.6.1 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
+	github.com/casbin/govaluate v1.3.0 // indirect
 	github.com/coder/websocket v1.8.15 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
@@ -170,7 +175,7 @@ require (
 	go.uber.org/dig v1.19.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/arch v0.22.0 // indirect
-	golang.org/x/crypto v0.54.0 // indirect
+	golang.org/x/crypto v0.54.0
 	golang.org/x/exp v0.0.0-20260718201538-764159d718ef // indirect
 	golang.org/x/mod v0.38.0 // indirect
 	golang.org/x/net v0.57.0 // indirect

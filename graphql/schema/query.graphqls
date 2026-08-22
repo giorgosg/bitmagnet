@@ -1,10 +1,13 @@
 type Query {
-  version: String!
-  workers: WorkersQuery!
-  health: HealthQuery!
-  queue: QueueQuery!
-  torrent: TorrentQuery!
+  version: String! @auth(object: "version", action: "query")
+  self: SelfQuery! @auth(object: "self", action: "query")
+  auth: AuthQuery! @auth(object: "auth", action: "query")
+  workers: WorkersQuery! @auth(object: "workers", action: "query")
+  health: HealthQuery! @auth(object: "health", action: "query")
+  queue: QueueQuery! @auth(object: "queue", action: "query")
+  torrent: TorrentQuery! @auth(object: "torrent", action: "query")
   torrentContent: TorrentContentQuery!
+    @auth(object: "torrentContent", action: "query")
 }
 
 type TorrentQuery {
