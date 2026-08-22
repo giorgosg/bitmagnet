@@ -24,6 +24,17 @@ These are _working notes_. The user documentation lives in `bitmagnet.io/` and a
 | [integration-status.md](integration-status.md) | Checking whether a candidate is already merged, queued, or rejected                   |
 | [auth.md](auth.md)                             | Configuring or deploying authentication, or running behind a reverse proxy            |
 | [agents/](agents/issue-tracker.md)             | Filing an issue, applying a triage label, or looking for domain docs                  |
+| [adr/](adr/)                                   | A decision constrains future changes and the reason will not be obvious from the code |
+| `issues/`                                      | Review findings: what is confirmed, fixed, or rejected, and why — **local only**      |
+| `ideas/`                                       | Weighing what to work on next rather than how to do it — **local only**               |
+
+## Keeping these pages true
+
+These pages are part of the change that affects them, not follow-up work. AGENTS.md
+carries the rule and the table of which page a given change writes back to; the short
+version is that a merged PR adds its row to [integration-status.md](integration-status.md),
+and anything that moves a default, a boundary, or a decision updates the page that
+describes it in the same PR.
 
 ## Snapshots expire
 
