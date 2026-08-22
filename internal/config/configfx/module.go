@@ -11,10 +11,12 @@ import (
 	"go.uber.org/fx"
 )
 
+// resolverGroup is the fx group every config resolver is provided into.
+const resolverGroup = "config_resolvers"
+
 func New() fx.Option {
 	osEnv := ReadOsEnv()
 
-	//nolint:prealloc
 	var options []fx.Option
 
 	var extraConfigFiles []string
@@ -26,7 +28,7 @@ func New() fx.Option {
 		options = append(options,
 			fx.Provide(
 				fx.Annotated{
-					Group: "config_resolvers",
+					Group: resolverGroup,
 					Target: func(val *validator.Validate) (configresolver.Resolver, error) {
 						return configresolver.NewFromYamlFile(
 							file,
@@ -42,7 +44,7 @@ func New() fx.Option {
 	options = append(options,
 		fx.Provide(config.New),
 		fx.Provide(fx.Annotated{
-			Group: "config_resolvers",
+			Group: resolverGroup,
 			Target: func() (configresolver.Resolver, error) {
 				return configresolver.NewEnv(
 					osEnv,
@@ -52,7 +54,7 @@ func New() fx.Option {
 		}),
 		fx.Provide(
 			fx.Annotated{
-				Group: "config_resolvers",
+				Group: resolverGroup,
 				Target: func(val *validator.Validate) (configresolver.Resolver, error) {
 					return configresolver.NewFromYamlFile(
 						"./config.yml",
@@ -68,7 +70,7 @@ func New() fx.Option {
 		options = append(options,
 			fx.Provide(
 				fx.Annotated{
-					Group: "config_resolvers",
+					Group: resolverGroup,
 					Target: func(val *validator.Validate) (configresolver.Resolver, error) {
 						return configresolver.NewFromYamlFile(
 							configFilePath,

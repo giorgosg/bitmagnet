@@ -169,6 +169,7 @@ func CustomRecoveryWithZap(logger ZapLogger, stack bool, recovery gin.RecoveryFu
 				recovery(c, err)
 			}
 		}()
+
 		c.Next()
 	}
 }

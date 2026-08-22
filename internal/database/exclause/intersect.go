@@ -12,7 +12,7 @@ type Intersect struct {
 
 // Name intersect clause name
 func (Intersect) Name() string {
-	return "INTERSECT"
+	return ClauseIntersect
 }
 
 // Build build intersect clause

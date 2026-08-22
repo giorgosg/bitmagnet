@@ -163,6 +163,7 @@ const gcBatchPredicate = "queue_jobs.id IN (" +
 func (s *server) runGarbageCollection(ctx context.Context) {
 	for {
 		s.runGCBatch(ctx)
+
 		select {
 		case <-ctx.Done():
 			return
@@ -233,6 +234,7 @@ func (h *serverHandler) start(ctx context.Context) {
 
 			go func() {
 				defer h.sem.Release(1)
+
 				_, _, _ = h.handleJob(ctx, h.query.QueueJob.ID.Eq(notification.Payload))
 			}()
 		case <-checkTicker.C:
@@ -244,6 +246,7 @@ func (h *serverHandler) start(ctx context.Context) {
 
 			go func() {
 				defer h.sem.Release(1)
+
 				jobID, _, err := h.handleJob(ctx)
 				// if a job was found, we should check straight away for another job,
 				// otherwise we wait for the check interval

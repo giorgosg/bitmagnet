@@ -60,7 +60,7 @@ func TestTorznabRejectsBrowserBearerTokenWithoutAPIKey(t *testing.T) {
 	engine.Use(http_auth.NewMiddleware(authenticator).AttachAuth())
 	require.NoError(t, httpserver.New(lazyClient, testCfg, authenticator).Apply(engine))
 
-	req := httptest.NewRequest(http.MethodGet, "/torznab/?t=caps", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/torznab/?t=caps", nil)
 	req.Header.Set(http_auth.AuthorizationHeader, http_auth.BearerPrefix+browserJWT)
 
 	response := httptest.NewRecorder()

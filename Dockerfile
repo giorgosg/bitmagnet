@@ -1,4 +1,4 @@
-FROM golang:1.24.13-alpine3.22 AS build
+FROM golang:1.26.7-alpine3.23 AS build
 
 RUN apk --update add \
     gcc \
@@ -15,7 +15,10 @@ RUN go mod download
 
 COPY . /build
 
-RUN go build -ldflags "-s -w -X github.com/bitmagnet-io/bitmagnet/internal/version.GitTag=$(git describe --tags --always --dirty)"
+# CGO_ENABLED=0 matches .goreleaser.yml, so the image ships the same statically
+# linked binary as every other release artifact and the build stage's Alpine
+# version does not have to track the runtime stage's.
+RUN CGO_ENABLED=0 go build -ldflags "-s -w -X github.com/bitmagnet-io/bitmagnet/internal/version.GitTag=$(git describe --tags --always --dirty)"
 
 FROM alpine:3.20
 

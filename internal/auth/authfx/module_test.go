@@ -31,14 +31,16 @@ func (stubDaoProvider) DaoTransaction(func(tx *dao.Query) error) error { return 
 // testApp supplies the pieces the auth module expects from the wider graph:
 // a database provider and an already-resolved config node.
 func testApp(cfg authconfig.Config, invokes ...any) fx.Option {
-	opts := []fx.Option{
+	opts := make([]fx.Option, 0, 4+len(invokes))
+	opts = append(opts,
 		authfx.New(),
 		fx.Provide(func() database.DaoTransactionProvider { return stubDaoProvider{} }),
 		fx.Supply(config.ResolvedConfig{
 			NodeMap: map[string]config.ResolvedNode{"auth": {Value: cfg}},
 		}),
 		fx.NopLogger,
-	}
+	)
+
 	for _, i := range invokes {
 		opts = append(opts, fx.Invoke(i))
 	}

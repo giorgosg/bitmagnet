@@ -75,7 +75,7 @@ func TestMiddlewareRecoveryRedactsCredentials(t *testing.T) {
 				panic(tt.panicValue)
 			})
 
-			req := httptest.NewRequest(
+			req := httptest.NewRequestWithContext(t.Context(),
 				http.MethodGet,
 				"/torznab/?t=caps&apikey="+queryKey,
 				nil,

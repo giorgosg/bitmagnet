@@ -23,7 +23,7 @@ func clientIPFor(t *testing.T, cfg httpserver.Config, peer, forwardedFor string)
 
 	engine.GET("/", func(c *gin.Context) { got = c.ClientIP() })
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	req.RemoteAddr = peer + ":44321"
 	req.Header.Set("X-Forwarded-For", forwardedFor)
 

@@ -30,6 +30,7 @@ func (c *crawler) runGetPeers(ctx context.Context) {
 		c.kTable.BatchCommand(
 			ktable.PutHash{ID: req.infoHash, Peers: hashPeers},
 		)
+
 		select {
 		case <-ctx.Done():
 			return

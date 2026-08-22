@@ -9,6 +9,13 @@ made `crypto/rand.Read` incapable of returning an error — it terminates the pr
 the system entropy source fails — which is the correct outcome for a credential. The
 module, the `Dockerfile` and the CI pins therefore move to 1.24 together.
 
+**Updated 2026-08-22:** trunk has since gone past this floor. Closing four called
+vulnerabilities required `x/text`, `x/net` and `pgx`, every fixed version of which
+declares `go 1.25.0`, so the module now targets 1.25 and the images build on 1.26. That
+supersedes the number in this record without disturbing the decision — 1.25 is above
+1.24, so the `crypto/rand` guarantee still holds. The floor must never drop back below
+1.24.
+
 ## Consequences
 
 The error is still checked at the call site rather than left implied by the `go`

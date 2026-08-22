@@ -30,6 +30,7 @@ func TestOptionalUnwrapsOmittable(t *testing.T) {
 	assert.Empty(t, got)
 
 	var omitted graphql.Omittable[*string]
+
 	got, ok = optional(omitted)
 	assert.False(t, ok, "an omitted field must not be treated as a value")
 	assert.Empty(t, got)

@@ -38,22 +38,26 @@ func (c compilerContext) compileAction(ctx compilerContext) (action, error) {
 	var actions []action
 
 	var errs []error
+
 outer:
 	for i, rawAction := range rawActions {
 		actionCtx := ctx
 		if isArray {
 			actionCtx = ctx.child(numericPathPart(i), rawAction)
 		}
+
 		for _, def := range c.actions {
 			a, err := def.compileAction(actionCtx.child(def.name(), rawAction))
 			if err == nil {
 				actions = append(actions, a)
 				continue outer
 			}
+
 			if asFatalCompilerError(err) != nil {
 				return action{}, err
 			}
 		}
+
 		errs = append(errs, fmt.Errorf("no action matched: %v", ctx.source))
 	}
 
@@ -67,8 +71,10 @@ outer:
 			if err != nil {
 				return classification.Result{}, err
 			}
+
 			ctx = ctx.withResult(result)
 		}
+
 		return ctx.result, nil
 	}}, errors.Join(errs...)
 }

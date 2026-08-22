@@ -24,6 +24,7 @@ func NewCheck(
 			if err != nil {
 				return err
 			}
+
 			return c.ValidateAPIKey(ctx)
 		},
 	}

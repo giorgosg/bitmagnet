@@ -16,6 +16,7 @@ func New() fx.Option {
 				if v == "" {
 					v = "unknown"
 				}
+
 				return v
 			},
 		}),

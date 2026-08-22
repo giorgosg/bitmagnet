@@ -27,6 +27,7 @@ func (p bootstrapBarrierProvider) Dao() (*dao.Query, error) { return p.query, ni
 func (p bootstrapBarrierProvider) DaoTransaction(fn func(tx *dao.Query) error) error {
 	return p.query.Transaction(func(tx *dao.Query) error {
 		p.ready <- struct{}{}
+
 		<-p.release
 
 		return fn(tx)
@@ -84,10 +85,12 @@ func TestConcurrentBootstrapCreatesOneInitialInvitation(t *testing.T) {
 
 		go func() {
 			defer wg.Done()
+
 			<-launch
 
 			result, err := service.CreateInitialInvitation(t.Context())
 			results <- result
+
 			errs <- err
 		}()
 	}

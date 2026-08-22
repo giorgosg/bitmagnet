@@ -47,6 +47,7 @@ func (s *server) start() error {
 	go func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		go s.read(ctx)
+
 		<-s.stopped
 		cancel()
 
@@ -203,6 +204,7 @@ func (s *server) Query(
 
 	queryCtx, cancel := context.WithTimeout(ctx, s.queryTimeout)
 	defer cancel()
+
 	select {
 	case <-queryCtx.Done():
 		err = queryCtx.Err()

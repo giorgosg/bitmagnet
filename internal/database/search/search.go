@@ -35,6 +35,7 @@ func New(params Params) Result {
 			if err != nil {
 				return nil, err
 			}
+
 			return &search{
 				q: q,
 			}, nil

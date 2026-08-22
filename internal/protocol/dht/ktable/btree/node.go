@@ -354,9 +354,11 @@ func (n branchNode) furthestXor() (NodeID, bool) {
 }
 
 func (n branchNode) allXors() []NodeID {
-	var xors []NodeID
-	xors = append(xors, n.branches[Bit0].allXors()...)
-	xors = append(xors, n.branches[Bit1].allXors()...)
+	bit0, bit1 := n.branches[Bit0].allXors(), n.branches[Bit1].allXors()
+
+	xors := make([]NodeID, 0, len(bit0)+len(bit1))
+	xors = append(xors, bit0...)
+	xors = append(xors, bit1...)
 
 	return xors
 }

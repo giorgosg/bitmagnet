@@ -43,6 +43,7 @@ var _ interface {
 
 func (ni NodeInfo) MarshalBinary() ([]byte, error) {
 	var w bytes.Buffer
+
 	_, _ = w.Write(ni.ID[:])
 	_, _ = w.Write(ni.Addr.IP)
 
@@ -180,7 +181,7 @@ func makeInto(ptrTo interface{}, from interface{}) {
 	}
 	// Deref the pointer to slice.
 	slicePtrValue := reflect.ValueOf(ptrTo)
-	if slicePtrValue.Kind() != reflect.Ptr {
+	if slicePtrValue.Kind() != reflect.Pointer {
 		panic("destination is not a pointer")
 	}
 

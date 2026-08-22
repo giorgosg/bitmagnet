@@ -24,13 +24,6 @@ jobs:
       - name: Run linters
         run: |
           nix develop --ignore-environment --keep HOME . --command task lint
-      # Pinned separately from the Nix shell: nixpkgs tracks a newer golangci-lint
-      # whose added analyzers report findings this tree has not addressed yet.
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
-        with:
-          version: v2.1.6
-          args: --timeout=10m
 
   test:
     # The Ubuntu image has been downgraded and pinned for the `test` and `generated` jobs as they are broken on 24.04
@@ -66,6 +59,46 @@ jobs:
           nix develop --ignore-environment --keep HOME --keep TEST_POSTGRES_DSN . --command task test
         env:
           TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/postgres
+
+  # Neither Dockerfile is built anywhere else on a pull request: ghcr.yml only
+  # fires on v*.*.* tags, so until this job existed a broken image build stayed
+  # invisible until release day. Nothing is pushed here.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # Dockerfile runs `git describe`, which needs history and tags.
+          fetch-depth: 0
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      # The released image. Both platforms are cheap because the Go build runs on
+      # BUILDPLATFORM and cross-compiles; only the small runner stage is emulated.
+      - name: Build release image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./ci.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+      # Not used by any workflow, but it is the one people build by hand, so it
+      # should not be allowed to rot.
+      - name: Build local image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
 
   # This job runs all code generations and builds the WebUI, to check that everything is correctly committed
   generated:

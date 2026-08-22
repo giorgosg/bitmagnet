@@ -21,6 +21,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// labelEntity is the Prometheus label naming the persisted entity type.
+const labelEntity = "entity"
+
 type Params struct {
 	fx.In
 	Config            Config
@@ -55,7 +58,7 @@ func New(params Params) Result {
 		Subsystem: "dht_crawler",
 		Name:      "persisted_total",
 		Help:      "A counter of persisted database entities.",
-	}, []string{"entity"})
+	}, []string{labelEntity})
 
 	return Result{
 		Worker: worker.NewWorker(
@@ -63,19 +66,24 @@ func New(params Params) Result {
 			fx.Hook{
 				OnStart: func(context.Context) error {
 					active.Set(true)
+
 					scalingFactor := int(params.Config.ScalingFactor)
+
 					cl, err := params.Client.Get()
 					if err != nil {
 						return err
 					}
+
 					query, err := params.Dao.Get()
 					if err != nil {
 						return err
 					}
+
 					blockingManager, err := params.BlockingManager.Get()
 					if err != nil {
 						return err
 					}
+
 					c = crawler{
 						kTable:                       params.KTable,
 						client:                       cl,
@@ -135,13 +143,16 @@ func New(params Params) Result {
 					// todo: Fix!
 					//nolint:contextcheck
 					go c.start()
+
 					return nil
 				},
 				OnStop: func(context.Context) error {
 					active.Set(false)
+
 					if c.stopped != nil {
 						close(c.stopped)
 					}
+
 					return nil
 				},
 			},

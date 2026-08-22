@@ -71,7 +71,7 @@ func New(p Params) Result {
 		Worker: worker.NewWorker(
 			"http_server",
 			fx.Hook{
-				OnStart: func(context.Context) error {
+				OnStart: func(ctx context.Context) error {
 					gin.SetMode(p.Config.GinMode)
 
 					g, engineErr := NewEngine(p.Config)
@@ -80,35 +80,44 @@ func New(p Params) Result {
 					}
 
 					g.Use(Middleware(p.Logger)...)
+
 					options, optionsErr := resolveOptions(p.Config.Options, p.Options)
 					if optionsErr != nil {
 						return optionsErr
 					}
+
 					for _, o := range options {
 						if buildErr := o.Apply(g); buildErr != nil {
 							return buildErr
 						}
 					}
+
 					s = &http.Server{
 						Addr:    p.Config.LocalAddress,
 						Handler: g.Handler(),
 					}
-					ln, listenErr := net.Listen("tcp", s.Addr)
+
+					var lc net.ListenConfig
+
+					ln, listenErr := lc.Listen(ctx, "tcp", s.Addr)
 					if listenErr != nil {
 						return listenErr
 					}
+
 					go (func() {
 						serveErr := s.Serve(ln)
 						if !errors.Is(serveErr, http.ErrServerClosed) {
 							panic(serveErr)
 						}
 					})()
+
 					return nil
 				},
 				OnStop: func(ctx context.Context) error {
 					if s == nil {
 						return nil
 					}
+
 					return s.Shutdown(ctx)
 				},
 			},

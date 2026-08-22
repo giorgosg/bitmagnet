@@ -83,6 +83,7 @@ func TestQueueFetchPlanUsesOrderIndex(t *testing.T) {
 			limit 1
 		`)
 	require.NoError(t, err)
+
 	defer rows.Close()
 
 	var planLines []string

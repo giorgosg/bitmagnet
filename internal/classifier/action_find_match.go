@@ -18,7 +18,7 @@ var findMatchActionPayloadSpec = payloadSingleKeyValue[[]any]{
 	key: findMatchName,
 	valueSpec: payloadMustSucceed[[]any]{payloadList[any]{itemSpec: payloadGeneric[any]{
 		jsonSchema: map[string]any{
-			"$ref": "#/definitions/action_single",
+			schemaKeyRef: schemaRefActionSingle,
 		},
 	}}},
 	description: "Iterate through a series of actions to find the first that does not return an unmatched error",
@@ -51,13 +51,16 @@ func (findMatchAction) compileAction(ctx compilerContext) (action, error) {
 					if errors.Is(err, classification.ErrUnmatched) {
 						continue
 					}
+
 					return classification.Result{}, classification.RuntimeError{
 						Cause: err,
 						Path:  path,
 					}
 				}
+
 				return result, nil
 			}
+
 			return ctx.result, nil
 		},
 	}, nil

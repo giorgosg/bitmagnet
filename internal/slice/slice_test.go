@@ -96,6 +96,7 @@ var _ = Describe("Slice Utils", func() {
 			for chunks := range slice.CollectChunks(slices.Values(input), n) {
 				result = append(result, chunks)
 			}
+
 			Expect(result).To(Equal(expected))
 		},
 		Entry("returns empty slice (nil) for an empty input", []int{}, 1, nil),

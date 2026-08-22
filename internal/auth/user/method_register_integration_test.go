@@ -187,6 +187,7 @@ func TestInvitationIsSingleUseUnderConcurrency(t *testing.T) {
 
 		go func(i int) {
 			defer wg.Done()
+
 			<-start
 
 			if _, err := service.Register(t.Context(), user.RegisterRequest{

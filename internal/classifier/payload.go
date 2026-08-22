@@ -47,12 +47,11 @@ func (s payloadUnion[T]) JSONSchema() JSONSchema {
 	}
 
 	return map[string]any{
-		"oneOf": schemas,
+		schemaKeyOneOf: schemas,
 	}
 }
 
 func (s payloadUnion[T]) Unmarshal(ctx compilerContext) (to T, _ error) {
-	//nolint:prealloc
 	var errs []error
 
 	for _, def := range s.oneOf {
@@ -134,8 +133,8 @@ type payloadList[T any] struct {
 
 func (s payloadList[T]) JSONSchema() JSONSchema {
 	schema := map[string]any{
-		"type":  "array",
-		"items": s.itemSpec.JSONSchema(),
+		schemaKeyType:  schemaTypeArray,
+		schemaKeyItems: s.itemSpec.JSONSchema(),
 	}
 	if s.description != "" {
 		schema["description"] = s.description
@@ -176,12 +175,12 @@ type payloadSingleKeyValue[T any] struct {
 
 func (s payloadSingleKeyValue[T]) JSONSchema() JSONSchema {
 	schema := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
+		schemaKeyType: schemaTypeObject,
+		schemaKeyProperties: map[string]any{
 			s.key: s.valueSpec.JSONSchema(),
 		},
-		"required":             []string{s.key},
-		"additionalProperties": false,
+		"required":                    []string{s.key},
+		schemaKeyAdditionalProperties: false,
 	}
 	if s.description != "" {
 		schema["description"] = s.description
@@ -219,8 +218,8 @@ type payloadEnum[T string] struct {
 
 func (s payloadEnum[T]) JSONSchema() JSONSchema {
 	return map[string]any{
-		"type": "string",
-		"enum": s.values,
+		schemaKeyType: schemaTypeString,
+		"enum":        s.values,
 	}
 }
 
@@ -262,10 +261,12 @@ var contentTypePayloadSpec = payloadTransformer[string, model.NullContentType]{
 		if str == "unknown" {
 			return model.NullContentType{}, nil
 		}
+
 		contentType, err := model.ParseContentType(str)
 		if err != nil {
 			return model.NullContentType{}, err
 		}
+
 		return model.NullContentType{ContentType: contentType, Valid: true}, nil
 	},
 }

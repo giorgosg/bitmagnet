@@ -1,5 +1,5 @@
 # build app
-FROM --platform=$BUILDPLATFORM golang:1.23.6-alpine3.20 AS app-builder
+FROM --platform=$BUILDPLATFORM golang:1.26.7-alpine3.23 AS app-builder
 RUN apk add --no-cache git tzdata
 
 ENV SERVICE=bitmagnet

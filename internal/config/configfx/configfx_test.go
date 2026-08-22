@@ -97,6 +97,7 @@ func TestConfig(t *testing.T) {
 					},
 				},
 			}, cfg)
+
 			shutdownErr := shutdowner.Shutdown()
 			assert.NoError(t, shutdownErr)
 		}),

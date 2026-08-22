@@ -32,9 +32,11 @@ func New(p Params) Result {
 			if err != nil {
 				return nil, err
 			}
+
 			dialector := postgres.New(postgres.Config{
 				Conn: sqlDB,
 			})
+
 			gDB, dbErr := gorm.Open(dialector, &gorm.Config{
 				Logger: logger.New(logger.Params{
 					ZapLogger: p.Logger,
@@ -48,9 +50,11 @@ func New(p Params) Result {
 			if dbErr != nil {
 				return nil, dbErr
 			}
+
 			if pluginErr := gDB.Use(exclause.New()); pluginErr != nil {
 				return nil, pluginErr
 			}
+
 			return gDB, nil
 		}),
 	}

@@ -16,13 +16,14 @@ func (addTagAction) name() string {
 var tagPayloadSpec = payloadTransformer[string, string]{
 	spec: payloadGeneric[string]{
 		jsonSchema: JSONSchema{
-			"type": "string",
+			schemaKeyType: "string",
 		},
 	},
 	transform: func(str string, _ compilerContext) (string, error) {
 		if err := model.ValidateTagName(str); err != nil {
 			return "", err
 		}
+
 		return str, nil
 	},
 }
@@ -49,9 +50,11 @@ func (addTagAction) compileAction(ctx compilerContext) (action, error) {
 			if cl.Tags == nil {
 				cl.Tags = make(map[string]struct{})
 			}
+
 			for _, tag := range tags {
 				cl.Tags[tag] = struct{}{}
 			}
+
 			return cl, nil
 		},
 	}, nil

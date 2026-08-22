@@ -26,6 +26,7 @@ func (c *crawler) reseedBootstrapNodes(ctx context.Context) {
 				c.logger.Warnf("failed to resolve bootstrap node address: %s", err)
 				continue
 			}
+
 			select {
 			case <-ctx.Done():
 				return

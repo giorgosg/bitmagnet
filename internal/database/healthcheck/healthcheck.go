@@ -34,10 +34,12 @@ func New(p Params) Result {
 					if dbErr != nil {
 						return fmt.Errorf("failed to get database connection: %w", dbErr)
 					}
+
 					pingErr := db.PingContext(ctx)
 					if pingErr != nil {
 						return fmt.Errorf("failed to ping database: %w", pingErr)
 					}
+
 					return nil
 				},
 			}),

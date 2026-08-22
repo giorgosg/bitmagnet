@@ -11,7 +11,7 @@ type Reflected struct {
 }
 
 func ReflectType(tp reflect.Type) (Reflected, bool) {
-	if tp.Kind() != reflect.Ptr {
+	if tp.Kind() != reflect.Pointer {
 		return Reflected{}, false
 	}
 
@@ -25,7 +25,7 @@ func ReflectValue(reflectValue reflect.Value) (Reflected, bool) {
 
 	tp := reflectValue.Type()
 
-	if tp.Kind() != reflect.Ptr {
+	if tp.Kind() != reflect.Pointer {
 		return Reflected{}, false
 	}
 

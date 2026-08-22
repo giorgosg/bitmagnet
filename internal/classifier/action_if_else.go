@@ -20,20 +20,20 @@ var ifElsePayloadSpec = payloadSingleKeyValue[ifElsePayload]{
 	key: ifElseName,
 	valueSpec: payloadMustSucceed[ifElsePayload]{payloadStruct[ifElsePayload]{
 		jsonSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"condition": map[string]any{
-					"$ref": "#/definitions/condition",
+			schemaKeyType: schemaTypeObject,
+			schemaKeyProperties: map[string]any{
+				schemaKeyCondition: map[string]any{
+					schemaKeyRef: schemaRefCondition,
 				},
 				"if_action": map[string]any{
-					"$ref": "#/definitions/action",
+					schemaKeyRef: schemaRefAction,
 				},
 				"else_action": map[string]any{
-					"$ref": "#/definitions/action",
+					schemaKeyRef: schemaRefAction,
 				},
 			},
-			"required":             []string{"condition"},
-			"additionalProperties": false,
+			"required":                    []string{schemaKeyCondition},
+			schemaKeyAdditionalProperties: false,
 		},
 	}},
 	description: "Execute an action based on a condition",
@@ -45,7 +45,7 @@ func (ifElseAction) compileAction(ctx compilerContext) (action, error) {
 		return action{}, ctx.error(decodeErr)
 	}
 
-	cond, cErr := ctx.compileCondition(ctx.child("condition", p.Condition))
+	cond, cErr := ctx.compileCondition(ctx.child(schemaKeyCondition, p.Condition))
 	if cErr != nil {
 		return action{}, ctx.error(cErr)
 	}
@@ -83,6 +83,7 @@ func (ifElseAction) compileAction(ctx compilerContext) (action, error) {
 					return elseAction.run(ctx)
 				}
 			}
+
 			return ctx.result, nil
 		},
 	}, nil

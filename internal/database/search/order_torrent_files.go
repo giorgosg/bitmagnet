@@ -50,7 +50,7 @@ func (ob TorrentFilesOrderBy) Clauses(direction OrderDirection) []query.OrderByC
 			OrderByColumn: clause.OrderByColumn{
 				Column: clause.Column{
 					Table: model.TableNameTorrentFile,
-					Name:  "size",
+					Name:  colSize,
 				},
 				Desc: desc,
 			},

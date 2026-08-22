@@ -60,6 +60,7 @@ func (s search) TorrentsWithMissingInfoHashes(
 	torrents := make([]model.Torrent, 0, len(searchResult.Items))
 	missingInfoHashes := make([]protocol.ID, 0, len(infoHashes)-len(searchResult.Items))
 	foundInfoHashes := make(map[protocol.ID]struct{}, len(searchResult.Items))
+
 nextInfoHash:
 	for _, h := range infoHashes {
 		for _, t := range searchResult.Items {
@@ -67,11 +68,15 @@ nextInfoHash:
 				if _, ok := foundInfoHashes[h]; ok {
 					continue nextInfoHash
 				}
+
 				foundInfoHashes[h] = struct{}{}
+
 				torrents = append(torrents, t)
+
 				continue nextInfoHash
 			}
 		}
+
 		missingInfoHashes = append(missingInfoHashes, h)
 	}
 
@@ -150,7 +155,7 @@ func (s search) TorrentSuggestTags(
 				query.OrderByColumn{
 					OrderByColumn: clause.OrderByColumn{
 						Column: clause.Column{
-							Alias: "name",
+							Alias: colName,
 						},
 					},
 				},

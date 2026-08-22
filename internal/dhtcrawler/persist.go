@@ -73,7 +73,12 @@ func (c *crawler) persistTorrentBatch(ctx context.Context, is []infoHashWithMeta
 
 		hashMap[i.infoHash] = i
 
-		if t, err := createTorrentModel(i.infoHash, i.metaInfo, c.savePieces, c.saveFilesThreshold); err != nil {
+		if t, err := createTorrentModel(
+			i.infoHash,
+			i.metaInfo,
+			c.savePieces,
+			c.saveFilesThreshold,
+		); err != nil {
 			c.logger.Errorf("error creating torrent model: %s", err.Error())
 		} else {
 			for _, f := range t.Files {
@@ -121,6 +126,7 @@ func (c *crawler) persistTorrentBatch(ctx context.Context, is []infoHashWithMeta
 		}).CreateInBatches(torrentsToPersist, 100); err != nil {
 			return err
 		}
+
 		if len(torrentFilesToPersist) > 0 {
 			if err := tx.WithContext(ctx).TorrentFile.Clauses(clause.OnConflict{
 				DoNothing: true,
@@ -128,11 +134,13 @@ func (c *crawler) persistTorrentBatch(ctx context.Context, is []infoHashWithMeta
 				return err
 			}
 		}
+
 		if err := tx.WithContext(ctx).TorrentsTorrentSource.Clauses(clause.OnConflict{
 			DoNothing: true,
 		}).CreateInBatches(torrentSourcesToPersist, 100); err != nil {
 			return err
 		}
+
 		if c.savePieces {
 			if err := tx.WithContext(ctx).TorrentPieces.Clauses(clause.OnConflict{
 				DoNothing: true,
@@ -147,7 +155,7 @@ func (c *crawler) persistTorrentBatch(ctx context.Context, is []infoHashWithMeta
 		return
 	}
 
-	c.persistedTotal.With(prometheus.Labels{"entity": "Torrent"}).Add(float64(len(torrentsToPersist)))
+	c.persistedTotal.With(prometheus.Labels{labelEntity: "Torrent"}).Add(float64(len(torrentsToPersist)))
 	c.logger.Debugw("persisted torrents", "count", len(torrentsToPersist))
 
 	for _, i := range hashMap {
@@ -329,7 +337,8 @@ func (c *crawler) runPersistSources(ctx context.Context) {
 			).CreateInBatches(srcs, 100); persistErr != nil {
 				c.logger.Errorf("error persisting torrent sources: %s", persistErr.Error())
 			} else {
-				c.persistedTotal.With(prometheus.Labels{"entity": "TorrentsTorrentSource"}).Add(float64(len(srcs)))
+				c.persistedTotal.With(prometheus.Labels{labelEntity: "TorrentsTorrentSource"}).
+					Add(float64(len(srcs)))
 				c.logger.Debugw("persisted torrent sources", "count", len(srcs))
 			}
 		}

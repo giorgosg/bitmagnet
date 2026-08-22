@@ -49,7 +49,7 @@ func loginThroughMiddleware(
 		_, loginErr = service.Login(c.Request.Context(), username, password)
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/login", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/login", nil)
 	// A fixed peer address: the socket the packets actually arrive on never
 	// changes in these tests, only the header does.
 	req.RemoteAddr = "203.0.113.9:44321"
