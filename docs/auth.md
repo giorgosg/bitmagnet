@@ -109,6 +109,16 @@ baseline: orchestrators poll it, and it reports liveness only.
   defaults to on while doing nothing tells an operator their addresses are verified when
   they are not. The default follows the behaviour, and flips back when the behaviour
   arrives.
-- **CORS still defaults to `*`.** Carried over from before this lineage had authentication.
-  While anonymous access is on, any web page can query a reachable instance as the
-  anonymous identity.
+- **CORS origins still default to `*`.** Carried over from before this lineage had
+  authentication. While anonymous access is on, any web page can query a reachable
+  instance as the anonymous identity — including an instance bound to a LAN address that
+  the page could not otherwise reach. Narrowing it is safe only if you know where your web
+  UI is served from: the bundled UI shares the API's origin and needs no CORS at all, but
+  serving it separately is supported, and an empty origin list breaks that deployment.
+  Set `http_server.cors.allowed_origins` explicitly if you serve the UI from another
+  origin.
+
+  The allowed _headers_ are no longer `*`; they are the four the server actually reads
+  (`Content-Type`, `Authorization`, `X-Api-Key`, `X-Import-Id`). A client sending anything
+  else cross-origin now fails its preflight, and needs the header added to
+  `http_server.cors.allowed_headers`.
