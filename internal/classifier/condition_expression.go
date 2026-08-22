@@ -15,7 +15,7 @@ type expressionCondition struct{}
 var celProgramPayload = payloadTransformer[string, cel.Program]{
 	spec: payloadGeneric[string]{
 		jsonSchema: JSONSchema{
-			"type":        "string",
+			schemaKeyType: schemaTypeString,
 			"minLength":   1,
 			"description": "A CEL expression describing a condition",
 		},

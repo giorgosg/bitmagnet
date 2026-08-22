@@ -10,14 +10,34 @@ func (*ExtraClausePlugin) Name() string {
 	return "ExtraClausePlugin"
 }
 
+// Clause names GORM builds in order. Named because each is also returned by the
+// corresponding clause type's Name method.
+const (
+	ClauseWith      = "WITH"
+	ClauseUnion     = "UNION"
+	ClauseIntersect = "INTERSECT"
+	ClauseExcept    = "EXCEPT"
+)
+
+// buildClauses is the clause order GORM applies to both Query and Row callbacks.
+var buildClauses = []string{
+	ClauseWith,
+	"SELECT",
+	"FROM",
+	"WHERE",
+	"GROUP BY",
+	ClauseUnion,
+	ClauseIntersect,
+	ClauseExcept,
+	"ORDER BY",
+	"LIMIT",
+	"FOR",
+}
+
 // Initialize register BuildClauses
 func (*ExtraClausePlugin) Initialize(db *gorm.DB) error {
-	db.Callback().Query().Clauses = []string{
-		"WITH", "SELECT", "FROM", "WHERE", "GROUP BY", "UNION", "INTERSECT", "EXCEPT", "ORDER BY", "LIMIT", "FOR",
-	}
-	db.Callback().Row().Clauses = []string{
-		"WITH", "SELECT", "FROM", "WHERE", "GROUP BY", "UNION", "INTERSECT", "EXCEPT", "ORDER BY", "LIMIT", "FOR",
-	}
+	db.Callback().Query().Clauses = buildClauses
+	db.Callback().Row().Clauses = buildClauses
 
 	return nil
 }

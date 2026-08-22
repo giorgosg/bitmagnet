@@ -244,9 +244,11 @@ func (i *activeImport) persistItems(items ...Item) error {
 			}
 		}
 
-		if createTorrentsTorrentSourcesErr := tx.TorrentsTorrentSource.WithContext(i.ctx).Clauses(clause.OnConflict{
-			UpdateAll: true,
-		}).CreateInBatches(torrentsTorrentSources, 100); createTorrentsTorrentSourcesErr != nil {
+		if createTorrentsTorrentSourcesErr := tx.TorrentsTorrentSource.WithContext(i.ctx).
+			Clauses(clause.OnConflict{
+				UpdateAll: true,
+			}).
+			CreateInBatches(torrentsTorrentSources, 100); createTorrentsTorrentSourcesErr != nil {
 			return createTorrentsTorrentSourcesErr
 		}
 

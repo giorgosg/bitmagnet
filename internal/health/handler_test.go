@@ -59,7 +59,7 @@ func doTestHandler(t *testing.T,
 
 	// Arrange
 	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "https://localhost/foo", nil)
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "https://localhost/foo", nil)
 
 	ckr := checkerMock{}
 	ckr.On("IsStarted").Return(false)
@@ -125,7 +125,7 @@ func TestWhenChecksEmptyThenHandlerResultContainNoChecksMap(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
-	r := httptest.NewRequest(http.MethodGet, "/health", nil)
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
 
 	// Act

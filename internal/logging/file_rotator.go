@@ -152,7 +152,6 @@ func (r *fileRotator) pruneBackups(now time.Time) error {
 		return err
 	}
 
-	//nolint:prealloc
 	var backupFiles []string
 
 	strNow := now.Format(timeFormat)

@@ -45,7 +45,7 @@ func TorrentContentDefaultOption() query.Option {
 				OrderByColumn: clause.OrderByColumn{
 					Column: clause.Column{
 						Table: clause.CurrentTable,
-						Name:  "published_at",
+						Name:  colPublishedAt,
 					},
 					Desc: true,
 				},

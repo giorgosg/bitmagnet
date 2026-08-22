@@ -26,6 +26,16 @@ import (
 	"github.com/google/cel-go/interpreter/functions"
 )
 
+// CEL type names, repeated across the list-library declarations and the
+// zero-value table below.
+const (
+	celTypeInt      = "int"
+	celTypeUint     = "uint"
+	celTypeDouble   = "double"
+	celTypeDuration = "duration"
+	celTypeString   = "string"
+)
+
 // Lists provides a CEL function library extension of list utility functions.
 //
 // isSorted
@@ -111,27 +121,27 @@ type namedCELType struct {
 }
 
 var summableTypes = []namedCELType{
-	{typeName: "int", celType: cel.IntType},
-	{typeName: "uint", celType: cel.UintType},
-	{typeName: "double", celType: cel.DoubleType},
-	{typeName: "duration", celType: cel.DurationType},
+	{typeName: celTypeInt, celType: cel.IntType},
+	{typeName: celTypeUint, celType: cel.UintType},
+	{typeName: celTypeDouble, celType: cel.DoubleType},
+	{typeName: celTypeDuration, celType: cel.DurationType},
 }
 
 var zeroValuesOfSummableTypes = map[string]ref.Val{
-	"int":      types.Int(0),
-	"uint":     types.Uint(0),
-	"double":   types.Double(0.0),
-	"duration": types.Duration{Duration: 0},
+	celTypeInt:      types.Int(0),
+	celTypeUint:     types.Uint(0),
+	celTypeDouble:   types.Double(0.0),
+	celTypeDuration: types.Duration{Duration: 0},
 }
 
 var comparableTypes = []namedCELType{
-	{typeName: "int", celType: cel.IntType},
-	{typeName: "uint", celType: cel.UintType},
-	{typeName: "double", celType: cel.DoubleType},
+	{typeName: celTypeInt, celType: cel.IntType},
+	{typeName: celTypeUint, celType: cel.UintType},
+	{typeName: celTypeDouble, celType: cel.DoubleType},
 	{typeName: "bool", celType: cel.BoolType},
-	{typeName: "duration", celType: cel.DurationType},
+	{typeName: celTypeDuration, celType: cel.DurationType},
 	{typeName: "timestamp", celType: cel.TimestampType},
-	{typeName: "string", celType: cel.StringType},
+	{typeName: celTypeString, celType: cel.StringType},
 	{typeName: "bytes", celType: cel.BytesType},
 }
 
@@ -168,7 +178,7 @@ var listsLibraryDecls = map[string][]cel.FunctionOpt{
 }
 
 func (*lists) CompileOptions() []cel.EnvOption {
-	options := []cel.EnvOption{}
+	options := make([]cel.EnvOption, 0, len(listsLibraryDecls))
 	for name, overloads := range listsLibraryDecls {
 		options = append(options, cel.Function(name, overloads...))
 	}

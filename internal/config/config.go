@@ -163,7 +163,10 @@ func resolveStructNode(
 			var rk string
 
 			for _, resolver := range resolvers {
-				if resolved, ok, err := resolver.Resolve(append(thisPath, fieldKey), field.Type); err != nil {
+				if resolved, ok, err := resolver.Resolve(
+					append(thisPath, fieldKey),
+					field.Type,
+				); err != nil {
 					return ResolvedNode{}, err
 				} else if ok {
 					rv = resolved

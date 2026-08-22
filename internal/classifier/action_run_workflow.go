@@ -20,8 +20,8 @@ var runWorkflowPayloadSpec = payloadSingleKeyValue[[]string]{
 		payloadList[string]{
 			itemSpec: payloadGeneric[string]{
 				jsonSchema: map[string]interface{}{
-					"type":      "string",
-					"minLength": 1,
+					schemaKeyType: schemaTypeString,
+					"minLength":   1,
 				},
 			},
 		},

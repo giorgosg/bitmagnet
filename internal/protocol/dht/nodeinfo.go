@@ -180,7 +180,7 @@ func makeInto(ptrTo interface{}, from interface{}) {
 	}
 	// Deref the pointer to slice.
 	slicePtrValue := reflect.ValueOf(ptrTo)
-	if slicePtrValue.Kind() != reflect.Ptr {
+	if slicePtrValue.Kind() != reflect.Pointer {
 		panic("destination is not a pointer")
 	}
 

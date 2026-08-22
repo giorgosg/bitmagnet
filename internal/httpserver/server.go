@@ -35,7 +35,7 @@ func New(p Params) Result {
 		Worker: worker.NewWorker(
 			"http_server",
 			fx.Hook{
-				OnStart: func(context.Context) error {
+				OnStart: func(ctx context.Context) error {
 					gin.SetMode(p.Config.GinMode)
 					g := gin.New()
 					g.Use(ginzap.Ginzap(p.Logger.Named("gin"), time.RFC3339, true), gin.Recovery())
@@ -52,7 +52,9 @@ func New(p Params) Result {
 						Addr:    p.Config.LocalAddress,
 						Handler: g.Handler(),
 					}
-					ln, listenErr := net.Listen("tcp", s.Addr)
+					var lc net.ListenConfig
+
+					ln, listenErr := lc.Listen(ctx, "tcp", s.Addr)
 					if listenErr != nil {
 						return listenErr
 					}
