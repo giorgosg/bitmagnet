@@ -2,7 +2,8 @@ package responder
 
 import (
 	"context"
-	"crypto/md5"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/hex"
 	"net/netip"
 
@@ -26,6 +27,11 @@ var ErrMissingArguments = dht.Error{
 	Code: dht.ErrorCodeProtocolError,
 	Msg:  "missing arguments",
 }
+
+// tokenLength is how many bytes of the announce token HMAC are kept. Sixteen
+// bytes gives the same 32 hex characters the previous md5-based token produced,
+// so the wire format is unchanged.
+const tokenLength = 16
 
 var ErrInvalidToken = dht.Error{
 	Code: dht.ErrorCodeProtocolError,
@@ -88,7 +94,7 @@ func (r responder) Respond(_ context.Context, msg dht.RecvMsg) (ret dht.Return, 
 			return
 		}
 
-		if args.Token != r.announceToken(args.InfoHash, args.ID, msg.From.Addr()) {
+		if !r.validAnnounceToken(args.Token, args.InfoHash, args.ID, msg.From.Addr()) {
 			err = ErrInvalidToken
 			return
 		}
@@ -125,15 +131,40 @@ func (r responder) Respond(_ context.Context, msg dht.RecvMsg) (ret dht.Return, 
 // Then the queried node should store the IP address of the querying node and the supplied port number
 // under the infohash in its store of peer contact information.
 // https://www.bittorrent.org/beps/bep_0005.html
+//
+// The token is a MAC over the querying node's identity and address, keyed by a
+// per-process secret. It used to be md5(secret || message), which is the textbook
+// length-extension-vulnerable construction: MD5 is Merkle-Damgard, so knowing one
+// valid token lets an attacker compute a token for that message plus a suffix,
+// without knowing the secret. The address is the final and only variable-length
+// field, which is exactly the suffix position. HMAC is not vulnerable to this.
+//
+// The digest is truncated to tokenLength bytes so the token stays the same size on
+// the wire as before, BEP 5 asking for "a short binary string". Truncating an HMAC
+// is sound.
 func (r responder) announceToken(infoHash protocol.ID, nodeID protocol.ID, nodeAddr netip.Addr) string {
-	bytes := r.tokenSecret
-	bytes = append(bytes, r.nodeID[:]...)
-	bytes = append(bytes, infoHash[:]...)
-	bytes = append(bytes, nodeID[:]...)
-	bytes = append(bytes, []byte(nodeAddr.String())...)
-	tokenHash := md5.Sum(bytes)
+	mac := hmac.New(sha256.New, r.tokenSecret)
+	// hash.Hash never returns an error from Write.
+	mac.Write(r.nodeID[:])
+	mac.Write(infoHash[:])
+	mac.Write(nodeID[:])
+	mac.Write([]byte(nodeAddr.String()))
 
-	return hex.EncodeToString(tokenHash[:])
+	return hex.EncodeToString(mac.Sum(nil)[:tokenLength])
+}
+
+// validAnnounceToken reports whether token is the one this node issued for these
+// arguments, comparing in constant time so a wrong token cannot be recovered a byte
+// at a time by measuring how long the rejection takes.
+func (r responder) validAnnounceToken(
+	token string,
+	infoHash protocol.ID,
+	nodeID protocol.ID,
+	nodeAddr netip.Addr,
+) bool {
+	expected := r.announceToken(infoHash, nodeID, nodeAddr)
+
+	return hmac.Equal([]byte(token), []byte(expected))
 }
 
 func nodeInfosFromNodes(ns ...ktable.Node) []dht.NodeInfo {
