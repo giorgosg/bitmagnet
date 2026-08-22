@@ -256,7 +256,7 @@ func TestClassifier(t *testing.T) {
 				tc.prepareMocks(mocks)
 			}
 
-			result, runErr := workflow.Run(context.Background(), "default", tc.flags, tc.torrent)
+			result, runErr := workflow.Run(t.Context(), "default", tc.flags, tc.torrent)
 			if runErr != nil {
 				assert.Equal(t, tc.expectedErr, runErr)
 				t.Log(runErr)
@@ -319,7 +319,7 @@ func TestClassifierParsesVideoNameWithoutUsableFileMetadata(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			result, runErr := workflow.Run(context.Background(), "default", Flags{
+			result, runErr := workflow.Run(t.Context(), "default", Flags{
 				"local_search_enabled": false,
 				"apis_enabled":         false,
 			}, tc.torrent)

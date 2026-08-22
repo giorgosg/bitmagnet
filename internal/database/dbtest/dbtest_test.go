@@ -1,7 +1,6 @@
 package dbtest_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dbtest"
@@ -15,7 +14,7 @@ func TestNewProvisionsAMigratedDatabase(t *testing.T) {
 	t.Parallel()
 
 	db := dbtest.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("migrations have been applied", func(t *testing.T) {
 		t.Parallel()
@@ -69,7 +68,7 @@ func TestNewIsolatesDatabases(t *testing.T) {
 	first, second := dbtest.New(t), dbtest.New(t)
 	require.NotEqual(t, first.Name, second.Name)
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, err := first.Pool.Exec(ctx, "create table isolation_probe (id int)")
 	require.NoError(t, err)

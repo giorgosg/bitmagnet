@@ -1,7 +1,6 @@
 package dhtcrawler
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 
@@ -39,7 +38,7 @@ func TestPersistTorrentsPausesClassificationUntilQueueDrains(t *testing.T) {
 	t.Parallel()
 
 	db := dbtest.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	crawler := newPersistTestCrawler(db.Query, 1)
 	backlog, err := model.NewQueueJob("backlog", map[string]string{"test": "backlog"})
 	require.NoError(t, err)
@@ -89,7 +88,7 @@ func TestPersistTorrentsQueueDepthZeroDisablesBackpressure(t *testing.T) {
 	t.Parallel()
 
 	db := dbtest.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	crawler := newPersistTestCrawler(db.Query, 0)
 	backlog, err := model.NewQueueJob("backlog", map[string]string{"test": "backlog"})
 	require.NoError(t, err)

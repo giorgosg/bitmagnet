@@ -1,7 +1,6 @@
 package migrationssql_test
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -14,7 +13,7 @@ func TestQueueFetchOrderIndexDefinition(t *testing.T) {
 	t.Parallel()
 
 	db := dbtest.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	var definition string
 
@@ -33,7 +32,7 @@ func TestQueuePayloadIndexIsAbsent(t *testing.T) {
 	t.Parallel()
 
 	db := dbtest.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	var exists bool
 
@@ -47,7 +46,7 @@ func TestQueueFetchPlanUsesOrderIndex(t *testing.T) {
 	t.Parallel()
 
 	db := dbtest.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, err := db.Pool.Exec(ctx, `
 			insert into queue_jobs (

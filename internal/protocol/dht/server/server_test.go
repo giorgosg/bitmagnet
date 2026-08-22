@@ -29,14 +29,14 @@ func TestQueryRespectsGlobalConcurrencyLimit(t *testing.T) {
 	errs := make(chan error, 2)
 
 	go func() {
-		_, err := server.Query(context.Background(), addr, dht.QPing, dht.MsgArgs{})
+		_, err := server.Query(t.Context(), addr, dht.QPing, dht.MsgArgs{})
 		errs <- err
 	}()
 
 	firstID := <-socket.sent
 
 	go func() {
-		_, err := server.Query(context.Background(), addr, dht.QPing, dht.MsgArgs{})
+		_, err := server.Query(t.Context(), addr, dht.QPing, dht.MsgArgs{})
 		errs <- err
 	}()
 

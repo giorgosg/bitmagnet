@@ -1,7 +1,6 @@
 package importer
 
 import (
-	"context"
 	"testing"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dbtest"
@@ -17,7 +16,7 @@ func TestPersistItemsSkipsExistingQueueJob(t *testing.T) {
 		importer: importer{
 			dao: db.Query,
 		},
-		ctx:             context.Background(),
+		ctx:             t.Context(),
 		importedSources: make(map[string]struct{}),
 	}
 	item := Item{
