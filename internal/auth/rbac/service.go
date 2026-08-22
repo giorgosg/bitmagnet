@@ -228,16 +228,15 @@ func (s *service) DeleteRole(ctx context.Context, role Role) error {
 
 	defer func() { <-s.sem }()
 
-	err := s.repository.DeleteRole(ctx, role)
-
-	if !s.lastUpdate.IsZero() {
-		err = s.updatePermissions(ctx)
-		if err != nil {
-			return err
-		}
+	if err := s.repository.DeleteRole(ctx, role); err != nil {
+		return err
 	}
 
-	return err
+	if !s.lastUpdate.IsZero() {
+		return s.updatePermissions(ctx)
+	}
+
+	return nil
 }
 
 func (s *service) GetObjectActions() []ObjectAction {
