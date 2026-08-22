@@ -228,7 +228,7 @@ type extDict struct {
 const maxMetadataSize = 10 * 1024 * 1024
 
 func exHandshake(rw io.ReadWriter) (metadataSize uint, utMetadata uint8, err error) {
-	if _, writeErr := rw.Write([]byte("\x00\x00\x00\x1a\x14\x00d1:md11:ut_metadatai1eee")); err != nil {
+	if _, writeErr := rw.Write([]byte("\x00\x00\x00\x1a\x14\x00d1:md11:ut_metadatai1eee")); writeErr != nil {
 		err = writeErr
 		return
 	}
@@ -293,8 +293,14 @@ func uintToBigEndian4(i uint) []byte {
 	return b
 }
 
+const pieceSize = 16 * 1024
+
 func readAllPieces(r io.Reader, metadataSize uint) ([]byte, error) {
 	metadataBytes := make([]byte, metadataSize)
+	nPieces := int((metadataSize + pieceSize - 1) / pieceSize)
+	// A peer may send the same valid piece repeatedly, satisfying the length accounting
+	// below while leaving the buffer half written; track which have actually arrived.
+	seenPieces := make(map[int]struct{}, nPieces)
 
 	receivedSize := uint(0)
 	for receivedSize < metadataSize {
@@ -338,11 +344,25 @@ func readAllPieces(r io.Reader, metadataSize uint) ([]byte, error) {
 				return nil, errors.New("receivedSize > metadataSize")
 			}
 
+			// The piece index comes straight off the wire from an untrusted peer; it is
+			// used as an offset into metadataBytes, so it must be validated before use.
 			piece := rExtDict.Piece
-			copy(
-				metadataBytes[piece*int(math.Pow(2, 14)):piece*int(math.Pow(2, 14))+len(metadataPiece)],
-				metadataPiece,
-			)
+			if piece < 0 || piece >= nPieces {
+				return nil, errors.New("piece index out of range")
+			}
+
+			if _, seen := seenPieces[piece]; seen {
+				return nil, errors.New("duplicate piece index")
+			}
+
+			offset := piece * pieceSize
+			if offset+len(metadataPiece) > int(metadataSize) {
+				return nil, errors.New("piece overruns metadata")
+			}
+
+			seenPieces[piece] = struct{}{}
+
+			copy(metadataBytes[offset:offset+len(metadataPiece)], metadataPiece)
 		}
 	}
 
