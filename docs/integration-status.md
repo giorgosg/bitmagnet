@@ -54,6 +54,8 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#43](https://github.com/giorgosg/bitmagnet/pull/43) | Bound the queue metrics query with a deadline                               | local — review finding 0008c                                         | Ran without a deadline; observed red                       |
 | [#44](https://github.com/giorgosg/bitmagnet/pull/44) | Exclude padding files from `files_count`                                    | local — review finding 0007                                          | Counted 100 where 50 was correct; observed red             |
 | [#45](https://github.com/giorgosg/bitmagnet/pull/45) | Narrow the default CORS headers and turn debug off                          | local — review finding 0009, in part                                 | Invented header was allowed; observed red                  |
+| [#46](https://github.com/giorgosg/bitmagnet/pull/46) | Record PRs #29-#45 in this ledger                                           | local                                                                | Documentation only                                         |
+| [#47](https://github.com/giorgosg/bitmagnet/pull/47) | Document how `docs/` is used; require a docs update per PR                  | local                                                                | Documentation only                                         |
 
 ## In flight
 

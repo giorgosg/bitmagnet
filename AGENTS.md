@@ -32,10 +32,19 @@ code.
 | [docs/integration-status.md](docs/integration-status.md) | Checking whether a candidate is already merged, queued, or rejected                   |
 | [docs/auth.md](docs/auth.md)                             | Configuring or deploying authentication, or running behind a reverse proxy            |
 | [docs/agents/](docs/agents/issue-tracker.md)             | Filing an issue, applying a triage label, or looking for domain docs                  |
+| [docs/adr/](docs/adr/)                                   | A decision constrains future changes and the reason will not be obvious from the code |
+| `docs/issues/`                                           | Review findings: what is confirmed, fixed, or rejected, and why — **local only**      |
+| `docs/ideas/`                                            | Weighing what to work on next rather than how to do it — **local only**               |
+
+The last two rows are **local only**: they exist because a `*.local.md` file is present in
+this checkout, and are absent from a fresh clone. Never link to them from a tracked page.
 
 Several of those pages are dated **snapshots** — the fork survey, the upstream survey,
 every divergence count. Re-measure with the commands in [docs/porting.md](docs/porting.md)
 before acting on a number.
+
+That table is for reading. The same tree is where a change **writes back** what it
+learned — see [Every change lands with its documentation](#every-change-lands-with-its-documentation).
 
 `*.local.md` is gitignored at any depth and holds this checkout's private notes:
 environment details, unreviewed findings, and whatever authority the operator has granted.
@@ -106,6 +115,29 @@ install it separately. `task migrate` needs no binary; it runs goose as a librar
 `./internal/dev`.
 
 Run `task gen-gorm` afterwards when the change also touches `internal/model`.
+
+## Every change lands with its documentation
+
+A merged PR updates `docs/` wherever the change makes a page wrong or incomplete. This is
+part of the change, not follow-up work: a ledger that stops mid-history and an
+architecture page describing code that moved are worse than no page at all, because they
+are read as current. Ask which of these the change touched, and update it in the same PR.
+
+| If the change…                                        | Update                                                                                           |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| is merged at all                                      | [docs/integration-status.md](docs/integration-status.md) — one row, with what was seen red       |
+| alters a default, a config key, or a deployment       | the operator page for it, e.g. [docs/auth.md](docs/auth.md)                                      |
+| moves a subsystem boundary, or adds or removes one    | the matching page under [docs/architecture/](docs/architecture/README.md)                        |
+| settles a decision that constrains later work         | a new record in [docs/adr/](docs/adr/)                                                           |
+| changes the toolchain, a generator, or the test setup | [docs/hacking.md](docs/hacking.md), and this file if it is a trap                                |
+| rejects a candidate, or kills one with a measurement  | [docs/integration-status.md](docs/integration-status.md) — the rejected section, with the number |
+| resolves or reprioritises a review finding            | `docs/issues/` if the checkout has it — local, and stays untracked                               |
+
+"Where applicable" is the operative phrase — a pure refactor with no visible effect
+usually touches nothing. But answer the question explicitly rather than skipping it, and
+say in the PR body which pages you checked and why none needed changing. A measurement
+that rejects an idea is worth recording precisely because the next reader would otherwise
+repeat it.
 
 ## Every change lands with a test seen **red**
 
