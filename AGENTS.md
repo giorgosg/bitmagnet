@@ -136,8 +136,8 @@ not tell you.
 ```bash
 task test-go          # DB tests skip silently without TEST_POSTGRES_DSN
 task test-webui       # Angular; needs Chromium and `task install-webui` first
-task lint             # web UI ESLint and Prettier — golangci-lint is NOT included
-task lint-golangci    # separate; must end in "0 issues." — but see the version note below
+task lint             # golangci-lint, web UI ESLint, and Prettier
+task lint-golangci    # just the Go linter; must end in "0 issues."
 task migrate          # needs a running PostgreSQL; docker-compose.yml brings one up
 go build ./... && go vet ./...   # quickest Go sanity check
 ```
@@ -146,12 +146,13 @@ go build ./... && go vet ./...   # quickest Go sanity check
 reach for `nix develop` or `direnv allow` when the host lacks them. PostgreSQL and `goose`
 are separate, and so is Prettier — see Trap 2.
 
-**golangci-lint is the one tool the shell gets wrong.** CI pins its own version in
-[`.github/workflows/checks.yml`](.github/workflows/checks.yml), and that pin is what "0
-issues" refers to. Nixpkgs tracks a newer release whose added analyzers report dozens of
-stylistic findings this tree has not addressed, so `task lint-golangci` inside
-`nix develop` disagrees with CI and is not the measurement to trust. Match CI's pinned
-version — that is also why the CI step is separate from `task lint`.
+**Lint from the Nix shell, never from a golangci-lint on your `PATH`.** The linter has
+to be built with a Go at least as new as the toolchain compiling the code, so the flake
+pins both together and CI runs `task lint` inside `nix develop` rather than installing a
+linter of its own. A mismatch does not produce a tidy error: too old and it refuses the
+module outright, too new for the compiler and it panics mid-run. Version strings do not
+settle it either — a `go install`ed binary reports the same version as the official
+release while being built with a different Go.
 
 Before handing off, run the smallest relevant checks plus everything covering the touched
 area. After running a generator, reproduce CI's clean-tree expectation with `git diff

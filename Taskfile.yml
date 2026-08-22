@@ -52,11 +52,7 @@ tasks:
 
   lint:
     cmds:
-      # golangci-lint runs as its own CI step, pinned to the version in
-      # .github/workflows/checks.yml. Nixpkgs ships a newer one whose added
-      # analyzers report ~65 stylistic findings this tree has not addressed,
-      # so running it here would disagree with CI.
-      # - task lint-golangci
+      - task lint-golangci
       - task lint-webui
       - task lint-prettier
 

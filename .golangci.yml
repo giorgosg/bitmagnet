@@ -138,6 +138,11 @@ linters:
       - linters:
           - unused
         path: internal/protocol/dht/ktable/(.+)\.go
+      # Repeated literals in tests are fixture data. Naming them costs more
+      # readability than the duplication does.
+      - linters:
+          - goconst
+        path: (.+)_test\.go
     paths:
       - third_party$
       - builtin$

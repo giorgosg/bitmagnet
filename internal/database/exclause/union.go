@@ -12,7 +12,7 @@ type Union struct {
 
 // Name union clause name
 func (Union) Name() string {
-	return "UNION"
+	return ClauseUnion
 }
 
 // Build build union clause

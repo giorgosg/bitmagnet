@@ -21,6 +21,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// labelEntity is the Prometheus label naming the persisted entity type.
+const labelEntity = "entity"
+
 type Params struct {
 	fx.In
 	Config            Config
@@ -55,7 +58,7 @@ func New(params Params) Result {
 		Subsystem: "dht_crawler",
 		Name:      "persisted_total",
 		Help:      "A counter of persisted database entities.",
-	}, []string{"entity"})
+	}, []string{labelEntity})
 
 	return Result{
 		Worker: worker.NewWorker(

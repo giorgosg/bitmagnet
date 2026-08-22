@@ -12,7 +12,7 @@ type Except struct {
 
 // Name except clause name
 func (Except) Name() string {
-	return "EXCEPT"
+	return ClauseExcept
 }
 
 // Build build except clause

@@ -150,7 +150,7 @@ func (s search) TorrentSuggestTags(
 				query.OrderByColumn{
 					OrderByColumn: clause.OrderByColumn{
 						Column: clause.Column{
-							Alias: "name",
+							Alias: colName,
 						},
 					},
 				},

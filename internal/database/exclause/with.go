@@ -38,7 +38,7 @@ type CTE struct {
 
 // Name with clause name
 func (With) Name() string {
-	return "WITH"
+	return ClauseWith
 }
 
 // Build build with clause

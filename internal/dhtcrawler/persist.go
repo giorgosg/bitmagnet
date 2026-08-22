@@ -152,7 +152,7 @@ func (c *crawler) persistTorrentBatch(ctx context.Context, is []infoHashWithMeta
 		return
 	}
 
-	c.persistedTotal.With(prometheus.Labels{"entity": "Torrent"}).Add(float64(len(torrentsToPersist)))
+	c.persistedTotal.With(prometheus.Labels{labelEntity: "Torrent"}).Add(float64(len(torrentsToPersist)))
 	c.logger.Debugw("persisted torrents", "count", len(torrentsToPersist))
 
 	for _, i := range hashMap {
@@ -334,7 +334,7 @@ func (c *crawler) runPersistSources(ctx context.Context) {
 			).CreateInBatches(srcs, 100); persistErr != nil {
 				c.logger.Errorf("error persisting torrent sources: %s", persistErr.Error())
 			} else {
-				c.persistedTotal.With(prometheus.Labels{"entity": "TorrentsTorrentSource"}).
+				c.persistedTotal.With(prometheus.Labels{labelEntity: "TorrentsTorrentSource"}).
 					Add(float64(len(srcs)))
 				c.logger.Debugw("persisted torrent sources", "count", len(srcs))
 			}

@@ -18,7 +18,7 @@ var findMatchActionPayloadSpec = payloadSingleKeyValue[[]any]{
 	key: findMatchName,
 	valueSpec: payloadMustSucceed[[]any]{payloadList[any]{itemSpec: payloadGeneric[any]{
 		jsonSchema: map[string]any{
-			"$ref": "#/definitions/action_single",
+			schemaKeyRef: schemaRefActionSingle,
 		},
 	}}},
 	description: "Iterate through a series of actions to find the first that does not return an unmatched error",

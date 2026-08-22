@@ -2,6 +2,9 @@ package torznab
 
 import "strings"
 
+// availableYes is the Torznab caps value marking a capability as supported.
+const availableYes = "yes"
+
 type Profile struct {
 	ID                      string `validate:"required"`
 	Title                   string
@@ -49,7 +52,7 @@ func (p Profile) Caps() Caps {
 		},
 		Searching: CapsSearching{
 			Search: CapsSearch{
-				Available: "yes",
+				Available: availableYes,
 				SupportedParams: strings.Join([]string{
 					ParamQuery,
 					ParamIMDBID,
@@ -57,7 +60,7 @@ func (p Profile) Caps() Caps {
 				}, ","),
 			},
 			TvSearch: CapsSearch{
-				Available: "yes",
+				Available: availableYes,
 				SupportedParams: strings.Join([]string{
 					ParamQuery,
 					ParamIMDBID,
@@ -67,7 +70,7 @@ func (p Profile) Caps() Caps {
 				}, ","),
 			},
 			MovieSearch: CapsSearch{
-				Available: "yes",
+				Available: availableYes,
 				SupportedParams: strings.Join([]string{
 					ParamQuery,
 					ParamIMDBID,
@@ -75,14 +78,14 @@ func (p Profile) Caps() Caps {
 				}, ","),
 			},
 			MusicSearch: CapsSearch{
-				Available:       "yes",
+				Available:       availableYes,
 				SupportedParams: ParamQuery,
 			},
 			AudioSearch: CapsSearch{
 				Available: "no",
 			},
 			BookSearch: CapsSearch{
-				Available:       "yes",
+				Available:       availableYes,
 				SupportedParams: ParamQuery,
 			},
 		},

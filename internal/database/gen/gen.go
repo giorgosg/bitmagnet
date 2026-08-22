@@ -10,6 +10,14 @@ import (
 	"gorm.io/gorm"
 )
 
+// GORM association tag keys, and the column names this schema joins on.
+const (
+	tagForeignKey = "foreignKey"
+	tagReferences = "references"
+	colInfoHash   = "InfoHash"
+	colSource     = "Source"
+)
+
 func BuildGenerator(db *gorm.DB) *gen.Generator {
 	_, filename, _, _ := runtime.Caller(0)
 	internal := path.Dir(path.Dir(path.Dir(filename)))
@@ -89,7 +97,7 @@ func BuildGenerator(db *gorm.DB) *gen.Generator {
 			torrentSources,
 			&field.RelateConfig{
 				GORMTag: field.GormTag{
-					"foreignKey": []string{"Source"},
+					tagForeignKey: []string{colSource},
 				},
 			},
 		),
@@ -117,7 +125,7 @@ func BuildGenerator(db *gorm.DB) *gen.Generator {
 			),
 			&field.RelateConfig{
 				GORMTag: field.GormTag{
-					"foreignKey": []string{"InfoHash"},
+					tagForeignKey: []string{colInfoHash},
 				},
 			},
 		),
@@ -130,7 +138,7 @@ func BuildGenerator(db *gorm.DB) *gen.Generator {
 			),
 			&field.RelateConfig{
 				GORMTag: field.GormTag{
-					"foreignKey": []string{"InfoHash"},
+					tagForeignKey: []string{colInfoHash},
 				},
 			},
 		),
@@ -141,7 +149,7 @@ func BuildGenerator(db *gorm.DB) *gen.Generator {
 			&field.RelateConfig{
 				RelateSlice: true,
 				GORMTag: field.GormTag{
-					"foreignKey": []string{"InfoHash"},
+					tagForeignKey: []string{colInfoHash},
 				},
 			},
 		),
@@ -152,7 +160,7 @@ func BuildGenerator(db *gorm.DB) *gen.Generator {
 			&field.RelateConfig{
 				RelateSlice: true,
 				GORMTag: field.GormTag{
-					"foreignKey": []string{"InfoHash"},
+					tagForeignKey: []string{colInfoHash},
 				},
 			},
 		),
@@ -162,7 +170,7 @@ func BuildGenerator(db *gorm.DB) *gen.Generator {
 			torrentPieces,
 			&field.RelateConfig{
 				GORMTag: field.GormTag{
-					"foreignKey": []string{"InfoHash"},
+					tagForeignKey: []string{colInfoHash},
 				},
 				JSONTag: "-",
 			},
@@ -174,7 +182,7 @@ func BuildGenerator(db *gorm.DB) *gen.Generator {
 			&field.RelateConfig{
 				RelateSlice: true,
 				GORMTag: field.GormTag{
-					"foreignKey": []string{"InfoHash"},
+					tagForeignKey: []string{colInfoHash},
 				},
 			},
 		),
@@ -209,7 +217,7 @@ func BuildGenerator(db *gorm.DB) *gen.Generator {
 			metadataSources,
 			&field.RelateConfig{
 				GORMTag: field.GormTag{
-					"foreignKey": {"Source"},
+					tagForeignKey: {colSource},
 				},
 			},
 		),
@@ -228,7 +236,7 @@ func BuildGenerator(db *gorm.DB) *gen.Generator {
 			metadataSources,
 			&field.RelateConfig{
 				GORMTag: field.GormTag{
-					"foreignKey": {"Source"},
+					tagForeignKey: {colSource},
 				},
 			},
 		),
@@ -262,7 +270,7 @@ func BuildGenerator(db *gorm.DB) *gen.Generator {
 			metadataSources,
 			&field.RelateConfig{
 				GORMTag: field.GormTag{
-					"foreignKey": {"Source"},
+					tagForeignKey: {colSource},
 				},
 			},
 		),
@@ -299,10 +307,10 @@ func BuildGenerator(db *gorm.DB) *gen.Generator {
 			contentCollections,
 			&field.RelateConfig{
 				GORMTag: field.GormTag{
-					"foreignKey": {
+					tagForeignKey: {
 						"ContentCollectionType,ContentCollectionSource,ContentCollectionID",
 					},
-					"references": {"Type,Source,ID"},
+					tagReferences: {"Type,Source,ID"},
 				},
 			},
 		),
@@ -348,8 +356,8 @@ func BuildGenerator(db *gorm.DB) *gen.Generator {
 					torrents,
 					&field.RelateConfig{
 						GORMTag: field.GormTag{
-							"foreignKey": {"InfoHash"},
-							"references": {"InfoHash"},
+							tagForeignKey: {colInfoHash},
+							tagReferences: {colInfoHash},
 						},
 					},
 				),
@@ -359,8 +367,8 @@ func BuildGenerator(db *gorm.DB) *gen.Generator {
 					content,
 					&field.RelateConfig{
 						GORMTag: field.GormTag{
-							"foreignKey": []string{"ContentType,ContentSource,ContentID"},
-							"references": []string{"Type,Source,ID"},
+							tagForeignKey: []string{"ContentType,ContentSource,ContentID"},
+							tagReferences: []string{"Type,Source,ID"},
 						},
 					},
 				),
