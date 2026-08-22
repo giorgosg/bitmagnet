@@ -59,9 +59,14 @@ them separately for consistency.
 
 ## Trap 2: Prettier is pinned
 
-`task lint` runs `prettier --check .`, and `.prettierignore` does not exclude `*.md`, so
-markdown is linted too. Use the repo's own copy: `npx prettier@3` resolves to a later 3.x
-that formats markdown differently, passes locally, and fails CI.
+`task lint` runs Prettier over the whole tree, and `.prettierignore` does not exclude
+`*.md`, so markdown is linted too. Formatting differs between 3.x releases, so a stray
+version passes locally and fails CI.
+
+Always use the repo's own copy — the web UI's `^3.3.3`, installed by `task install-webui`.
+`task lint-prettier` calls it by path for exactly this reason, and it is deliberately
+absent from the Nix shell so nothing else can win on `PATH`. `npx prettier@3` resolves to
+a later 3.x and is the specific mistake to avoid.
 
 ```bash
 ./webui/node_modules/.bin/prettier --write AGENTS.md 'docs/**/*.md'
@@ -133,14 +138,21 @@ not tell you.
 task test-go          # DB tests skip silently without TEST_POSTGRES_DSN
 task test-webui       # Angular; needs Chromium and `task install-webui` first
 task lint             # web UI ESLint and Prettier — golangci-lint is NOT included
-task lint-golangci    # separate, and must end in "0 issues." — a clean tree reports zero
+task lint-golangci    # separate; must end in "0 issues." — but see the version note below
 task migrate          # needs a running PostgreSQL; docker-compose.yml brings one up
 go build ./... && go vet ./...   # quickest Go sanity check
 ```
 
-`flake.nix` supplies Go, go-task, Node 22, golangci-lint, prettier, protoc, and Chromium
-on Linux; reach for `nix develop` or `direnv allow` when the host lacks them. PostgreSQL
-and `goose` are separate.
+`flake.nix` supplies Go, go-task, Node 22, golangci-lint, protoc, and Chromium on Linux;
+reach for `nix develop` or `direnv allow` when the host lacks them. PostgreSQL and `goose`
+are separate, and so is Prettier — see Trap 2.
+
+**golangci-lint is the one tool the shell gets wrong.** CI pins its own version in
+[`.github/workflows/checks.yml`](.github/workflows/checks.yml), and that pin is what "0
+issues" refers to. Nixpkgs tracks a newer release whose added analyzers report dozens of
+stylistic findings this tree has not addressed, so `task lint-golangci` inside
+`nix develop` disagrees with CI and is not the measurement to trust. Match CI's pinned
+version — that is also why the CI step is separate from `task lint`.
 
 Before handing off, run the smallest relevant checks plus everything covering the touched
 area. After running a generator, reproduce CI's clean-tree expectation with `git diff

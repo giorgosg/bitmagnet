@@ -7,8 +7,9 @@ this covers _how to work on them_.
 
 ## Toolchain
 
-`flake.nix` provides a dev shell — Go, go-task, Node 22, golangci-lint, prettier, protoc,
-Ruby/Jekyll for the docsite, and Chromium on Linux. `direnv allow` or `nix develop` gets
+`flake.nix` provides a dev shell — Go, go-task, Node 22, golangci-lint, protoc,
+Ruby/Jekyll for the docsite, and Chromium on Linux. Prettier is deliberately not in it;
+the web UI's pinned copy is the only one that should ever run. `direnv allow` or `nix develop` gets
 you a working environment. Without Nix you need Go, go-task, Node 22, PostgreSQL, and —
 only if you touch protobufs — `protoc`.
 

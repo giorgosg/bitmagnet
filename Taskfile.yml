@@ -52,7 +52,10 @@ tasks:
 
   lint:
     cmds:
-      # Removing golang-ci lint as the Nix package is currently broken
+      # golangci-lint runs as its own CI step, pinned to the version in
+      # .github/workflows/checks.yml. Nixpkgs ships a newer one whose added
+      # analyzers report ~65 stylistic findings this tree has not addressed,
+      # so running it here would disagree with CI.
       # - task lint-golangci
       - task lint-webui
       - task lint-prettier
@@ -68,7 +71,10 @@ tasks:
 
   lint-prettier:
     cmds:
-      - prettier --check .
+      # The web UI's pinned Prettier, not one from PATH: markdown formatting differs
+      # between 3.x releases, so a stray version passes locally and fails CI.
+      # Requires `task install-webui`.
+      - ./webui/node_modules/.bin/prettier --check .
 
   test:
     cmds:
