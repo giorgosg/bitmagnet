@@ -1,6 +1,6 @@
 {
   description = "bitmagnet dev shell";
-  inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-24.11";
+  inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-26.05";
   inputs.flake-utils.url = "github:numtide/flake-utils";
 
   outputs = {
@@ -23,7 +23,6 @@
             golangci-lint
             jekyll
             nodejs_22
-            nodePackages.prettier
             protobuf
             protoc-gen-go
             ruby
