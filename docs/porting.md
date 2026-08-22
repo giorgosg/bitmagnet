@@ -93,6 +93,33 @@ git config alias.forkdiff '!f() { git diff -w --ignore-cr-at-eol "${2:-upstream/
 Read the whole substantive diff that comes back. A fork's commit message states intent,
 not behaviour.
 
+## Measuring what a subsystem actually costs to port
+
+Before porting a whole subsystem, measure its **import closure**, not its line count. The
+method, from the `internal/auth` port:
+
+1. Extract every import across all files of the package.
+2. Walk the closure, descending **only** into packages the target lineage does not already
+   provide.
+3. Stop where it terminates, and count what has to come along.
+
+`internal/auth` imports just six bitmagnet packages directly. Closing over those, five
+support packages had to be ported alongside it — about 3,000 lines on top of the
+subsystem's own 4,100 — and the closure **terminated there**, reaching nothing in the
+plugin registry, the GraphQL layer or the wasm host. An earlier estimate had claimed the
+subsystem could not be extracted without taking the source lineage wholesale. It was
+wrong, and the whole difference was step 2.
+
+**Measure against the lineage you are porting _to_.** Walking the source lineage's own
+copies of shared packages such as `internal/database` and `internal/model` drags in
+everything they depend on there — an artefact of measuring the wrong thing, since those
+packages already exist on the target.
+
+Two signals worth collecting while you are there. New third-party modules are a real cost
+and are invisible in a diffstat. And where the port includes generated code, regenerating
+it on the target is the strongest evidence the extraction is faithful: the auth model and
+dao types came out byte-identical to the source lineage's after `task gen-gorm`.
+
 ## Taking the change
 
 One topic branch per feature, based on `upstream/main`:

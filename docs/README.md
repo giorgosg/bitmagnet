@@ -22,8 +22,7 @@ These are _working notes_. The user documentation lives in `bitmagnet.io/` and a
 | [forks/](forks/README.md)                      | Choosing which downstream repo a change should come from                              |
 | [upstream-status.md](upstream-status.md)       | Sending a change upstream, or weighing whether the `next` rewrite makes it moot       |
 | [integration-status.md](integration-status.md) | Checking whether a candidate is already merged, queued, or rejected                   |
-| [auth.md](auth.md)                             | Adding or protecting an externally reachable interface                                |
-| [auth-port.md](auth-port.md)                   | Porting more of `next`, or reviewing a security-sensitive change                      |
+| [auth.md](auth.md)                             | Configuring or deploying authentication, or running behind a reverse proxy            |
 | [agents/](agents/issue-tracker.md)             | Filing an issue, applying a triage label, or looking for domain docs                  |
 
 ## Snapshots expire
