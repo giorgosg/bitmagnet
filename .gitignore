@@ -56,3 +56,9 @@ Thumbs.db
 # private plans stay untracked. Any file named *.local.md is ignored at any depth —
 # name a note `<topic>.local.md` and it stays out of git. See docs/README.md.
 *.local.md
+
+# MkDocs tooling and output (see docs/mkdocs.yml).
+.venv/
+.uv-cache/
+site/
+docs/mkdocs.yml
