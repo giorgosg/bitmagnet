@@ -18,6 +18,7 @@ import (
 
 type Params struct {
 	fx.In
+	fx.Shutdowner
 	Config  Config
 	Options []Option `group:"http_server_options"`
 	Logger  *zap.Logger
@@ -105,10 +106,7 @@ func New(p Params) Result {
 					}
 
 					go (func() {
-						serveErr := s.Serve(ln)
-						if !errors.Is(serveErr, http.ErrServerClosed) {
-							panic(serveErr)
-						}
+						handleServeError(s.Serve(ln), p.Logger, p.Shutdowner)
 					})()
 
 					return nil
@@ -122,6 +120,22 @@ func New(p Params) Result {
 				},
 			},
 		),
+	}
+}
+
+// handleServeError deals with the return of http.Server.Serve. A normal shutdown
+// returns http.ErrServerClosed and is not an error. Anything else used to panic,
+// which killed the process outright and lost the graceful shutdown of every other
+// worker; ask fx to shut down instead, so the rest of the app stops cleanly.
+func handleServeError(serveErr error, logger *zap.Logger, shutdowner fx.Shutdowner) {
+	if serveErr == nil || errors.Is(serveErr, http.ErrServerClosed) {
+		return
+	}
+
+	logger.Error("http server stopped serving", zap.Error(serveErr))
+
+	if shutdownErr := shutdowner.Shutdown(); shutdownErr != nil {
+		logger.Error("failed to shut down after http server error", zap.Error(shutdownErr))
 	}
 }
 
