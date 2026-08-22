@@ -73,7 +73,12 @@ func (c *crawler) persistTorrentBatch(ctx context.Context, is []infoHashWithMeta
 
 		hashMap[i.infoHash] = i
 
-		if t, err := createTorrentModel(i.infoHash, i.metaInfo, c.savePieces, c.saveFilesThreshold); err != nil {
+		if t, err := createTorrentModel(
+			i.infoHash,
+			i.metaInfo,
+			c.savePieces,
+			c.saveFilesThreshold,
+		); err != nil {
 			c.logger.Errorf("error creating torrent model: %s", err.Error())
 		} else {
 			for _, f := range t.Files {
@@ -329,7 +334,8 @@ func (c *crawler) runPersistSources(ctx context.Context) {
 			).CreateInBatches(srcs, 100); persistErr != nil {
 				c.logger.Errorf("error persisting torrent sources: %s", persistErr.Error())
 			} else {
-				c.persistedTotal.With(prometheus.Labels{"entity": "TorrentsTorrentSource"}).Add(float64(len(srcs)))
+				c.persistedTotal.With(prometheus.Labels{"entity": "TorrentsTorrentSource"}).
+					Add(float64(len(srcs)))
 				c.logger.Debugw("persisted torrent sources", "count", len(srcs))
 			}
 		}

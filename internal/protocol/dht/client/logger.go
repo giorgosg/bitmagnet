@@ -67,6 +67,14 @@ func (l clientLogger) log(query string, addr netip.AddrPort, start time.Time, er
 	if err == nil {
 		l.logger.Debugw(query, "addr", addr, "duration", time.Since(start))
 	} else {
-		l.logger.Debugw(fmt.Sprintf("%s failed", query), "addr", addr, "duration", time.Since(start), "error", err)
+		l.logger.Debugw(
+			fmt.Sprintf("%s failed", query),
+			"addr",
+			addr,
+			"duration",
+			time.Since(start),
+			"error",
+			err,
+		)
 	}
 }

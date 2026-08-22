@@ -14,7 +14,6 @@ import (
 func New() fx.Option {
 	osEnv := ReadOsEnv()
 
-	//nolint:prealloc
 	var options []fx.Option
 
 	var extraConfigFiles []string
