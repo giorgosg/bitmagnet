@@ -37,10 +37,43 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#24](https://github.com/giorgosg/bitmagnet/pull/24) | Cache Go module downloads in the Docker build                               | upstream #513 `ba737ad25`                                            | Equivalent build and full CI passed                        |
 | [#26](https://github.com/giorgosg/bitmagnet/pull/26) | Preserve compact season ranges                                              | local — regression from #22                                          | Parser regression observed red                             |
 | [#28](https://github.com/giorgosg/bitmagnet/pull/28) | Port the `upstream/next` auth stack                                         | `upstream/next`, adapted; Torznab from kawaii-not-kawaii `172a784d3` | Three review passes; every fix observed red                |
+| [#29](https://github.com/giorgosg/bitmagnet/pull/29) | Update the Nix dev shell to nixpkgs 26.05                                   | local                                                                | Full CI passed                                             |
+| [#30](https://github.com/giorgosg/bitmagnet/pull/30) | Run checks and CodeQL on trunk pushes and PRs                               | local                                                                | CI configuration; verified by its own run                  |
+| [#31](https://github.com/giorgosg/bitmagnet/pull/31) | Close every called vulnerability; Go floor to 1.25                          | local                                                                | `govulncheck` clean; full suite passed                     |
+| [#32](https://github.com/giorgosg/bitmagnet/pull/32) | Source golangci-lint from the pinned toolchain                              | local                                                                | Fixes a linter/compiler mismatch CI hit                    |
+| [#33](https://github.com/giorgosg/bitmagnet/pull/33) | Build both container images on pull requests                                | local                                                                | CI configuration; verified by its own run                  |
+| [#34](https://github.com/giorgosg/bitmagnet/pull/34) | Migrate wsl to wsl_v5                                                       | local                                                                | Lint only; 0 issues                                        |
+| [#35](https://github.com/giorgosg/bitmagnet/pull/35) | Bump the routine Go dependencies                                            | local                                                                | Full suite passed                                          |
+| [#36](https://github.com/giorgosg/bitmagnet/pull/36) | Bump the code generation tools and regenerate                               | local                                                                | Generators re-run; clean-tree diff verified                |
+| [#37](https://github.com/giorgosg/bitmagnet/pull/37) | Resolve the three open CodeQL alerts                                        | local                                                                | CodeQL clean                                               |
+| [#38](https://github.com/giorgosg/bitmagnet/pull/38) | Validate the peer-supplied metainfo piece index                             | local — review finding 0001, 0008a                                   | Out-of-range piece **panicked** before the fix             |
+| [#39](https://github.com/giorgosg/bitmagnet/pull/39) | Return the delete error from `rbac.DeleteRole`                              | local — review finding 0005                                          | Returned nil on a failed delete; observed red              |
+| [#40](https://github.com/giorgosg/bitmagnet/pull/40) | Remove the unreachable `activeImport.ImportErrors`                          | local — review finding 0008f                                         | Dead code; no behaviour change                             |
+| [#41](https://github.com/giorgosg/bitmagnet/pull/41) | Shut down via fx instead of panicking on a serve error                      | local — review finding 0008d                                         | Panicked on the error path; observed red                   |
+| [#42](https://github.com/giorgosg/bitmagnet/pull/42) | Stop rewriting the bloom filter on the blocklist read path                  | local — review finding 0006                                          | Large-object row versions changed; observed red            |
+| [#43](https://github.com/giorgosg/bitmagnet/pull/43) | Bound the queue metrics query with a deadline                               | local — review finding 0008c                                         | Ran without a deadline; observed red                       |
+| [#44](https://github.com/giorgosg/bitmagnet/pull/44) | Exclude padding files from `files_count`                                    | local — review finding 0007                                          | Counted 100 where 50 was correct; observed red             |
+| [#45](https://github.com/giorgosg/bitmagnet/pull/45) | Narrow the default CORS headers and turn debug off                          | local — review finding 0009, in part                                 | Invented header was allowed; observed red                  |
 
 ## In flight
 
 Nothing.
+
+## The static review findings
+
+A full static review of the Go tree (2026-08-22) produced eleven findings, kept as
+untracked notes under `docs/issues/`. PRs #38-#45 above close six of them, plus four of
+the small defects collected in 0008. What remains open there, hardest last:
+`files_count`/`size` consistency for rows already written, the breaking half of the CORS
+decision (same-origin default and GraphQL-over-GET), the crawler and importer shutdown
+paths, the queue job that runs inside its claiming transaction, the search SQL
+re-execution, and the two serialisation points in the auth path.
+
+One finding was measured and rejected rather than fixed: the crawler's periodic queue
+depth `COUNT` costs 0.065 ms in steady state on the reference instance, and a
+`LIMIT`-bounded rewrite measures 11.3 ms against 12.9 ms at 120,000 pending rows - it
+still scans `max_queue_depth + 1` index entries, so it is not constant-time where it
+would matter.
 
 ## Next candidate
 
