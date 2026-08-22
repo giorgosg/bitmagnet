@@ -2,6 +2,7 @@ package dhtcrawler
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
@@ -167,6 +168,12 @@ func (c *crawler) persistTorrentBatch(ctx context.Context, is []infoHashWithMeta
 	}
 }
 
+// isPaddingFile reports whether a file entry is a BEP-47 padding file, which
+// exists to align the following file with a piece boundary and is not content.
+func isPaddingFile(displayPath string) bool {
+	return strings.HasPrefix(displayPath, ".pad/")
+}
+
 func createTorrentModel(
 	hash protocol.ID,
 	info metainfo.Info,
@@ -185,7 +192,23 @@ func createTorrentModel(
 	filesStatus := model.FilesStatusSingle
 	if len(info.Files) > 0 {
 		filesStatus = model.FilesStatusMulti
-		filesCount = model.NewNullUint(uint(len(info.Files)))
+		// Count what the database will hold, not what the torrent declares: the
+		// padding entries skipped below are never written as torrent_files rows,
+		// so counting them makes files_count disagree with the rows it describes.
+		//
+		// This is the torrent's full non-padding count, not the number of rows
+		// actually written - over the threshold those differ, and infohash_triage
+		// re-fetches metainfo whenever files_status is over_threshold and
+		// files_count <= saveFilesThreshold. A capped count would loop forever.
+		nonPaddingCount := 0
+
+		for _, file := range info.Files {
+			if !isPaddingFile(file.DisplayPath(&info)) {
+				nonPaddingCount++
+			}
+		}
+
+		filesCount = model.NewNullUint(uint(nonPaddingCount))
 	}
 
 	files := make([]model.TorrentFile, 0, min(int(saveFilesThreshold), len(info.Files)))
@@ -196,7 +219,7 @@ func createTorrentModel(
 
 	for i, file := range info.Files {
 		displayPath := file.DisplayPath(&info)
-		if len(displayPath) >= 5 && displayPath[:5] == ".pad/" {
+		if isPaddingFile(displayPath) {
 			continue
 		}
 
