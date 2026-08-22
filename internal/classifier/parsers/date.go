@@ -190,7 +190,10 @@ func (l *dateLexer) lexDatePart() datePart {
 	}
 
 	if regex1Digit.MatchString(str) {
-		i, _ := strconv.Atoi(str)
+		// The regex matched a single digit, so this parses and fits in 8 bits.
+		// Parsing with an explicit bit size keeps that bound visible rather than
+		// implied by the regex.
+		i, _ := strconv.ParseUint(str, 10, 8)
 
 		return datePart{
 			Date:    model.Date{Day: uint8(i), Month: time.Month(i)},
@@ -219,7 +222,8 @@ func (l *dateLexer) lexDatePart() datePart {
 	}
 
 	if regex4Digits.MatchString(str) {
-		i, _ := strconv.Atoi(str)
+		// Four digits is at most 9999, which fits model.Year's uint16.
+		i, _ := strconv.ParseUint(str, 10, 16)
 
 		return datePart{
 			Date:    model.Date{Year: model.Year(i)},

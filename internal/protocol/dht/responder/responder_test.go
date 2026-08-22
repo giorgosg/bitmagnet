@@ -404,3 +404,76 @@ func TestResponder_unknown_method(t *testing.T) {
 	_, err := mocks.responder.Respond(t.Context(), msg)
 	assert.Equal(t, err, ErrMethodUnknown)
 }
+
+// The announce token is what stops a peer announcing under an address it does not
+// control, and nothing exercised its rejection path. These cover the three ways a
+// token can be wrong.
+func TestResponder_announce_peer__rejects_bad_tokens(t *testing.T) {
+	t.Parallel()
+
+	infoHash := protocol.RandomNodeID()
+
+	for _, tc := range []struct {
+		name  string
+		token func(m testResponderMocks) string
+	}{
+		{
+			name:  "garbage",
+			token: func(testResponderMocks) string { return "not a token" },
+		},
+		{
+			name: "issued for a different info hash",
+			token: func(m testResponderMocks) string {
+				return m.responder.announceToken(
+					protocol.RandomNodeID(), m.sender.ID, m.sender.Addr.ToAddrPort().Addr())
+			},
+		},
+		{
+			name: "issued for a different node",
+			token: func(m testResponderMocks) string {
+				return m.responder.announceToken(
+					infoHash, protocol.RandomNodeID(), m.sender.Addr.ToAddrPort().Addr())
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			mocks := newTestResponderMocks(t)
+			port := 6881
+			msg := dht.RecvMsg{
+				From: mocks.sender.Addr.ToAddrPort(),
+				Msg: dht.Msg{
+					Q: "announce_peer",
+					A: &dht.MsgArgs{
+						ID:       mocks.sender.ID,
+						InfoHash: infoHash,
+						Token:    tc.token(mocks),
+						Port:     &port,
+					},
+				},
+			}
+
+			_, err := mocks.responder.Respond(t.Context(), msg)
+			assert.Equal(t, ErrInvalidToken, err)
+		})
+	}
+}
+
+// A token issued by this node for these arguments must be accepted, so the
+// rejection test above cannot pass by rejecting everything.
+func TestResponder_announceToken__round_trips(t *testing.T) {
+	t.Parallel()
+
+	mocks := newTestResponderMocks(t)
+	infoHash := protocol.RandomNodeID()
+	addr := mocks.sender.Addr.ToAddrPort().Addr()
+
+	token := mocks.responder.announceToken(infoHash, mocks.sender.ID, addr)
+
+	// Literal 32, not tokenLength*2: the point is that the wire format did not
+	// change when the token moved from md5 to a truncated HMAC, and an assertion
+	// derived from the constant would follow the constant instead of pinning it.
+	assert.Len(t, token, 32, "token should stay 32 hex characters wide")
+	assert.True(t, mocks.responder.validAnnounceToken(token, infoHash, mocks.sender.ID, addr))
+}
