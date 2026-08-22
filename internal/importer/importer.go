@@ -331,13 +331,6 @@ func (i *activeImport) Err() error {
 	return i.errors.OrNil()
 }
 
-func (i *activeImport) ImportErrors() ImportErrors {
-	i.mutex.RLock()
-	defer i.mutex.RUnlock()
-
-	return i.errors
-}
-
 func (i *activeImport) Closed() bool {
 	i.mutex.RLock()
 	defer i.mutex.RUnlock()
