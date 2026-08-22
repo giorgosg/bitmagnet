@@ -62,11 +62,22 @@ func NewDefaultConfig() Config {
 	return Config{
 		LocalAddress: ":3333",
 		GinMode:      "release",
-		// todo review
 		Cors: CorsConfig{
+			// AllowedOrigins stays permissive: the bundled web UI is served from the
+			// same origin and needs no CORS at all, but serving it from a separate
+			// origin is a supported deployment, and narrowing this would break those
+			// silently. Tightening it is an operator decision - see docs/auth.md.
 			AllowedOrigins: []string{"*"},
-			AllowedHeaders: []string{"*"},
-			Debug:          true,
+			// Only the headers the server actually reads. "*" reflected back whatever
+			// a caller asked for, which grants more than anything here needs.
+			// Literals rather than the constants that define them: those live in
+			// packages that import this one.
+			AllowedHeaders: []string{
+				"Content-Type",
+				"Authorization", // http_auth.AuthorizationHeader
+				"X-Api-Key",     // torznab api key header
+				"X-Import-Id",   // importer/httpserver.ImportIDHeader
+			},
 		},
 		Options: []string{"*"},
 	}
