@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/http_auth"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/identity"
@@ -30,8 +31,18 @@ func AuthenticationErrorFromContext(ctx context.Context) error {
 		return nil
 	}
 
-	return resolution.Err
+	if resolution.Err == nil {
+		return nil
+	}
+
+	return fmt.Errorf("%w: %w", ErrAuthenticationInfrastructure, resolution.Err)
 }
+
+// ErrAuthenticationInfrastructure marks a failure to resolve the request's
+// credential because an authentication dependency could not answer. The
+// underlying cause remains available to server-side error handling through
+// errors.Is/errors.As, but the GraphQL boundary presents a stable public error.
+var ErrAuthenticationInfrastructure = errors.New("authentication infrastructure failure")
 
 func UserFromContext(ctx context.Context) (model.User, bool) {
 	identity, ok := IdentityFromContext(ctx)

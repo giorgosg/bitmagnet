@@ -194,7 +194,15 @@ func newAuthTestServerWithConfigAndAuthenticator(
 }
 
 type gqlError struct {
-	Message string `json:"message"`
+	Message    string         `json:"message"`
+	Path       []any          `json:"path"`
+	Locations  []gqlLocation  `json:"locations"`
+	Extensions map[string]any `json:"extensions"`
+}
+
+type gqlLocation struct {
+	Line   int `json:"line"`
+	Column int `json:"column"`
 }
 
 type gqlResponse struct {
@@ -842,9 +850,9 @@ func TestAuthenticationInfrastructureFailureSurvivesGraphQLBoundary(t *testing.T
 
 	response, headers := queryWithCredentials(t, server, "", browserCookie,
 		`{ self { identity { user { username } } } }`)
-	require.Len(t, response.Errors, 1)
-	assert.Contains(t, response.Errors[0].Message, backendErr.Error())
-	assert.NotContains(t, response.Errors[0].Message, "unauthorized")
+	gqlErr := requireGraphQLErrorCode(t, response, "AUTHENTICATION_INFRASTRUCTURE_FAILURE")
+	assert.Equal(t, "authentication service unavailable", gqlErr.Message)
+	assert.NotContains(t, gqlErr.Message, backendErr.Error())
 	assert.Empty(t, headers.Values("Set-Cookie"), "infrastructure failures must not clear credentials")
 }
 
@@ -1194,8 +1202,8 @@ func TestAPIKeyCannotManageAPIKeys(t *testing.T) {
 			t.Parallel()
 
 			res := query(t, server, narrow, testCase.query)
-			require.NotEmpty(t, res.Errors, "an API key must not manage API keys")
-			assert.Contains(t, res.Errors[0].Message, "api keys may not manage api keys")
+			gqlErr := requireGraphQLErrorCode(t, res, "API_KEY_MANAGEMENT_FORBIDDEN")
+			assert.Equal(t, "api keys may not manage api keys", gqlErr.Message)
 		})
 	}
 
@@ -1207,8 +1215,8 @@ func TestAPIKeyCannotManageAPIKeys(t *testing.T) {
 		`{ self { apiKeys { id name } } }`,
 	} {
 		res := query(t, server, "", q)
-		require.NotEmpty(t, res.Errors, "Anonymous must not manage API keys")
-		assert.Contains(t, res.Errors[0].Message, "not authenticated")
+		gqlErr := requireGraphQLErrorCode(t, res, "USER_SESSION_REQUIRED")
+		assert.Equal(t, "not authenticated", gqlErr.Message)
 	}
 
 	// The legitimate path must keep working, or the guard above is just a denial.

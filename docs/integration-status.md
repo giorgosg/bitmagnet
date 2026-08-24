@@ -62,12 +62,13 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#51](https://github.com/giorgosg/bitmagnet/pull/51) | Add the browser session cookie contract                                     | local                                                                | Real Gin/gqlgen/PostgreSQL regression observed red             |
 | [#52](https://github.com/giorgosg/bitmagnet/pull/52) | Resolve browser cookie credentials safely                                   | local                                                                | Gin/gqlgen/PostgreSQL regressions observed red                 |
 | [#53](https://github.com/giorgosg/bitmagnet/pull/53) | Protect cookie-authenticated GraphQL mutations from CSRF                    | local                                                                | Credential-source and transport regressions observed red       |
+| [#54](https://github.com/giorgosg/bitmagnet/pull/54) | Make GraphQL `self` a recovery boundary                                     | local                                                                | Identity/permission/logout regressions observed red            |
 
 ## In flight
 
-| PR                                                   | Change                                  | Downstream source | Verification note                                                      |
-| ---------------------------------------------------- | --------------------------------------- | ----------------- | ---------------------------------------------------------------------- |
-| [#54](https://github.com/giorgosg/bitmagnet/pull/54) | Make GraphQL `self` a recovery boundary | local             | Identity/permission/logout regressions observed red; full suite passed |
+| PR                                                   | Change                                        | Downstream source | Verification note                                                         |
+| ---------------------------------------------------- | --------------------------------------------- | ----------------- | ------------------------------------------------------------------------- |
+| [#55](https://github.com/giorgosg/bitmagnet/pull/55) | Add stable GraphQL authentication error codes | local             | Error-code/metadata/redaction regressions observed red; full suite passed |
 
 ## The static review findings
 
