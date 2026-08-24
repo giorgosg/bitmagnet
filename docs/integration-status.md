@@ -63,7 +63,9 @@ review in [porting.md](porting.md) and a test seen **red**.
 
 ## In flight
 
-Nothing.
+| PR                                                   | Change                                    | Downstream source | Verification note                              |
+| ---------------------------------------------------- | ----------------------------------------- | ----------------- | ---------------------------------------------- |
+| [#52](https://github.com/giorgosg/bitmagnet/pull/52) | Resolve browser cookie credentials safely | local             | Gin/gqlgen/PostgreSQL regressions observed red |
 
 ## The static review findings
 
