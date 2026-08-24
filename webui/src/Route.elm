@@ -1,4 +1,4 @@
-module Route exposing (Access(..), BasePath, LoginParams, RegisterParams, Route(..), SearchParams, basePath, emptySearch, fromUrl, guard, toHref)
+module Route exposing (Access(..), BasePath, LoginParams, RegisterParams, Route(..), SearchParams, basePath, emptySearch, fromUrl, guard, returnDestination, toHref)
 
 {-| Routes are real paths, not fragments — see the README.
 
@@ -227,6 +227,83 @@ toHref (BasePath prefix) route =
                 NotFound ->
                     Builder.absolute [] []
            )
+
+
+{-| Where login should land after it succeeds.
+
+The stored `returnUrl` came off the address bar, so it is attacker-supplied: a crafted
+`/login?returnUrl=https://evil.test` would otherwise turn Magnes' own login into an
+off-site redirect, which is exactly the shape a credential-phishing page wants. So this
+never navigates to the string. It re-parses it through the same parser the address bar
+goes through and returns a `Route`, which cannot name another origin at all.
+
+Anything that does not resolve to a real destination within the mount falls back to the
+default one. Login and registration are excluded because returning to them would bounce a
+User who has just signed in straight back to the form.
+
+-}
+returnDestination : BasePath -> Route -> Route
+returnDestination mount from =
+    storedReturnUrl from
+        |> Maybe.andThen internalPath
+        |> Maybe.map (fromUrl mount)
+        |> Maybe.andThen destination
+        |> Maybe.withDefault (Search emptySearch)
+
+
+storedReturnUrl : Route -> Maybe String
+storedReturnUrl route =
+    case route of
+        Login params ->
+            params.returnUrl
+
+        _ ->
+            Nothing
+
+
+{-| A single leading slash, and nothing that could start an authority. `//evil.test` is a
+protocol-relative URL, and browsers have historically treated a backslash as a slash in
+that position, so both are refused rather than normalized.
+-}
+internalPath : String -> Maybe Url
+internalPath raw =
+    if String.startsWith "/" raw && not (List.any (\prefix -> String.startsWith prefix raw) [ "//", "/\\" ]) then
+        let
+            ( path, query ) =
+                case String.split "?" raw of
+                    before :: rest ->
+                        ( before, String.join "?" rest |> nonBlank )
+
+                    [] ->
+                        ( raw, Nothing )
+        in
+        Just
+            { protocol = Url.Https
+            , host = ""
+            , port_ = Nothing
+            , path = path
+            , query = query
+            , fragment = Nothing
+            }
+
+    else
+        Nothing
+
+
+destination : Route -> Maybe Route
+destination route =
+    case route of
+        Login _ ->
+            Nothing
+
+        Register _ ->
+            Nothing
+
+        NotFound ->
+            Nothing
+
+        _ ->
+            Just route
 
 
 guard : BasePath -> Identity.Identity -> Route -> Access

@@ -39,7 +39,60 @@ suite =
                 )
                     |> Expect.equal
                         ( Route.PendingIdentity, Route.Refused "offline" )
+        , describe "returnDestination"
+            [ test "a protected route is resolved back from its stored URL" <|
+                \_ ->
+                    Route.returnDestination mount (Route.Login { returnUrl = Just "/magnes/account/api-keys" })
+                        |> Expect.equal Route.APIKeys
+            , test "a search keeps its query" <|
+                \_ ->
+                    Route.returnDestination mount (Route.Login { returnUrl = Just "/magnes/search?q=dune" })
+                        |> Expect.equal
+                            (searchFor "dune")
+            , test "a protocol-relative URL cannot send a User off-site" <|
+                \_ ->
+                    Route.returnDestination mount (Route.Login { returnUrl = Just "//evil.test/phish" })
+                        |> Expect.equal home
+            , test "an absolute URL cannot send a User off-site" <|
+                \_ ->
+                    Route.returnDestination mount (Route.Login { returnUrl = Just "https://evil.test/phish" })
+                        |> Expect.equal home
+            , test "a backslash cannot stand in for the second slash" <|
+                \_ ->
+                    Route.returnDestination mount (Route.Login { returnUrl = Just "/\\evil.test/phish" })
+                        |> Expect.equal home
+            , test "a path outside the mount is not a destination" <|
+                \_ ->
+                    Route.returnDestination mount (Route.Login { returnUrl = Just "/elsewhere/account" })
+                        |> Expect.equal home
+            , test "login does not return to itself" <|
+                \_ ->
+                    Route.returnDestination mount (Route.Login { returnUrl = Just "/magnes/login" })
+                        |> Expect.equal home
+            , test "registration is not a destination either" <|
+                \_ ->
+                    Route.returnDestination mount (Route.Login { returnUrl = Just "/magnes/register?code=x" })
+                        |> Expect.equal home
+            , test "no stored URL means the default destination" <|
+                \_ ->
+                    Route.returnDestination mount (Route.Login { returnUrl = Nothing })
+                        |> Expect.equal home
+            ]
         ]
+
+
+home : Route.Route
+home =
+    Route.Search Route.emptySearch
+
+
+searchFor : String -> Route.Route
+searchFor term =
+    let
+        params =
+            Route.emptySearch
+    in
+    Route.Search { params | q = Just term }
 
 
 mount : Route.BasePath

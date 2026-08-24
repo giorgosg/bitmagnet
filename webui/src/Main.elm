@@ -10,12 +10,13 @@ import Facet
 import FileTree
 import Format
 import Graphql.Http
-import Html exposing (Attribute, Html, a, button, div, form, h1, header, input, main_, p, span, text)
-import Html.Attributes exposing (attribute, class, classList, href, id, placeholder, spellcheck, type_, value)
+import Html exposing (Attribute, Html, a, button, div, form, h1, header, input, label, main_, p, span, text)
+import Html.Attributes exposing (attribute, class, classList, for, href, id, placeholder, spellcheck, type_, value)
 import Html.Events exposing (on, onClick, onInput, onSubmit, stopPropagationOn)
 import Identity
 import InfiniteList
 import Json.Decode as Decode exposing (Value)
+import Login
 import Magnes.Api.Enum.ContentType as ContentType
 import Magnes.Api.Enum.FilesStatus exposing (FilesStatus(..))
 import Process
@@ -71,6 +72,11 @@ type alias Model =
     -- were asked under, so a page that arrives after the query moved on is dropped rather
     -- than appended to the wrong list.
     , epoch : Int
+
+    -- The login form. It lives here rather than being rebuilt per render so a keystroke
+    -- does not lose what is typed, and it is cleared on success so a password stops
+    -- existing in the model the moment it stops being needed.
+    , login : Login.Form
 
     -- Separate counter for the debounce, because a keystroke is not yet a new query.
     -- Bumping the epoch here would strand an in-flight page — the reply would be dropped
@@ -216,6 +222,7 @@ init flags url key =
       , viewportHeight = 800
       , zone = Time.utc
       , filtersOpen = not (Facet.isEmpty (filtersFor route))
+      , login = Login.empty
       , epoch = 0
       , typing = 0
       }
@@ -287,6 +294,10 @@ type Msg
     | GotResults Int (Result (Graphql.Http.Error Page) Page)
     | GotIdentity Int (Result (Graphql.Http.Error Identity.Identity) Identity.Identity)
     | VisibilityChanged Browser.Events.Visibility
+    | LoginUsernameChanged String
+    | LoginPasswordChanged String
+    | LoginSubmitted
+    | GotLogin (Result (Graphql.Http.Error ()) ())
     | AuthenticationChangedHere
     | AuthenticationChanged
     | Ignored
@@ -297,6 +308,45 @@ update msg model =
     case msg of
         Ignored ->
             ( model, Cmd.none )
+
+        LoginUsernameChanged username ->
+            ( { model | login = Login.withUsername username model.login }, Cmd.none )
+
+        LoginPasswordChanged password ->
+            ( { model | login = Login.withPassword password model.login }, Cmd.none )
+
+        LoginSubmitted ->
+            if not (Login.canSubmit model.login) then
+                ( model, Cmd.none )
+
+            else
+                ( { model | login = Login.withState Login.Submitting model.login }
+                , Login.submit model.apiUrl (Login.credentials model.login) GotLogin
+                )
+
+        GotLogin (Err error) ->
+            ( { model | login = Login.withState (Login.Rejected (ApiError.fromError error)) model.login }
+            , Cmd.none
+            )
+
+        GotLogin (Ok ()) ->
+            let
+                destination =
+                    Route.returnDestination model.basePath model.route
+
+                -- Dropping the form takes the password with it. The rest is exactly what
+                -- any other authentication change does — tell the other tabs, and let the
+                -- server say what the new Identity may do — so it goes through the same
+                -- branch rather than a second copy of it that could drift.
+                ( refreshed, refresh ) =
+                    update AuthenticationChangedHere { model | login = Login.empty }
+            in
+            ( refreshed
+            , Cmd.batch
+                [ Nav.replaceUrl model.key (Route.toHref model.basePath destination)
+                , refresh
+                ]
+            )
 
         AuthenticationChanged ->
             beginIdentityRefresh model
@@ -385,7 +435,7 @@ update msg model =
                     , epoch = epoch
                     , infiniteList = InfiniteList.init
                   }
-                , Cmd.batch [ cmd, scrollListToTop ]
+                , Cmd.batch [ cmd, scrollListToTop, focusOnArrival route ]
                 )
 
         FieldChanged field ->
@@ -555,6 +605,28 @@ update msg model =
                             (\message current ->
                                 ( { current | results = Failed message }, Cmd.none )
                             )
+
+
+loginMessages : Login.Messages Msg
+loginMessages =
+    { usernameChanged = LoginUsernameChanged
+    , passwordChanged = LoginPasswordChanged
+    , submitted = LoginSubmitted
+    }
+
+
+{-| A form arrived at through a client-side navigation is a virtual-DOM patch, not a new
+document, so `autofocus` never fires. Focus is moved explicitly instead. A missing element
+is not a failure worth reporting — the route may have been guarded away before this ran.
+-}
+focusOnArrival : Route -> Cmd Msg
+focusOnArrival route =
+    case route of
+        Route.Login _ ->
+            Task.attempt (\_ -> Ignored) (Browser.Dom.focus Login.usernameFieldId)
+
+        _ ->
+            Cmd.none
 
 
 {-| Every failed request asks the same question first: does this say the Identity Magnes
@@ -1285,7 +1357,7 @@ viewAllowedRoute model =
             viewTorrent model
 
         Route.Login _ ->
-            p [ class "notice" ] [ text "Sign in." ]
+            Login.view loginMessages model.login
 
         Route.Register _ ->
             p [ class "notice" ] [ text "Register User." ]

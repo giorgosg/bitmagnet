@@ -37,6 +37,14 @@ suite =
                                 Just { namespace = "graphql", object = "auth", action = "query" }
                             }
                         )
+        , test "a failed browser login, which arrives beside partial data" <|
+            \_ ->
+                -- bitmagnet answers a rejected loginBrowser with data present
+                -- ("loginBrowser": null) alongside the error. elm-graphql's `send` still
+                -- yields Err, because only `parseableErrorAsSuccess` would prefer the
+                -- data, and nothing here uses it. A rejected login cannot read as success.
+                live """{"errors":[{"message":"invalid username or password","path":["self","loginBrowser"],"locations":[{"line":1,"column":15}],"extensions":{"code":"INVALID_CREDENTIALS"}}],"data":{"self":{"loginBrowser":null}}}"""
+                    |> Expect.equal ApiError.InvalidCredentials
         , test "a failed login" <|
             \_ ->
                 live """{"errors":[{"message":"invalid username or password","path":["self","login"],"locations":[{"line":1,"column":15}],"extensions":{"code":"INVALID_CREDENTIALS"}}],"data":null}"""
