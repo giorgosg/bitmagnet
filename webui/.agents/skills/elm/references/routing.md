@@ -176,24 +176,22 @@ toHref r =
         Home -> "/"
         Search Nothing -> "/search"
         Search (Just q) -> "/search?q=" ++ Url.percentEncode q
-        Torrent hash -> "/torrent/" ++ hash
-        Dashboard -> "/dashboard"
+        Item id -> "/item/" ++ id
         NotFound -> "/"
 ```
 
 A `case` here means adding a route variant produces a compile error at the link builder,
 not a dead link.
 
-## Server requirement
+## What real paths demand of the server
 
-Magnes uses **real paths, not fragments** — decided, don't reopen it. `Browser.application`
-with real paths needs whatever serves the app to fall back to `index.html` on any unmatched
-path, or a deep link 404s on refresh.
+`Browser.application` with real paths (rather than `#/` fragments) needs whatever serves
+the app to fall back to `index.html` on any unmatched path, or a deep link 404s on refresh.
 
-Everything that serves Magnes already does: `dev.js` in development, and bitmagnet's
-`http_server.static` mount in deployment. So this costs nothing and keeps `#/` out of every
-URL.
+Check that both ends do it — the dev server *and* the deployment. They are usually
+different programs, and a fragment-free URL scheme that works locally and 404s in
+production is the standard way this bites.
 
-The corollary: any new top-level route must not collide with a path the host owns. Under
-the static mount that means Magnes is namespaced beneath the configured prefix and the
-collision risk is small, but `/graphql` and the bundled `/webui` are bitmagnet's.
+The corollary: a new top-level route must not collide with a path the host owns. An API
+endpoint and any bundled UI are the usual claimants. Serving the app beneath a path prefix
+makes collisions unlikely, since everything the app routes is namespaced under it.

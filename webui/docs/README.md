@@ -13,6 +13,7 @@ where Magnes is going; these pages describe what is actually true today.
 | Read                                                   | When                                                                              |
 | ------------------------------------------------------ | --------------------------------------------------------------------------------- |
 | [plan.md](plan.md)                                     | Understanding phase 1 — the UI with no server, which is what currently runs       |
+| [bitmagnet-api.md](bitmagnet-api.md)                   | Writing any query at all — the schema, transcribed; bitmagnet publishes no reference |
 | [auth-api.md](auth-api.md)                             | Writing any query or mutation that touches identity, users, roles, keys           |
 | [bitmagnet-ui-audit.md](bitmagnet-ui-audit.md)         | Deciding what Magnes should do — what the Angular UI does, and what it never did  |
 | [accounts-plan.md](accounts-plan.md)                   | Implementing accounts in Magnes: the work items, in order, with the decisions     |

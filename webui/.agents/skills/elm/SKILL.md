@@ -1,101 +1,63 @@
 ---
 name: elm
-description: Elm language, Elm Architecture, routing, and elm-graphql conventions for the Magnes codebase. Use when writing or reviewing any .elm file, wiring Browser.application/routing, building or regenerating the bitmagnet GraphQL client, decoding API data, or debugging Elm compiler errors.
+description: Elm 0.19 conventions - the Elm Architecture, Browser.application routing, elm-graphql clients, modeling with custom types, and rendering long lists. Use when writing or reviewing any .elm file, wiring routes, querying a GraphQL API from Elm, choosing an Elm package, or reading Elm compiler errors.
 ---
 
-# Elm in Magnes
+# Elm
 
-Magnes is a single-page Elm app talking to bitmagnet's GraphQL API. The API client
-is **generated, not hand-written** — treat `src/Magnes/Api/` as build output.
-
-At runtime the endpoint is **read from `window.MAGNES_API_URL`**, set by
-`public/config.js`, so one build works against any instance. Never hard-code it in Elm.
-
-There is no Magnes server. An earlier draft of this file said requests were proxied
-through one; that was never built, and the reason for it has expired — the bitmagnet fork
-now enforces permissions on every GraphQL field itself. Two arrangements are real:
-
-- **Cross-origin** — the endpoint is an absolute bitmagnet URL and the browser queries it
-  directly. This works because bitmagnet's CORS defaults are permissive.
-- **Same-origin** — bitmagnet serves the built `public/` itself via `http_server.static`,
-  and the endpoint is the relative `/graphql`. No CORS at all.
-
-Elm does not care which: it reads one string. Code generation always points at bitmagnet
-directly, since the schema is identical either way. See `docs/serving-and-testing.md`.
+Elm 0.19. The compiler is the design tool: most of what follows is about giving it enough
+information to reject the broken version.
 
 ## Toolchain
 
-`elm` is not installed globally. Run everything through `npx`:
+Assume `elm` is not installed globally; run through `npx`:
 
 ```bash
-npx elm make src/Main.elm --output=dist/main.js   # dev build
+npx elm make src/Main.elm --output=dist/main.js
 npx elm make src/Main.elm --optimize --output=dist/main.js
 npx elm repl
-npx elm-format src/ --yes                          # canonical formatting, no debate
+npx elm-format src/ --yes
 npx elm-test
 ```
 
-Regenerate the API client from a live bitmagnet instance:
+Check the project's `package.json` scripts first — most projects wrap these, and the
+wrapper knows the real paths.
 
-```bash
-npx @dillonkearns/elm-graphql http://<host>:3333/graphql --base Magnes.Api --output src
+`elm-format` has no options and no style debate. Run it; don't argue with it.
+
+## Make impossible states impossible
+
+The central Elm move, and the one that most changes what code gets written. Encode states
+as a custom type so the broken combinations cannot be constructed:
+
+```elm
+type Data e a
+    = Loading
+    | Failure e
+    | Success a
 ```
 
-This writes `src/Magnes/Api/{Query,Mutation,Object,InputObject,Enum,Scalar,...}.elm`.
-Never hand-edit those files — a regeneration overwrites them. If a generated type is
-awkward to use, wrap it in your own module rather than patching the generator output.
+Prefer this to `{ isLoading : Bool, error : Maybe String, items : List a }`, which admits
+four states that cannot happen and lets the view forget one. With the custom type the
+`case` is exhaustive, so a missing branch is a compile error.
 
-The one exception is `Magnes/Api/ScalarCodecs.elm`, which is generated *to be* edited and
-survives regeneration; that's where custom scalars get mapped to real Elm types. bitmagnet
-declares six: `Hash20`, `Date`, `DateTime`, `Duration`, `Void`, `Year`.
-
-**The schema is documented in [references/bitmagnet-api.md](references/bitmagnet-api.md)** —
-read it before writing a query. bitmagnet publishes no API reference, so that file is
-transcribed from the schema files in its repo.
-Generated code is committed (so builds don't need a live server) and excluded from
-`elm-review` via `Review.Rule.ignoreErrorsForDirectories [ "src/Magnes/Api" ]`.
-
-## Check for a package before building it
-
-Do this **before** writing a feature, not after. Elm's ecosystem is small enough that the
-registry is exhaustively searchable in a few seconds, and its packages are unusually safe
-to adopt: enforced semantic versioning means a patch bump cannot change an API, and no
-package can perform side effects the type system doesn't declare.
-
-The whole registry is one 275KB JSON file — grep it locally rather than guessing names:
-
-```bash
-curl -s --compressed https://package.elm-lang.org/search.json -o /tmp/pkgs.json
-python3 -c "
-import json
-d = json.load(open('/tmp/pkgs.json'))
-for p in d:
-    if 'scroll' in p['name'].lower() or 'scroll' in p['summary'].lower():
-        print(p['name'], p['version'], '|', p['summary'])
-"
-```
-
-The `--compressed` flag is required; the server rejects requests without it. ~2000
-packages total.
-
-Then vet the candidate before adding it:
-
-1. **Check `elm.json` for the Elm version bound** — `"0.19.0 <= v < 0.20.0"`. Elm 0.19
-   was a breaking change and plenty of registry entries are 0.18-only. This is the single
-   most common reason a promising-looking package is unusable.
-2. **Read the source, not just the README.** Elm packages are small; reading them is
-   usually faster than integrating blind. Doc comments in particular go stale — several
-   still show 0.18 syntax like `style [ ("height", "300px") ]` where 0.19 wants
-   `style "height" "300px"`.
-3. Prefer `elm/*` and `elm-community/*` where they cover the need.
-
-Read the docs from raw GitHub sources — `package.elm-lang.org` is itself an Elm SPA and
-returns an empty shell to any fetcher.
+Name messages for the interaction, not the mutation — `ChangedQuery String`,
+`SubmittedSearch`, `GotResults (Result Error Page)`. A message named after the state
+change it performs (`SetQuery`) puts update logic in the constructor's name and makes two
+callers with different intent share one message.
 
 ## The Elm Architecture
 
-Model / view / update, wired by one of four program constructors. Magnes uses
-`Browser.application` — it owns the whole page and handles URL changes:
+Model / view / update, wired by one of four program constructors:
+
+| Constructor | Owns | Use when |
+| --- | --- | --- |
+| `sandbox` | nothing | no effects at all |
+| `element` | one DOM node | embedding in a JS page |
+| `document` | `<title>` and `<body>` | whole page, no URL handling |
+| `application` | the page and its URL | single-page app with routes |
+
+`Browser.application` is the one with routing:
 
 ```elm
 application :
@@ -109,10 +71,7 @@ application :
     -> Program flags model msg
 ```
 
-The others, for reference: `sandbox` (no effects), `element` (embeds in a JS page,
-`view : model -> Html msg`), `document` (owns `<title>` and `<body>`, no URL handling).
-
-`Browser.application` intercepts every link click instead of navigating:
+It intercepts every link click rather than navigating:
 
 ```elm
 type UrlRequest
@@ -123,27 +82,24 @@ type UrlRequest
 Handle both — `Internal` with `Nav.pushUrl key (Url.toString url)`, `External` with
 `Nav.load href`. Dropping either silently breaks links.
 
-`Navigation.Key` is only obtainable from `application`'s `init`. Store it in the Model;
-every `pushUrl`/`replaceUrl`/`back`/`forward` needs it.
+`Navigation.Key` is obtainable only from `application`'s `init`. Store it in the Model;
+every `pushUrl` / `replaceUrl` / `back` / `forward` needs it.
 
 - `pushUrl key url` — change URL, no page load, adds a history entry.
-- `replaceUrl key url` — same, but no history entry. Use for filter/search churn so the
-  back button doesn't have to walk every keystroke.
+- `replaceUrl key url` — same, no history entry. Use for keystroke-level churn (search
+  terms, filter toggles) so the back button doesn't have to walk every character.
 - `load url` / `reload` — full page load. Escape hatch only.
 
 ## Routing
 
-Route matching lives in one `Route` custom type plus one parser. See
-[references/routing.md](references/routing.md) for the full `Url.Parser` API with examples.
-
-The essential shape:
+Route matching is one `Route` custom type plus one parser plus its inverse. Full
+`Url.Parser` API with worked examples in [references/routing.md](references/routing.md).
 
 ```elm
 type Route
     = Home
     | Search (Maybe String)
-    | Torrent String
-    | Dashboard
+    | Item String
     | NotFound
 
 route : Parser (Route -> a) a
@@ -151,8 +107,7 @@ route =
     oneOf
         [ map Home top
         , map Search (s "search" <?> Query.string "q")
-        , map Torrent (s "torrent" </> string)
-        , map Dashboard (s "dashboard")
+        , map Item (s "item" </> string)
         ]
 
 toRoute : Url -> Route
@@ -160,156 +115,111 @@ toRoute url =
     Maybe.withDefault NotFound (parse route url)
 ```
 
-**`Torrent` is an address, not a mode.** It renders the same expanded row the results list
-renders — share `viewTorrentExpanded` between the two rather than writing a detail page.
-Opened cold there is no list to draw from, so the route fetches that one torrent — via
-`search` with `infoHashes: [hash]`, since bitmagnet has no get-by-hash query.
+**Write the inverse (`toHref : Route -> String`) alongside the parser and build every link
+through it.** A `case` there means adding a route variant is a compile error at the link
+builder rather than a dead link discovered later.
 
-**Row expansion is local state and must stay out of the URL.** Scanning means expanding
-several rows in passing; if each pushed a history entry the back button would fill with
-them. Expansion lives on the record in the model (which is also what the virtualized list
-requires — see below), and several rows may be open at once.
+**Put shareable state in the URL; keep ephemeral state in the Model.** A query, a filter
+and a sort order make a link worth sending, so they belong in query parameters. Scroll
+depth and which rows a user expanded in passing do not — putting them in the URL fills the
+back button with entries nobody meant to create.
 
-Rows should still link to `/torrent/<hash>` with a real `<a href>`, so middle-click and
-open-in-new-tab work. `Browser.application` intercepts the plain click and routes it
-through `onUrlRequest` as `Internal`; the browser handles the modified clicks natively.
-
-Search terms, filters, and sort belong in the URL (`<?>` + `Url.Parser.Query`), not only
-in the Model — that makes results linkable and back/forward meaningful. Scroll offset
-does **not** go in the URL: results load on scroll, and depth is deliberately not
-addressable. Use `replaceUrl` for keystroke-level churn so back doesn't unwind one entry
-per character.
+Real paths (rather than `#/` fragments) require whatever serves the app to fall back to
+`index.html` on unmatched paths, or a deep link 404s on refresh. Confirm the deployment
+does that before choosing them, and keep top-level routes clear of paths the host owns.
 
 ## elm-graphql
 
-Full API notes in [references/elm-graphql.md](references/elm-graphql.md). The rules that
-matter most:
+`dillonkearns/elm-graphql` generates a type-safe client by introspecting a live schema.
+Full API notes in [references/elm-graphql.md](references/elm-graphql.md).
 
-**Build selections with `SelectionSet.mapN`, not the `succeed |> with` pipeline.** The
-pipeline typechecks but produces much worse error messages when a field is added or
-reordered:
-
-```elm
-rowSelection : SelectionSet Row Magnes.Api.Object.TorrentContent
-rowSelection =
-    SelectionSet.map4 Row
-        TorrentContent.id
-        TorrentContent.title
-        TorrentContent.seeders
-        (TorrentContent.torrent torrentSelection)
+```bash
+npx @dillonkearns/elm-graphql <endpoint> --base Api --output src
 ```
 
-Search returns `TorrentContent`, which *nests* the `Torrent` — so selections nest too.
-See [references/bitmagnet-api.md](references/bitmagnet-api.md) for the schema.
+**Generated code is build output.** Never hand-edit it — regeneration overwrites. If a
+generated type is awkward, wrap it in your own module. Commit the output so a checkout
+builds without reaching a server, and exclude it from review:
 
-**Optional arguments are three-state**, not `Maybe`:
+```elm
+Review.Rule.ignoreErrorsForDirectories [ "src/Api" ]
+```
+
+The one exception is `Api/ScalarCodecs.elm`, generated *to be* edited and preserved across
+regeneration. That is where custom scalars become real Elm types instead of opaque
+`String` wrappers.
+
+**Build selections with `SelectionSet.mapN`, not the `succeed |> with` pipeline.** Both
+typecheck; the pipeline produces far worse errors when a field is added or reordered.
+Reach for the pipeline only past 8 fields.
+
+```elm
+itemSelection : SelectionSet Item Api.Object.Item
+itemSelection =
+    SelectionSet.map3 Item
+        Item.id
+        Item.title
+        (Item.owner ownerSelection)
+```
+
+**Optional arguments are three-state, not `Maybe`:**
 
 ```elm
 type OptionalArgument a = Present a | Absent | Null
 ```
 
-Absent and null can mean different things to the server. Where a *field* has optional
-arguments, the generated function takes a record-updater for them:
+Absent and null can mean different things to a server. Fields with optional arguments take
+a record-updater: `Query.field (\opts -> { opts | limit = Present 50 }) selection`.
+
+**Keep the two failure modes apart.** `Graphql.Http.Error` distinguishes a GraphQL error
+(which may carry *partial* data) from an HTTP error. Decide deliberately which to show;
+collapsing both into one "something went wrong" string at the boundary throws away the
+distinction before the view can use it.
+
+A `BadPayload` almost always means the committed generated code is stale. Regenerate
+before debugging anything else.
+
+## Modules
+
+Follow the official guidance, which cuts against React and Vue instincts:
+
+- **Build modules around a type, not a layer.** `Page.Search`, `Item` — never
+  `Models.elm` / `Update.elm` / `View.elm`. Layer splits create boundaries where "which
+  file does this go in?" has no answer.
+- **Long files are fine.** There is no mutable state to lose track of; a 1000-line page
+  module is healthier than six files that must be read together.
+- **Write functions, not components.** A sidebar is `viewSidebar : Model -> Html Msg`, not
+  a module with its own Model/Msg/update. Nesting TEA costs real complexity and pays only
+  for genuinely independent state.
+- **Let duplication sit.** Two similar pages usually diverge. The compiler makes unifying
+  them safe later, once the shape is known.
+
+## Long lists
+
+Three tools, in increasing order of cost:
+
+`Html.Keyed.node "tbody" [] [ ( id, viewRow item ) ]` gives each row a stable identity, so
+appending a batch doesn't rebuild the rows above it. Key on a stable domain id — never the
+list index, whose meaning shifts as the list grows.
+
+`Html.Lazy.lazy fn arg` skips re-render when `arg` is unchanged **by reference**. Pass the
+smallest data the function needs: `lazy viewResults model.results` works, `lazy viewPage
+model` never hits.
+
+Virtualization — rendering only visible rows — is worth adopting **from the start** rather
+than retrofitting, because the code deciding *what to render* and the code deciding *when
+to fetch more* both want to own the scroll handler, and Elm allows one `on "scroll"` per
+node. See [references/packages.md](references/packages.md) for the survey and the choice.
+
+If rows vary in height, keep height a **pure function of the item**, computable without
+measuring. A row whose height is only known after a fetch needs a fixed-size placeholder
+for the pending state — that costs exactly one layout shift when the data arrives, instead
+of a scrollbar that jumps on every response.
+
+Model fetch state so a scroll event during an in-flight request cannot fire a second one,
+and so "no more results" is distinguishable from "still loading":
 
 ```elm
-SomeQuery.field (\optionals -> { optionals | limit = Present 50 }) selection
-```
-
-**bitmagnet mostly doesn't work that way.** Its queries take a single non-null `input:`
-object, so the optionality lives in the input object's *fields* rather than in the
-argument list, and the query is nested two levels:
-
-```elm
-Query.torrentContent
-    (TorrentContentQuery.search
-        { input = InputObject.buildTorrentContentSearchQueryInput
-            (\opts -> { opts | queryString = Present term, limit = Present 50 })
-        }
-        resultSelection
-    )
-```
-
-The exact generated names above are **inferred, not verified** — nothing has been
-generated yet. Check them against `src/Magnes/Api/` after the first codegen run.
-
-**Sending a request:**
-
-```elm
-Graphql.Http.queryRequest endpoint query
-    |> Graphql.Http.send GotResponse
-```
-
-`send : (Result (Error decodesTo) decodesTo -> msg) -> Request decodesTo -> Cmd msg`.
-The error type distinguishes GraphQL errors (possibly with partial data) from HTTP
-errors — don't collapse both into a bare "something went wrong" string in the Model
-until the view actually needs one.
-
-## Modeling
-
-Custom types are the main tool. Encode states so impossible ones don't typecheck:
-
-```elm
-type Data e a
-    = Loading
-    | Failure e
-    | Success a
-```
-
-Prefer this over `{ isLoading : Bool, error : Maybe String, items : List Torrent }`,
-which admits four states that can't happen. The view then must handle each case, so a
-loading spinner can't be forgotten.
-
-Same for messages — name the interaction, not the mutation:
-
-```elm
-type Msg
-    = ChangedQuery String
-    | SubmittedSearch
-    | GotTorrents (Result (Graphql.Http.Error TorrentPage) TorrentPage)
-    | ClickedLink Browser.UrlRequest
-    | ChangedUrl Url
-```
-
-## Module structure
-
-Follow the official guidance, which cuts against instincts from React/Vue:
-
-- **Build modules around a type**, not around a layer. `Page.Search`, `Page.Torrent`,
-  `Torrent` — never `Models.elm` / `Update.elm` / `View.elm`. The shared expanded-row view
-  belongs in `Torrent` (the type), used by both pages. Layer-based splits create
-  boundaries where "which file does this go in?" has no answer.
-- **Long files are fine.** Elm has no mutable state to lose track of; a 1000-line
-  `Page.Search` is healthier than six files that must be read together.
-- **Don't build components.** A sidebar is a `viewSidebar : Model -> Html Msg` function,
-  not a module with its own Model/Msg/update. Nesting TEA is a real cost and is only
-  worth paying for genuinely independent state.
-- **Don't factor out shared code early.** Two pages that look similar usually diverge.
-  The compiler makes it safe to unify later, once the shape is actually known.
-
-## Infinite scroll and large lists
-
-Results append as the user reaches the bottom — no page numbers — so within a query the
-loaded list only ever grows. The results list is virtualized (see below), which handles
-rendering cost there. For **any other** long list, two tools apply:
-
-- `Html.Keyed.node "tbody" [] [ ( id, viewRow t ) ]` — stable identity per row, so
-  appending a batch doesn't rebuild every row above it. Key on `TorrentContent.id`, never
-  on list index (an index key changes meaning as the list grows) and never on `infoHash`
-  (one torrent can surface as several content rows, so hashes collide).
-- `Html.Lazy.lazy fn arg` — skips re-render when `arg` is unchanged *by reference*. Pass
-  the smallest data the function needs: `lazy viewResults model.torrents` works,
-  `lazy viewPage model` never hits.
-
-Model the fetch state so a scroll event during an in-flight request can't fire a second
-one, and so the end of results is distinguishable from a pending load:
-
-```elm
-type alias SearchState =
-    { query : Query
-    , loaded : List TorrentContent
-    , more : More
-    }
-
 type More
     = Idle Int          -- next offset
     | Loading Int
@@ -317,68 +227,46 @@ type More
     | Failed Int Error
 ```
 
-Pagination is **offset-based** — bitmagnet's schema has no cursors. Two consequences that
-are easy to get wrong, both detailed in [references/bitmagnet-api.md](references/bitmagnet-api.md):
+Note that `++` on a long left operand is O(n). For very deep lists, accumulate reversed
+and reverse once in the view, or keep batches as a `List (List a)`.
 
-- `hasNextPage` and `totalCount` are **opt-in request flags that fail silently**. Omit
-  them and the response says `hasNextPage: false` and `totalCount: 0` — not null. The
-  scroll stops dead after the first batch and looks like "no more results". Set both on
-  every search.
-- **Dedupe by `id` when appending.** bitmagnet is a live crawler; new rows shift offsets
-  under a recency sort, so a batch routinely repeats rows already shown. This is the
-  steady state, not a rare race.
+## Check the registry before building it
 
-Append with `loaded ++ batch`, and note that `++` on a long left operand is O(n) — for
-very deep scrolls, accumulate reversed and reverse once in the view, or keep batches as a
-`List (List Torrent)`.
+Do this **before** writing a feature. Elm's registry is small enough to search
+exhaustively in seconds, and its packages are unusually safe to adopt: enforced semantic
+versioning means a patch bump cannot change an API, and no package performs side effects
+its types don't declare.
 
-Use **`FabienHenon/elm-infinite-list-view`** for the results list, from the start rather
-than as a later optimization. Rationale and the rejected alternatives are in
-[references/packages.md](references/packages.md); the short version is that it's the only
-candidate that doesn't seize the scroll container, so the same handler can also detect
-near-bottom and fire the next fetch. Don't add a second scroll package — Elm allows one
-`on "scroll"` per node.
+The whole registry is one ~275KB JSON file — grep it locally rather than guessing names:
 
-The package renders only visible rows and applies `lazy3` per item itself, so the manual
-`Html.Keyed`/`Html.Lazy` work above is *not* additionally needed inside the results list.
-It still applies to any other long list.
+```bash
+curl -s --compressed https://package.elm-lang.org/search.json -o /tmp/pkgs.json
+```
 
-### Row heights must be a pure function of the item
+`--compressed` is mandatory; the server returns a 406 without it. Search **name and
+summary both** — Elm package names are often oblique.
 
-Rows expand in place: collapsed → metadata → file list. Use `withVariableHeight`, and keep
-every state's height computable without measuring:
+Then vet the candidate:
 
-| Row state | Height |
-| --- | --- |
-| Collapsed | constant — name truncated with `text-overflow: ellipsis` |
-| Expanded | constant — metadata panel |
-| Expanded, files loading | constant placeholder |
-| Expanded, files loaded | `min cap (header + fileCount * rowHeight)` |
+1. **Check `elm.json` for the version bound** — `"0.19.0 <= v < 0.20.0"`. Elm 0.19 was a
+   breaking change and many registry entries are 0.18-only. This is the most common reason
+   a promising package turns out to be unusable.
+2. **Read the source, not the README.** Elm packages are small, and reading one is usually
+   faster than integrating it blind. Doc comments go stale — plenty still show 0.18 syntax
+   like `style [ ("height", "300px") ]` where 0.19 wants `style "height" "300px"`.
+3. Prefer `elm/*` and `elm-community/*` where they cover the need.
 
-The file level often doesn't exist: `torrent.filesStatus` is `no_info` for roughly 4 rows
-in 5 on a real index. Branch on it before offering the expander — the states are
-`no_info | single | multi | over_threshold` and only `multi` has a list worth fetching.
-
-The loading placeholder is what keeps the function total: a torrent's file list needs its
-own fetch, so the count is unknown at click time. Transitioning to the computed height
-only once the files arrive gives exactly one layout shift instead of a jumping scrollbar.
-`cap` matters because a torrent can hold thousands of files — past it, scroll inside the
-expanded panel.
-
-**Expansion state belongs on the record in the model**, not zipped in at view time. The
-package's internal `lazy3` compares `item` by reference, so building wrapper records in
-the view allocates fresh ones each render and silently disables it.
-
-Debounce search-as-you-type before it reaches the network.
+Read docs from `raw.githubusercontent.com`. `package.elm-lang.org` is itself an Elm SPA and
+serves an empty shell to any fetcher.
 
 ## Gotchas
 
-- Elm has no runtime exceptions in practice, but `Debug.log`/`Debug.todo` block
-  `--optimize`. Strip them before a production build.
-- `elm-format` is not configurable and not a matter of taste — run it, don't argue with it.
-- A missing `case` branch is a compile error. That's the point; don't add a catch-all `_ ->`
-  to silence it unless the behavior really is "everything else does nothing."
-- Record update syntax needs an existing value: `{ model | query = q }`. There is no
-  partial-record literal.
-- `==` doesn't work on functions and will fail at runtime; it doesn't work on custom types
-  containing them either.
+- `Debug.log` and `Debug.todo` block `--optimize`. Strip them before a production build.
+- A missing `case` branch is a compile error, which is the point. Add `_ ->` only when the
+  behaviour genuinely is "everything else does nothing".
+- Record update needs an existing value: `{ model | query = q }`. There is no partial
+  record literal.
+- `==` on functions fails at **runtime**, not compile time — including custom types that
+  contain them.
+- `parse` needs a real `Url`; a bare path string doesn't parse into one. Only a trap in
+  tests, where there is no `init` to take one from.

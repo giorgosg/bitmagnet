@@ -5,33 +5,33 @@
 ## Code generation
 
 ```bash
-npx @dillonkearns/elm-graphql http://<host>:3333/graphql --base Magnes.Api --output src
+npx @dillonkearns/elm-graphql <endpoint> --base Api --output src
 ```
 
-With auth, if bitmagnet is behind one:
+Behind authentication:
 
 ```bash
-npx @dillonkearns/elm-graphql <url> --base Magnes.Api --output src --header 'headerKey: header value'
+npx @dillonkearns/elm-graphql <endpoint> --base Api --output src --header 'headerKey: header value'
 ```
 
-Generated module layout (with `--base Magnes.Api`):
+Generated module layout (with `--base Api`):
 
 | Module | Contents |
 | --- | --- |
-| `Magnes.Api.Query` | one function per root query field |
-| `Magnes.Api.Mutation` | one function per root mutation field |
-| `Magnes.Api.Object` | phantom types, one per GraphQL object — the `scope` in `SelectionSet a scope` |
-| `Magnes.Api.Object.Torrent` (etc.) | field selectors for that object |
-| `Magnes.Api.InputObject` | record types + constructors for GraphQL input objects |
-| `Magnes.Api.Enum.*` | Elm custom types for GraphQL enums |
-| `Magnes.Api.Scalar` | opaque wrappers for custom scalars |
-| `Magnes.Api.ScalarCodecs` | the one generated file intended to be edited (see below) |
+| `Api.Query` | one function per root query field |
+| `Api.Mutation` | one function per root mutation field |
+| `Api.Object` | phantom types, one per GraphQL object — the `scope` in `SelectionSet a scope` |
+| `Api.Object.<Name>` | field selectors for that object |
+| `Api.InputObject` | record types + constructors for GraphQL input objects |
+| `Api.Enum.*` | Elm custom types for GraphQL enums |
+| `Api.Scalar` | opaque wrappers for custom scalars |
+| `Api.ScalarCodecs` | the one generated file intended to be edited (see below) |
 
 ## SelectionSet
 
 `SelectionSet decodesTo scope` — a set of fields to fetch from `scope`, plus the decoder
-for the result. The `scope` phantom type is what stops you selecting a `Torrent` field
-inside a `TorrentContent` selection.
+for the result. The `scope` phantom type is what stops you selecting one object's field
+inside another object's selection.
 
 ```elm
 import Graphql.Operation exposing (RootQuery)
@@ -146,14 +146,18 @@ withTimeout : Float -> Request decodesTo -> Request decodesTo
 ```
 
 ```elm
-searchTorrents : String -> String -> Cmd Msg
-searchTorrents endpoint term =
-    Query.torrentContent
+search : String -> String -> Cmd Msg
+search endpoint term =
+    Query.items
         (\opts -> { opts | queryString = Present term })
         resultSelection
         |> Graphql.Http.queryRequest endpoint
-        |> Graphql.Http.send GotTorrents
+        |> Graphql.Http.send GotItems
 ```
+
+The endpoint is a plain `String`, so read it at runtime (a global set by a config file,
+or a flag passed to `init`) rather than baking it into the build. One build then works
+against any instance, and a relative `/graphql` works when the API serves the app itself.
 
 ## Errors
 
@@ -182,12 +186,12 @@ sign the committed generated code is stale relative to the server. Regenerate.
 
 ## Custom scalars
 
-Custom scalars default to `String`-backed opaque wrappers in `Magnes.Api.Scalar` because
-GraphQL gives no type-safe way to describe them. Two ways to get real types:
+Custom scalars default to `String`-backed opaque wrappers in `Api.Scalar`, because GraphQL
+gives no type-safe way to describe them. Two ways to get real types:
 
-1. Edit `Magnes.Api.ScalarCodecs` — the generated file designed to be customized. It maps
-   each scalar to an Elm type plus encoder/decoder, and regeneration preserves it. This is
-   the right place for bitmagnet's date and hash scalars.
+1. Edit `Api.ScalarCodecs` — the generated file designed to be customized. It maps each
+   scalar to an Elm type plus encoder/decoder, and regeneration preserves it. This is the
+   right place for dates, ids and hashes.
 2. Unwrap at the call site with `SelectionSet.map` / `mapOrFail`. Fine for one-offs,
    repetitive if the scalar is common.
 
@@ -196,5 +200,5 @@ GraphQL gives no type-safe way to describe them. Two ways to get real types:
 Generated code trips lint rules. Exclude it:
 
 ```elm
-Review.Rule.ignoreErrorsForDirectories [ "src/Magnes/Api" ]
+Review.Rule.ignoreErrorsForDirectories [ "src/Api" ]
 ```

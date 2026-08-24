@@ -1,4 +1,11 @@
-# bitmagnet GraphQL API
+# bitmagnet's GraphQL API
+
+Transcribed from the schema files in `../bitmagnet/graphql/schema/`, which are the source
+of truth — re-read them when something here looks wrong. bitmagnet publishes no API
+reference of its own, which is why this exists.
+
+Read it before writing a query. For how to *express* a query in Elm, see the `elm` skill;
+this page is only about what bitmagnet offers.
 
 Schema facts below are verbatim from `graphql/schema/*.graphqls` in
 [bitmagnet-io/bitmagnet](https://github.com/bitmagnet-io/bitmagnet) (`main`). There is no
