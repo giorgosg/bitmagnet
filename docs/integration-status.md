@@ -62,7 +62,9 @@ review in [porting.md](porting.md) and a test seen **red**.
 
 ## In flight
 
-Nothing.
+| PR                                                   | Change                                  | Downstream source | Verification note                                  |
+| ---------------------------------------------------- | --------------------------------------- | ----------------- | -------------------------------------------------- |
+| [#51](https://github.com/giorgosg/bitmagnet/pull/51) | Add the browser session cookie contract | local             | Real Gin/gqlgen/PostgreSQL regression observed red |
 
 ## The static review findings
 

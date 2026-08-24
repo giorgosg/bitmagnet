@@ -3,6 +3,7 @@ package gqlfx
 import (
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/api_key"
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/browser_session"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/rbac"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/user"
 	"github.com/bitmagnet-io/bitmagnet/internal/blocking"
@@ -126,6 +127,7 @@ func New() fx.Option {
 							UserService:          p.UserService,
 							APIKeyService:        p.APIKeyService,
 							RBACService:          p.RBACService,
+							BrowserCookie:        p.BrowserCookie,
 						}, nil
 					}),
 				}
@@ -157,6 +159,7 @@ type Params struct {
 	UserService          user.Service
 	APIKeyService        api_key.Service
 	RBACService          rbac.Service
+	BrowserCookie        browser_session.Cookie
 }
 
 type Result struct {

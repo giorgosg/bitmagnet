@@ -2,6 +2,7 @@ package resolvers
 
 import (
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/api_key"
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/browser_session"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/rbac"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/user"
 	"github.com/bitmagnet-io/bitmagnet/internal/blocking"
@@ -32,4 +33,5 @@ type Resolver struct {
 	UserService          user.Service
 	APIKeyService        api_key.Service
 	RBACService          rbac.Service
+	BrowserCookie        browser_session.Cookie
 }

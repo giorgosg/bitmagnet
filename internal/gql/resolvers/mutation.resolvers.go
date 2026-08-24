@@ -22,6 +22,7 @@ func (r *mutationResolver) Self(ctx context.Context) (gqlmodel.SelfMutation, err
 		UserService:   r.UserService,
 		APIKeyService: r.APIKeyService,
 		RBACService:   r.RBACService,
+		BrowserCookie: r.BrowserCookie,
 	}, nil
 }
 

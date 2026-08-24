@@ -3,6 +3,7 @@ package authfx
 import (
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/api_key"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/authconfig"
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/browser_session"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/http_auth"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/identity"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/jwt"
@@ -31,6 +32,7 @@ func New() fx.Option {
 			func(c authconfig.Config) rbac.CacheTTL { return rbac.CacheTTL(c.RBACCacheTTL) },
 
 			newUserService,
+			browser_session.NewCookie,
 
 			jwt.NewService,
 			api_key.NewRepository,
