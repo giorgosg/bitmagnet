@@ -426,7 +426,7 @@ update msg model =
                         Unopened ->
                             ( mapItem rowId (\i -> { i | files = Fetching }) model
                             , Bitmagnet.files item.row.infoHash
-                                |> Graphql.Http.queryRequest model.apiUrl
+                                |> Bitmagnet.queryRequest model.apiUrl
                                 |> Graphql.Http.send (GotFiles rowId)
                             )
 
@@ -657,7 +657,7 @@ searchArgs params offset =
 fetch : String -> Int -> Bitmagnet.SearchArgs -> Cmd Msg
 fetch apiUrl epoch args =
     Bitmagnet.search args
-        |> Graphql.Http.queryRequest apiUrl
+        |> Bitmagnet.queryRequest apiUrl
         |> Graphql.Http.send (GotResults epoch)
 
 

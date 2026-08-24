@@ -1,12 +1,13 @@
-module Bitmagnet exposing (File, FileList, Page, Row, SearchArgs, byInfoHash, errorToString, fileLimit, files, search)
+module Bitmagnet exposing (File, FileList, Page, Row, SearchArgs, byInfoHash, errorToString, fileLimit, files, mutationRequest, queryRequest, search)
 
-{-| Every call Magnes makes to bitmagnet. Read-only by construction: the generated
-`Magnes.Api.Mutation` is never imported here or anywhere else.
+{-| Every call Magnes makes to bitmagnet. Queries and mutations cross one request
+boundary, which always lets the browser attach bitmagnet's HttpOnly cookie. Call sites
+choose a selection set; they do not assemble credentials or transport policy.
 -}
 
 import Facet
 import Graphql.Http
-import Graphql.Operation exposing (RootQuery)
+import Graphql.Operation exposing (RootMutation, RootQuery)
 import Graphql.OptionalArgument as Opt exposing (OptionalArgument(..))
 import Graphql.SelectionSet as SelectionSet exposing (SelectionSet)
 import Magnes.Api.Enum.ContentType exposing (ContentType)
@@ -27,6 +28,18 @@ import Magnes.Api.Query as Query
 import Magnes.Api.Scalar as Scalar
 import Sort exposing (Sort)
 import Time
+
+
+queryRequest : String -> SelectionSet decodesTo RootQuery -> Graphql.Http.Request decodesTo
+queryRequest apiUrl selection =
+    Graphql.Http.queryRequest apiUrl selection
+        |> Graphql.Http.withCredentials
+
+
+mutationRequest : String -> SelectionSet decodesTo RootMutation -> Graphql.Http.Request decodesTo
+mutationRequest apiUrl selection =
+    Graphql.Http.mutationRequest apiUrl selection
+        |> Graphql.Http.withCredentials
 
 
 {-| One result line.
