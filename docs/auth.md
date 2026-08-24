@@ -55,6 +55,12 @@ The cookie name defaults to `__Secure-bitmagnet` and is configurable through
 requires HTTPS in development as well as production. Bearer login remains available through
 `self.login` for clients that manage their own credential.
 
+The top-level `self` query and mutation are a recovery boundary, not Role Permissions.
+Identity discovery, registration, both login forms, and browser logout remain reachable even
+when the current Role has no Permissions. Sensitive fields below that boundary — listing,
+creating, or deleting API keys — still require an authenticated User session and reject API
+key identities as well as Anonymous callers.
+
 An explicit `Authorization` header always takes precedence over the browser cookie. A bad
 explicit bearer credential falls back to the Anonymous identity; it does not borrow the
 cookie's authority. An expired, malformed, disabled, or deleted-User cookie also falls back

@@ -206,6 +206,8 @@ type gqlResponse struct {
 // parts of the payload each test asserts on.
 type objectActionBody struct {
 	Namespace string `json:"namespace"`
+	Object    string `json:"object"`
+	Action    string `json:"action"`
 }
 
 type permissionBody struct {
@@ -231,7 +233,13 @@ type userBody struct {
 }
 
 type identityBody struct {
-	User *userBody `json:"user"`
+	User        *userBody          `json:"user"`
+	APIKey      *apiKeyBody        `json:"apiKey"`
+	Permissions []objectActionBody `json:"permissions"`
+}
+
+type apiKeyBody struct {
+	Name string `json:"name"`
 }
 
 type selfIdentityBody struct {
@@ -264,6 +272,14 @@ type authInviteBody struct {
 
 type inviteResponse struct {
 	Auth authInviteBody `json:"auth"`
+}
+
+type authObjectActionsBody struct {
+	ListObjectActions []objectActionBody `json:"listObjectActions"`
+}
+
+type objectActionsResponse struct {
+	Auth authObjectActionsBody `json:"auth"`
 }
 
 func query(t *testing.T, server *httptest.Server, token, q string) gqlResponse {
@@ -921,7 +937,7 @@ func TestGraphQLDeniesAnonymousWhenAnonymousAccessIsOff(t *testing.T) {
 }
 
 // Refusing everything would be a lockout, since logging in is itself a mutation.
-// The baseline permissions must survive anonymous access being disabled.
+// The recovery boundary must survive anonymous access being disabled.
 func TestGraphQLAllowsLoginWhenAnonymousAccessIsOff(t *testing.T) {
 	t.Parallel()
 
@@ -950,6 +966,110 @@ func TestGraphQLAllowsLoginWhenAnonymousAccessIsOff(t *testing.T) {
 	// And the administrator, once authenticated, reaches what anonymous cannot.
 	admin := query(t, server, login.Self.Login.Token, `{ auth { listUsers { totalCount } } }`)
 	requireNoGqlErrors(t, admin)
+}
+
+func TestSelfRecoveryBoundaryIsReachableForEveryIdentity(t *testing.T) {
+	t.Parallel()
+
+	cfg := authconfig.NewDefaultConfig()
+	cfg.AnonymousAccess = false
+
+	server, code := newAuthTestServerWithConfig(t, cfg)
+	adminToken := loginAsAdmin(t, server, code)
+
+	requireNoGqlErrors(t, query(t, server, adminToken, `mutation { auth { putRole(
+		role: "custom", objectActions: [{namespace: "graphql", object: "version", action: "query"}]
+	) { name } } }`))
+
+	userToken := registerAndLoginAsRole(t, server, adminToken, "user", "ordinary")
+	editorToken := registerAndLoginAsRole(t, server, adminToken, "editor", "editor")
+	customToken := registerAndLoginAsRole(t, server, adminToken, "custom", "custom")
+	customCookie := loginBrowserCookie(t, server, "custom", "correct-horse-battery-staple-99")
+	apiKey := apiKeyFrom(t, createAPIKeyAs(
+		t, server, adminToken, "recovery", "graphql", "version", "query",
+	))
+
+	for _, testCase := range []struct {
+		name           string
+		credential     string
+		expectedUser   string
+		expectedRole   string
+		expectedAPIKey string
+	}{
+		{name: "Anonymous"},
+		{name: "user", credential: userToken, expectedUser: "ordinary", expectedRole: "user"},
+		{name: "editor", credential: editorToken, expectedUser: "editor", expectedRole: "editor"},
+		{name: "custom Role", credential: customToken, expectedUser: "custom", expectedRole: "custom"},
+		{name: "admin", credential: adminToken, expectedUser: "admin", expectedRole: "admin"},
+		{name: "API key", credential: apiKey, expectedUser: "admin", expectedRole: "admin", expectedAPIKey: "recovery"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			identified := query(t, server, testCase.credential, `{ self { identity {
+				user { username role }
+				apiKey { name }
+				permissions { namespace object action }
+			} } }`)
+			requireNoGqlErrors(t, identified)
+
+			var body identityResponse
+			require.NoError(t, json.Unmarshal(identified.Data, &body))
+
+			if testCase.expectedUser == "" {
+				assert.Nil(t, body.Self.Identity.User)
+			} else {
+				require.NotNil(t, body.Self.Identity.User)
+				assert.Equal(t, testCase.expectedUser, body.Self.Identity.User.Username)
+				assert.Equal(t, testCase.expectedRole, body.Self.Identity.User.Role)
+			}
+
+			if testCase.expectedAPIKey == "" {
+				assert.Nil(t, body.Self.Identity.APIKey)
+			} else {
+				require.NotNil(t, body.Self.Identity.APIKey)
+				assert.Equal(t, testCase.expectedAPIKey, body.Self.Identity.APIKey.Name)
+			}
+
+			for _, permission := range body.Self.Identity.Permissions {
+				assert.NotEqual(
+					t, "self", permission.Object,
+					"self is a recovery boundary, not an object action",
+				)
+			}
+		})
+	}
+
+	registered := query(t, server, adminToken,
+		`{ auth { listObjectActions { namespace object action } } }`)
+	requireNoGqlErrors(t, registered)
+
+	var objectActions objectActionsResponse
+	require.NoError(t, json.Unmarshal(registered.Data, &objectActions))
+	assert.NotContains(t, objectActions.Auth.ListObjectActions, objectActionBody{
+		Namespace: "graphql",
+		Object:    "self",
+		Action:    "query",
+	})
+	assert.NotContains(t, objectActions.Auth.ListObjectActions, objectActionBody{
+		Namespace: "graphql",
+		Object:    "self",
+		Action:    "mutate",
+	})
+
+	requireNoGqlErrors(t, query(t, server, adminToken,
+		`mutation { auth { putRole(role: "custom", objectActions: []) { name } } }`))
+
+	loggedOut, headers, status := queryWithOrigin(
+		t, server, "", customCookie, sameOrigin(t, server),
+		`mutation { self { logoutBrowser } }`,
+	)
+	assert.Equal(t, http.StatusOK, status)
+	requireNoGqlErrors(t, loggedOut)
+
+	expired := (&http.Response{Header: headers}).Cookies()
+	require.Len(t, expired, 1)
+	assert.Equal(t, -1, expired[0].MaxAge)
 }
 
 // createAPIKeyAs mints a key with the given permissions using the supplied
@@ -1000,14 +1120,47 @@ func loginAsAdmin(t *testing.T, server *httptest.Server, code string) string {
 	return login.Self.Login.Token
 }
 
+func registerAndLoginAsRole(
+	t *testing.T,
+	server *httptest.Server,
+	adminToken, role, username string,
+) string {
+	t.Helper()
+
+	invited := query(t, server, adminToken,
+		`mutation { auth { invite(input: {role: "`+role+`"}) { code } } }`)
+	requireNoGqlErrors(t, invited)
+
+	var invitation inviteResponse
+	require.NoError(t, json.Unmarshal(invited.Data, &invitation))
+	require.NotEmpty(t, invitation.Auth.Invite.Code)
+
+	const password = "correct-horse-battery-staple-99"
+	requireNoGqlErrors(t, query(t, server, "", `mutation { self { register(input: {
+		invitationCode: "`+invitation.Auth.Invite.Code+`",
+		username: "`+username+`", password: "`+password+`"
+	}) { user { id } } } }`))
+
+	loggedIn := query(t, server, "", `mutation { self { login(
+		username: "`+username+`", password: "`+password+`"
+	) { token } } }`)
+	requireNoGqlErrors(t, loggedIn)
+
+	var login loginResponse
+	require.NoError(t, json.Unmarshal(loggedIn.Data, &login))
+	require.NotEmpty(t, login.Self.Login.Token)
+
+	return login.Self.Login.Token
+}
+
 // A narrowly scoped API key must not be able to widen itself.
 //
-// The chain this guards against: an API-key identity reports its owning user
-// and inherits whatever the anon role may do, which necessarily includes the
-// self mutations because login lives there. So without a check, a key scoped to
-// one object action could call createAPIKey and mint a second key naming any
-// registered object action — bounded only by the owner's role, which for an
-// administrator is everything.
+// The chain this guards against: an API-key identity reports its owning user,
+// and the self recovery boundary is deliberately outside Role-Permission
+// gating. So without a field-level check, a key scoped to one object action
+// could call createAPIKey and mint a second key naming any registered object
+// action — bounded only by the owner's role, which for an administrator is
+// everything.
 func TestAPIKeyCannotManageAPIKeys(t *testing.T) {
 	t.Parallel()
 
@@ -1044,6 +1197,18 @@ func TestAPIKeyCannotManageAPIKeys(t *testing.T) {
 			require.NotEmpty(t, res.Errors, "an API key must not manage API keys")
 			assert.Contains(t, res.Errors[0].Message, "api keys may not manage api keys")
 		})
+	}
+
+	for _, q := range []string{
+		`mutation { self { createAPIKey(input: {
+			name: "anonymous", permissions: [{namespace: "graphql", object: "auth", action: "query"}]
+		}) { apiKey } } }`,
+		`mutation { self { deleteAPIKey(id: 1) } }`,
+		`{ self { apiKeys { id name } } }`,
+	} {
+		res := query(t, server, "", q)
+		require.NotEmpty(t, res.Errors, "Anonymous must not manage API keys")
+		assert.Contains(t, res.Errors[0].Message, "not authenticated")
 	}
 
 	// The legitimate path must keep working, or the guard above is just a denial.

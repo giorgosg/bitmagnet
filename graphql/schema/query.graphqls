@@ -1,6 +1,6 @@
 type Query {
   version: String! @auth(object: "version", action: "query")
-  self: SelfQuery! @auth(object: "self", action: "query")
+  self: SelfQuery!
   auth: AuthQuery! @auth(object: "auth", action: "query")
   workers: WorkersQuery! @auth(object: "workers", action: "query")
   health: HealthQuery! @auth(object: "health", action: "query")

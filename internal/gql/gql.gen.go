@@ -3181,7 +3181,7 @@ type ContentCollection {
 }
 `, BuiltIn: false},
 	{Name: "../../graphql/schema/mutation.graphqls", Input: `type Mutation {
-  self: SelfMutation! @auth(object: "self", action: "mutate")
+  self: SelfMutation!
   auth: AuthMutation! @auth(object: "auth", action: "mutate")
   torrent: TorrentMutation! @auth(object: "torrent", action: "mutate")
   queue: QueueMutation! @auth(object: "queue", action: "mutate")
@@ -3212,7 +3212,7 @@ input TorrentReprocessInput {
 `, BuiltIn: false},
 	{Name: "../../graphql/schema/query.graphqls", Input: `type Query {
   version: String! @auth(object: "version", action: "query")
-  self: SelfQuery! @auth(object: "self", action: "query")
+  self: SelfQuery!
   auth: AuthQuery! @auth(object: "auth", action: "query")
   workers: WorkersQuery! @auth(object: "workers", action: "query")
   health: HealthQuery! @auth(object: "health", action: "query")
@@ -7921,30 +7921,7 @@ func (ec *executionContext) _Mutation_self(ctx context.Context, field graphql.Co
 		func(ctx context.Context) (any, error) {
 			return ec.Resolvers.Mutation().Self(ctx)
 		},
-		func(ctx context.Context, next graphql.Resolver) graphql.Resolver {
-			directive0 := next
-
-			directive1 := func(ctx context.Context) (any, error) {
-				object, err := ec.unmarshalNString2string(ctx, "self")
-				if err != nil {
-					var zeroVal gqlmodel.SelfMutation
-					return zeroVal, err
-				}
-				action, err := ec.unmarshalNString2string(ctx, "mutate")
-				if err != nil {
-					var zeroVal gqlmodel.SelfMutation
-					return zeroVal, err
-				}
-				if ec.Directives.Auth == nil {
-					var zeroVal gqlmodel.SelfMutation
-					return zeroVal, errors.New("directive auth is not implemented")
-				}
-				return ec.Directives.Auth(ctx, nil, directive0, object, action)
-			}
-
-			next = directive1
-			return next
-		},
+		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v gqlmodel.SelfMutation) graphql.Marshaler {
 			return ec.marshalNSelfMutation2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚐSelfMutation(ctx, selections, v)
 		},
@@ -8343,30 +8320,7 @@ func (ec *executionContext) _Query_self(ctx context.Context, field graphql.Colle
 		func(ctx context.Context) (any, error) {
 			return ec.Resolvers.Query().Self(ctx)
 		},
-		func(ctx context.Context, next graphql.Resolver) graphql.Resolver {
-			directive0 := next
-
-			directive1 := func(ctx context.Context) (any, error) {
-				object, err := ec.unmarshalNString2string(ctx, "self")
-				if err != nil {
-					var zeroVal gqlmodel.SelfQuery
-					return zeroVal, err
-				}
-				action, err := ec.unmarshalNString2string(ctx, "query")
-				if err != nil {
-					var zeroVal gqlmodel.SelfQuery
-					return zeroVal, err
-				}
-				if ec.Directives.Auth == nil {
-					var zeroVal gqlmodel.SelfQuery
-					return zeroVal, errors.New("directive auth is not implemented")
-				}
-				return ec.Directives.Auth(ctx, nil, directive0, object, action)
-			}
-
-			next = directive1
-			return next
-		},
+		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v gqlmodel.SelfQuery) graphql.Marshaler {
 			return ec.marshalNSelfQuery2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚐSelfQuery(ctx, selections, v)
 		},
