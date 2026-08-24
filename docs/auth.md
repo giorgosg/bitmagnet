@@ -74,6 +74,37 @@ including `loginBrowser` before a browser credential exists — remain governed 
 GraphQL endpoint accepts JSON POST only; multipart uploads and WebSocket upgrades are not
 supported.
 
+## GraphQL authentication error codes
+
+Authentication and registration failures expose stable machine-readable values at
+`errors[].extensions.code`. Clients must branch on the code, not on the human-readable
+message or its wrapping. Application errors retain their GraphQL `path` and `locations`.
+
+| Code                                    | Meaning                                                        |
+| --------------------------------------- | -------------------------------------------------------------- |
+| `INVALID_CREDENTIALS`                   | The username/password pair is unusable                         |
+| `USER_DISABLED`                         | The credentials are correct, but the User is disabled          |
+| `LOGIN_THROTTLED`                       | The login bucket has no capacity; retry later                  |
+| `USER_ALREADY_EXISTS`                   | Registration would duplicate a User                            |
+| `USERNAME_INVALID`                      | The username does not meet server validation                   |
+| `INVITATION_REQUIRED`                   | Registration requires an Invitation code                       |
+| `INVITATION_INVALID`                    | The Invitation code does not exist                             |
+| `INVITATION_EXPIRED`                    | The Invitation has expired                                     |
+| `INVITATION_CLAIMED`                    | The Invitation has already been claimed                        |
+| `PASSWORD_INSUFFICIENT_ENTROPY`         | The password is below `auth.password_min_entropy`              |
+| `UNAUTHORIZED`                          | The Identity lacks the refused GraphQL Object action           |
+| `AUTHENTICATION_INFRASTRUCTURE_FAILURE` | A credential could not be resolved because a dependency failed |
+| `USER_SESSION_REQUIRED`                 | The field requires an interactive User session                 |
+| `API_KEY_MANAGEMENT_FORBIDDEN`          | An API-key Identity attempted to manage API keys               |
+| `INTERNAL_SERVER_ERROR`                 | An unclassified server-side failure occurred                   |
+
+`UNAUTHORIZED` also includes `namespace`, `object`, and `action` in its extensions. The
+two session-specific codes are field-level account constraints, not Role-Permission
+refusals, so they do not invent an Object action. Authentication infrastructure and
+unclassified internal failures use fixed public messages; their underlying error details
+are not returned to the client. GraphQL parsing and validation errors remain gqlgen's
+ordinary protocol errors rather than being mislabeled as application failures.
+
 **Every bound in that table is enforced, and they are load-bearing.**
 `login_requests_per_minute: 0` reaches `rate.Every(time.Minute / 0)` and takes the process
 down from a config file alone; `password_min_entropy: 0` accepts any password at all; a

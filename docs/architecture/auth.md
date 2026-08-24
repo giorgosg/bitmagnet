@@ -115,6 +115,15 @@ A baseline is granted to `anon` and `user` regardless of the anonymous-access se
 their top-level fields are intentionally outside the Role-Permission model, so no Role
 assignment can hide Identity discovery, login, registration, or browser logout.
 
+The gqlgen HTTP server owns one error presenter for this boundary. It classifies wrapped
+authentication, registration, and authorization sentinels with `errors.Is`, emits stable
+`extensions.code` values, and preserves gqlgen's path and source locations. The
+authorization refusal keeps its Object action on the typed error until the presenter adds
+`namespace`, `object`, and `action`; the old `GraphQLExtensions()` method was not a gqlgen
+hook and its result was silently discarded. Unknown resolver errors and authentication
+infrastructure causes are replaced with fixed public messages, while parsing and validation
+errors remain useful protocol errors.
+
 ## The permission model
 
 An **object action** is `namespace/object/action`. A **permission** binds one to one

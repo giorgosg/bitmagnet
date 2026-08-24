@@ -22,12 +22,17 @@ func (unauthorizedError) Unwrap() error {
 	return ErrUnauthorized
 }
 
-func (e unauthorizedError) GraphQLExtensions() map[string]any {
-	return map[string]any{
-		"namespace": Namespace,
-		"object":    e.objAct.Object,
-		"action":    e.objAct.Action,
+// RefusedObjectAction extracts the Object action attached to an authorization
+// refusal. Keeping this detail on the typed error lets the HTTP presenter add
+// stable GraphQL extensions without making gqlgen-specific behavior part of
+// the authorization directive.
+func RefusedObjectAction(err error) (rbac.ObjectAction, bool) {
+	var refusal unauthorizedError
+	if !errors.As(err, &refusal) {
+		return rbac.ObjectAction{}, false
 	}
+
+	return refusal.objAct, true
 }
 
 type Directive func(

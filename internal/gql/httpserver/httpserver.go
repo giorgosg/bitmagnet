@@ -78,6 +78,7 @@ func (b builder) Apply(e *gin.Engine) error {
 
 func newServer(es graphql.ExecutableSchema, browserCookie browser_session.Cookie) *handler.Server {
 	srv := handler.New(es)
+	srv.SetErrorPresenter(errorPresenter)
 
 	srv.AddTransport(transport.POST{})
 
