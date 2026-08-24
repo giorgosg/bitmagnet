@@ -64,7 +64,9 @@ review in [porting.md](porting.md) and a test seen **red**.
 
 ## In flight
 
-Nothing currently in flight.
+| PR                                                   | Change                                                   | Source |
+| ---------------------------------------------------- | -------------------------------------------------------- | ------ |
+| [#53](https://github.com/giorgosg/bitmagnet/pull/53) | Protect cookie-authenticated GraphQL mutations from CSRF | local  |
 
 ## The static review findings
 
