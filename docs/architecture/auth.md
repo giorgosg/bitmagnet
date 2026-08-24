@@ -85,10 +85,9 @@ untouched when authentication failed because the database or RBAC service could 
 Ambient browser authority has a second boundary after resolution: a valid cookie-backed
 GraphQL mutation must carry an `Origin` whose HTTPS host exactly matches the request host.
 The check runs after gqlgen identifies the operation but before it invokes a resolver;
-`loginBrowser` and `logoutBrowser` repeat it at their resolver boundary because login has
-no cookie yet and logout is deliberately idempotent. Cookie-backed reads do not need this
-CSRF check because they cannot change server state.
-Bearer and Anonymous requests retain their existing CORS behavior. GraphQL has no uploads
+cookie-backed reads do not need this CSRF check because they cannot change server state.
+Bearer and Anonymous requests, including `loginBrowser` before a credential exists, retain
+their existing CORS behavior. GraphQL has no uploads
 or subscriptions, so its multipart and WebSocket transports are disabled rather than left
 as unreviewed ways to submit a cookie-backed request.
 
