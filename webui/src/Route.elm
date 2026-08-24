@@ -1,4 +1,4 @@
-module Route exposing (BasePath, Route(..), SearchParams, basePath, emptySearch, fromUrl, toHref)
+module Route exposing (Access(..), BasePath, LoginParams, RegisterParams, Route(..), SearchParams, basePath, emptySearch, fromUrl, guard, toHref)
 
 {-| Routes are real paths, not fragments — see the README.
 
@@ -8,6 +8,7 @@ variant breaks it at compile time rather than producing a dead link.
 -}
 
 import Facet exposing (Filters)
+import Identity
 import Sort exposing (Sort)
 import Url exposing (Url)
 import Url.Builder as Builder
@@ -18,7 +19,29 @@ import Url.Parser.Query as Query
 type Route
     = Search SearchParams
     | Torrent String
+    | Login LoginParams
+    | Register RegisterParams
+    | UserOverview
+    | APIKeys
+    | AdminUsers
+    | AdminRoles
+    | AdminInvitations
     | NotFound
+
+
+type alias LoginParams =
+    { returnUrl : Maybe String }
+
+
+type alias RegisterParams =
+    { code : Maybe String }
+
+
+type Access
+    = PendingIdentity
+    | Allowed
+    | RedirectTo Route
+    | Refused String
 
 
 {-| The URL prefix where Magnes is mounted. An empty value means the origin root.
@@ -70,6 +93,13 @@ parser =
                 <?> Query.custom Facet.fileParam identity
             )
         , Parser.map Torrent (s "torrent" </> infoHash)
+        , Parser.map (Login << LoginParams) (s "login" <?> Query.string "returnUrl")
+        , Parser.map (Register << RegisterParams) (s "register" <?> Query.string "code")
+        , Parser.map UserOverview (s "account")
+        , Parser.map APIKeys (s "account" </> s "api-keys")
+        , Parser.map AdminUsers (s "admin" </> s "users")
+        , Parser.map AdminRoles (s "admin" </> s "roles")
+        , Parser.map AdminInvitations (s "admin" </> s "invitations")
         ]
 
 
@@ -165,6 +195,112 @@ toHref (BasePath prefix) route =
                 Torrent hash ->
                     Builder.absolute [ "torrent", hash ] []
 
+                Login params ->
+                    Builder.absolute [ "login" ]
+                        (Maybe.map (Builder.string "returnUrl") params.returnUrl
+                            |> Maybe.map List.singleton
+                            |> Maybe.withDefault []
+                        )
+
+                Register params ->
+                    Builder.absolute [ "register" ]
+                        (Maybe.map (Builder.string "code") params.code
+                            |> Maybe.map List.singleton
+                            |> Maybe.withDefault []
+                        )
+
+                UserOverview ->
+                    Builder.absolute [ "account" ] []
+
+                APIKeys ->
+                    Builder.absolute [ "account", "api-keys" ] []
+
+                AdminUsers ->
+                    Builder.absolute [ "admin", "users" ] []
+
+                AdminRoles ->
+                    Builder.absolute [ "admin", "roles" ] []
+
+                AdminInvitations ->
+                    Builder.absolute [ "admin", "invitations" ] []
+
                 NotFound ->
                     Builder.absolute [] []
            )
+
+
+guard : BasePath -> Identity.Identity -> Route -> Access
+guard mount identity route =
+    case identity of
+        Identity.Unknown ->
+            PendingIdentity
+
+        Identity.Failed message ->
+            Refused message
+
+        Identity.Anonymous _ ->
+            anonymousAccess mount route
+
+        Identity.APIKeyAuthenticated _ _ _ ->
+            anonymousAccess mount route
+
+        Identity.UserAuthenticated _ _ ->
+            userAccess identity route
+
+
+anonymousAccess : BasePath -> Route -> Access
+anonymousAccess mount route =
+    case route of
+        UserOverview ->
+            loginRedirect mount route
+
+        APIKeys ->
+            loginRedirect mount route
+
+        AdminUsers ->
+            loginRedirect mount route
+
+        AdminRoles ->
+            loginRedirect mount route
+
+        AdminInvitations ->
+            loginRedirect mount route
+
+        _ ->
+            Allowed
+
+
+loginRedirect : BasePath -> Route -> Access
+loginRedirect mount route =
+    RedirectTo (Login { returnUrl = Just (toHref mount route) })
+
+
+userAccess : Identity.Identity -> Route -> Access
+userAccess identity route =
+    case route of
+        Login _ ->
+            RedirectTo UserOverview
+
+        Register _ ->
+            RedirectTo UserOverview
+
+        AdminUsers ->
+            requireAdministration identity
+
+        AdminRoles ->
+            requireAdministration identity
+
+        AdminInvitations ->
+            requireAdministration identity
+
+        _ ->
+            Allowed
+
+
+requireAdministration : Identity.Identity -> Access
+requireAdministration identity =
+    if Identity.can (Identity.graphql "auth" "query") identity then
+        Allowed
+
+    else
+        Refused "Your Identity does not permit administration."

@@ -375,7 +375,7 @@ update msg model =
                         model.epoch + 1
 
                     ( results, cmd ) =
-                        loadWhenReady model.identity model.apiUrl epoch route
+                        guardedLoad model model.identity epoch route
                 in
                 ( { model
                     | route = route
@@ -686,6 +686,24 @@ loadWhenReady identity apiUrl epoch route =
                 load apiUrl epoch route
 
 
+guardedLoad : Model -> Identity.Identity -> Int -> Route -> ( Results, Cmd Msg )
+guardedLoad model identity epoch route =
+    case Route.guard model.basePath identity route of
+        Route.PendingIdentity ->
+            ( pendingResults route, Cmd.none )
+
+        Route.Refused message ->
+            ( Failed message, Cmd.none )
+
+        Route.RedirectTo destination ->
+            ( Blank
+            , Nav.replaceUrl model.key (Route.toHref model.basePath destination)
+            )
+
+        Route.Allowed ->
+            loadWhenReady identity model.apiUrl epoch route
+
+
 routeNeedsSearch : Route -> Bool
 routeNeedsSearch route =
     case route of
@@ -694,6 +712,27 @@ routeNeedsSearch route =
 
         Route.Torrent _ ->
             True
+
+        Route.Login _ ->
+            False
+
+        Route.Register _ ->
+            False
+
+        Route.UserOverview ->
+            False
+
+        Route.APIKeys ->
+            False
+
+        Route.AdminUsers ->
+            False
+
+        Route.AdminRoles ->
+            False
+
+        Route.AdminInvitations ->
+            False
 
         Route.NotFound ->
             False
@@ -728,14 +767,14 @@ identityResolved identity model =
         Identity.Unknown ->
             let
                 ( results, cmd ) =
-                    loadWhenReady identity model.apiUrl model.epoch model.route
+                    guardedLoad model identity model.epoch model.route
             in
             ( { model | identity = identity, results = results }, cmd )
 
         Identity.Failed _ ->
             let
                 ( results, cmd ) =
-                    loadWhenReady identity model.apiUrl model.epoch model.route
+                    guardedLoad model identity model.epoch model.route
             in
             ( { model | identity = identity, results = results }, cmd )
 
@@ -749,7 +788,7 @@ identityResolved identity model =
                         model.epoch + 1
 
                     ( results, cmd ) =
-                        loadWhenReady identity model.apiUrl epoch model.route
+                        guardedLoad model identity epoch model.route
                 in
                 ( { model
                     | identity = identity
@@ -771,6 +810,27 @@ load apiUrl epoch route =
 
         Route.Torrent infoHash ->
             ( Loading, fetch apiUrl epoch (Bitmagnet.byInfoHash infoHash) )
+
+        Route.Login _ ->
+            ( Blank, Cmd.none )
+
+        Route.Register _ ->
+            ( Blank, Cmd.none )
+
+        Route.UserOverview ->
+            ( Blank, Cmd.none )
+
+        Route.APIKeys ->
+            ( Blank, Cmd.none )
+
+        Route.AdminUsers ->
+            ( Blank, Cmd.none )
+
+        Route.AdminRoles ->
+            ( Blank, Cmd.none )
+
+        Route.AdminInvitations ->
+            ( Blank, Cmd.none )
 
         Route.NotFound ->
             ( Blank, Cmd.none )
@@ -947,6 +1007,27 @@ documentTitle model =
 
                 _ ->
                     infoHash ++ " — magnes"
+
+        Route.Login _ ->
+            "sign in — magnes"
+
+        Route.Register _ ->
+            "register User — magnes"
+
+        Route.UserOverview ->
+            "User — magnes"
+
+        Route.APIKeys ->
+            "API keys — magnes"
+
+        Route.AdminUsers ->
+            "Users — magnes"
+
+        Route.AdminRoles ->
+            "Roles — magnes"
+
+        Route.AdminInvitations ->
+            "Invitations — magnes"
 
         Route.NotFound ->
             "not found — magnes"
@@ -1157,12 +1238,49 @@ sortMenu selected =
 
 viewRoute : Model -> Html Msg
 viewRoute model =
+    case Route.guard model.basePath model.identity model.route of
+        Route.PendingIdentity ->
+            p [ class "notice" ] [ text "Resolving Identity…" ]
+
+        Route.Refused message ->
+            p [ class "notice error" ] [ text message ]
+
+        Route.RedirectTo _ ->
+            p [ class "notice" ] [ text "Redirecting…" ]
+
+        Route.Allowed ->
+            viewAllowedRoute model
+
+
+viewAllowedRoute : Model -> Html Msg
+viewAllowedRoute model =
     case model.route of
         Route.Search _ ->
             viewResults model
 
         Route.Torrent _ ->
             viewTorrent model
+
+        Route.Login _ ->
+            p [ class "notice" ] [ text "Sign in." ]
+
+        Route.Register _ ->
+            p [ class "notice" ] [ text "Register User." ]
+
+        Route.UserOverview ->
+            p [ class "notice" ] [ text "User overview." ]
+
+        Route.APIKeys ->
+            p [ class "notice" ] [ text "API keys." ]
+
+        Route.AdminUsers ->
+            p [ class "notice" ] [ text "User administration." ]
+
+        Route.AdminRoles ->
+            p [ class "notice" ] [ text "Role administration." ]
+
+        Route.AdminInvitations ->
+            p [ class "notice" ] [ text "Invitation administration." ]
 
         Route.NotFound ->
             p [ class "notice" ] [ text "No such page." ]
