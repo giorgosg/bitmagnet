@@ -57,6 +57,7 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#46](https://github.com/giorgosg/bitmagnet/pull/46) | Record PRs #29-#45 in this ledger                                           | local                                                                | Documentation only                                             |
 | [#47](https://github.com/giorgosg/bitmagnet/pull/47) | Document how `docs/` is used; require a docs update per PR                  | local                                                                | Documentation only                                             |
 | [#48](https://github.com/giorgosg/bitmagnet/pull/48) | Serve an alternative web UI from a configured directory                     | local                                                                | Tests written first; verified against a real external UI build |
+| [#49](https://github.com/giorgosg/bitmagnet/pull/49) | Disable browser caching for the alternative UI mount                        | local                                                                | Asset and SPA fallback regressions observed red                |
 
 ## In flight
 
