@@ -65,12 +65,12 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#54](https://github.com/giorgosg/bitmagnet/pull/54) | Make GraphQL `self` a recovery boundary                                     | local                                                                | Identity/permission/logout regressions observed red            |
 | [#55](https://github.com/giorgosg/bitmagnet/pull/55) | Add stable GraphQL authentication error codes                               | local                                                                | Error-code/metadata/redaction regressions observed red         |
 | [#56](https://github.com/giorgosg/bitmagnet/pull/56) | Return the current `lastLoginAt` from login                                 | local                                                                | Login/identity timestamp mismatch observed red                 |
+| [#57](https://github.com/giorgosg/bitmagnet/pull/57) | Sign off the browser authentication contract                                | local                                                                | Full matrix passed; regressions covered by #51–#56             |
+| [#58](https://github.com/giorgosg/bitmagnet/pull/58) | Close the browser authentication integration ledger                         | local                                                                | Documentation only                                             |
 
 ## In flight
 
-| PR                                                   | Change                                       | Source | Evidence seen red  |
-| ---------------------------------------------------- | -------------------------------------------- | ------ | ------------------ |
-| [#57](https://github.com/giorgosg/bitmagnet/pull/57) | Sign off the browser authentication contract | local  | Covered by #51–#56 |
+Nothing currently in flight.
 
 ## The static review findings
 
