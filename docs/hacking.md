@@ -25,6 +25,23 @@ task serve-webui     # Angular dev server on :3334, proxying a running bitmagnet
 task serve-docsite   # the Jekyll site under bitmagnet.io/
 ```
 
+The web UI has no standalone test target. Its former Karma specs only instantiated each
+component and asserted that it existed, so they duplicated the production build while
+providing no behavioral coverage. `task lint-webui` checks the TypeScript and templates;
+`task build-webui` is the compile-time and bundling check run by CI.
+
+## CI cost controls
+
+The checks workflows cancel an older run when a newer commit arrives on the same ref.
+GitHub pull requests are checked as synthetic merge commits, so the push produced by the
+GitHub merge button skips the duplicate checks; a direct push still runs them.
+
+Container builds are deliberately separate. They run when a Docker build input changes
+and once a week to catch image or registry drift, rather than spending roughly ten runner
+minutes on every source-only pull request. CodeQL scans Go and TypeScript on pull requests
+and weekly; the docsite's only Ruby source is the 14-line schema-copy plugin and does not
+justify a runner for every scan.
+
 `serve-webui` is how to iterate on the web UI without rebuilding the committed
 `webui/dist` on every change.
 

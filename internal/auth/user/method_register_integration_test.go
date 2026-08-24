@@ -17,6 +17,7 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type daoProvider struct{ query *dao.Query }
@@ -44,6 +45,8 @@ func newUserServiceWithConfig(
 	var provider database.DaoTransactionProvider = daoProvider{query: db.Query}
 
 	config := authconfig.NewDefaultConfig()
+	// These tests exercise auth behavior, not bcrypt's work factor.
+	config.PasswordHashingCost = bcrypt.MinCost
 	configure(&config)
 	values := config.UserValues()
 
@@ -263,7 +266,9 @@ func TestLoginDoesNotEnumerateAccounts(t *testing.T) {
 func TestLoginTimingDoesNotRevealAccountExistence(t *testing.T) {
 	t.Parallel()
 
-	service, query := newUserService(t)
+	service, query := newUserServiceWithConfig(t, func(config *authconfig.Config) {
+		config.PasswordHashingCost = bcrypt.DefaultCost
+	})
 	putInvitation(t, query, "timingtest001", sql.NullTime{})
 
 	_, err := service.Register(t.Context(), user.RegisterRequest{

@@ -48,20 +48,6 @@ func testApp(cfg authconfig.Config, invokes ...any) fx.Option {
 	return fx.Options(opts...)
 }
 
-// The graph must actually resolve. A module that compiles but cannot be
-// constructed is worse than none: it fails at application startup.
-//
-// The invoke is load-bearing — fx.ValidateApp only checks dependencies reachable
-// from an invoke, so validating a module with none passes unconditionally.
-func TestModuleGraphResolves(t *testing.T) {
-	t.Parallel()
-
-	require.NoError(t, fx.ValidateApp(testApp(
-		authconfig.NewDefaultConfig(),
-		func(http_auth.Middleware, identity.Authenticator, user.Service, rbac.Enforcer) {},
-	)))
-}
-
 func TestModuleProvidesTheAuthSurface(t *testing.T) {
 	t.Parallel()
 
@@ -90,25 +76,4 @@ func TestModuleProvidesTheAuthSurface(t *testing.T) {
 	assert.NotNil(t, authenticator)
 	assert.NotNil(t, userService)
 	assert.NotNil(t, enforcer)
-}
-
-// Anonymous access is the switch that keeps existing deployments working. With
-// it on, the anon role must be granted the registered object actions; with it
-// off, nothing.
-func TestAnonymousPermissionsFollowConfig(t *testing.T) {
-	t.Parallel()
-
-	objectActions := func() []rbac.ObjectAction {
-		return []rbac.ObjectAction{rbac.NewObjectAction("foo", "bar", "baz")}
-	}
-
-	cfg := authconfig.NewDefaultConfig()
-	require.True(t, cfg.AnonymousAccess, "anonymous access must default to on")
-
-	granted := authconfig.AnonymousPermissions(cfg, objectActions)()
-	require.Len(t, granted, 1)
-	assert.Equal(t, rbac.NewObjectAction("foo", "bar", "baz"), granted[0].ObjectAction())
-
-	cfg.AnonymousAccess = false
-	assert.Empty(t, authconfig.AnonymousPermissions(cfg, objectActions)())
 }

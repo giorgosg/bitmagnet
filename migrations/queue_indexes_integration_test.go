@@ -9,46 +9,43 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestQueueFetchOrderIndexDefinition(t *testing.T) {
+func TestQueueIndexes(t *testing.T) {
 	t.Parallel()
 
 	db := dbtest.New(t)
 	ctx := t.Context()
 
-	var definition string
+	t.Run("fetch order definition", func(t *testing.T) {
+		t.Parallel()
 
-	require.NoError(t, db.Pool.QueryRow(ctx, `
-		select pg_get_indexdef(to_regclass('queue_jobs_fetch_order_idx'))
-	`).Scan(&definition))
-	assert.Contains(t, definition,
-		"USING btree (queue, ((status = 'retry'::queue_job_status)) DESC, priority, run_after, id)",
-	)
-	assert.Contains(t, definition,
-		"WHERE (status = ANY (ARRAY['pending'::queue_job_status, 'retry'::queue_job_status]))",
-	)
-}
+		var definition string
 
-func TestQueuePayloadIndexIsAbsent(t *testing.T) {
-	t.Parallel()
+		require.NoError(t, db.Pool.QueryRow(ctx, `
+			select pg_get_indexdef(to_regclass('queue_jobs_fetch_order_idx'))
+		`).Scan(&definition))
+		assert.Contains(t, definition,
+			"USING btree (queue, ((status = 'retry'::queue_job_status)) DESC, priority, run_after, id)",
+		)
+		assert.Contains(t, definition,
+			"WHERE (status = ANY (ARRAY['pending'::queue_job_status, 'retry'::queue_job_status]))",
+		)
+	})
 
-	db := dbtest.New(t)
-	ctx := t.Context()
+	t.Run("obsolete payload index is absent", func(t *testing.T) {
+		t.Parallel()
 
-	var exists bool
+		var exists bool
 
-	require.NoError(t, db.Pool.QueryRow(ctx, `
-		select to_regclass('queue_jobs_queue_payload_idx') is not null
-	`).Scan(&exists))
-	assert.False(t, exists)
-}
+		require.NoError(t, db.Pool.QueryRow(ctx, `
+			select to_regclass('queue_jobs_queue_payload_idx') is not null
+		`).Scan(&exists))
+		assert.False(t, exists)
+	})
 
-func TestQueueFetchPlanUsesOrderIndex(t *testing.T) {
-	t.Parallel()
+	t.Run("fetch plan uses order index", func(t *testing.T) {
+		t.Parallel()
 
-	db := dbtest.New(t)
-	ctx := t.Context()
-
-	_, err := db.Pool.Exec(ctx, `
+		_, err := db.Pool.Exec(ctx, `
 			insert into queue_jobs (
 				fingerprint, queue, status, payload, priority, run_after,
 				archival_duration, created_at
@@ -67,11 +64,11 @@ func TestQueueFetchPlanUsesOrderIndex(t *testing.T) {
 				now()
 			from generate_series(1, 2000) n
 		`)
-	require.NoError(t, err)
-	_, err = db.Pool.Exec(ctx, "analyze queue_jobs")
-	require.NoError(t, err)
+		require.NoError(t, err)
+		_, err = db.Pool.Exec(ctx, "analyze queue_jobs")
+		require.NoError(t, err)
 
-	rows, err := db.Pool.Query(ctx, `
+		rows, err := db.Pool.Query(ctx, `
 			explain (costs off)
 			select id
 			from queue_jobs
@@ -82,19 +79,20 @@ func TestQueueFetchPlanUsesOrderIndex(t *testing.T) {
 			for update skip locked
 			limit 1
 		`)
-	require.NoError(t, err)
+		require.NoError(t, err)
 
-	defer rows.Close()
+		defer rows.Close()
 
-	var planLines []string
+		var planLines []string
 
-	for rows.Next() {
-		var line string
+		for rows.Next() {
+			var line string
 
-		require.NoError(t, rows.Scan(&line))
-		planLines = append(planLines, line)
-	}
+			require.NoError(t, rows.Scan(&line))
+			planLines = append(planLines, line)
+		}
 
-	require.NoError(t, rows.Err())
-	assert.Contains(t, strings.Join(planLines, "\n"), "Index Scan using queue_jobs_fetch_order_idx")
+		require.NoError(t, rows.Err())
+		assert.Contains(t, strings.Join(planLines, "\n"), "Index Scan using queue_jobs_fetch_order_idx")
+	})
 }

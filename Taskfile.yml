@@ -75,18 +75,10 @@ tasks:
   test:
     cmds:
       - task test-go
-      - task test-webui
 
   test-go:
     cmds:
-      - go test -v ./...
-
-  test-webui:
-    dir: ./webui
-    cmds:
-      - npm test
-    env:
-      CHROME_BIN: chromium
+      - go test ./...
 
   migrate:
     cmds:

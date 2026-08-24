@@ -14,6 +14,7 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dbtest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // scopeTestObjectAction is the only object action the scope stack registers.
@@ -32,6 +33,9 @@ func newScopeStack(t *testing.T) testStack {
 	var provider database.DaoTransactionProvider = daoProvider{query: db.Query}
 
 	values := authconfig.NewDefaultConfig().UserValues()
+	// These tests exercise credential scope, not bcrypt's work factor.
+	values.PasswordHashingCost.Set(user.PasswordHashingCost(bcrypt.MinCost))
+
 	jwtService := jwt.NewService(jwt.Secret("test-secret"), jwt.Duration(time.Hour))
 	userService := user.NewService(
 		provider, jwtService,

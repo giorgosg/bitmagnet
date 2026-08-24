@@ -8,6 +8,7 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dbtest"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
+	"github.com/bitmagnet-io/bitmagnet/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -43,35 +44,33 @@ func TestDaoTransactionProviderPropagatesResolutionError(t *testing.T) {
 	assert.False(t, called, "transaction body must not run when the dao is unavailable")
 }
 
-// The transaction must actually be a transaction: a body returning an error
-// rolls back, and the error reaches the caller.
-func TestDaoTransactionRollsBackOnError(t *testing.T) {
+func TestDaoTransactionCommitsAndRollsBack(t *testing.T) {
 	t.Parallel()
 
 	db := dbtest.New(t)
 	p := newProvider(db.Query, nil)
+	ctx := t.Context()
 
-	var seen *dao.Query
+	require.NoError(t, p.DaoTransaction(func(tx *dao.Query) error {
+		return tx.KeyValue.WithContext(ctx).Create(&model.KeyValue{Key: "committed", Value: "yes"})
+	}))
 
-	err := p.DaoTransaction(func(tx *dao.Query) error {
-		seen = tx
+	committed, err := db.Query.KeyValue.WithContext(ctx).
+		Where(db.Query.KeyValue.Key.Eq("committed")).Count()
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), committed)
+
+	err = p.DaoTransaction(func(tx *dao.Query) error {
+		require.NoError(t, tx.KeyValue.WithContext(ctx).
+			Create(&model.KeyValue{Key: "rolled_back", Value: "no"}))
 
 		return errBoom
 	})
 
 	require.ErrorIs(t, err, errBoom)
-	assert.NotNil(t, seen, "transaction body should receive a query handle")
-}
 
-func TestDaoTransactionCommits(t *testing.T) {
-	t.Parallel()
-
-	db := dbtest.New(t)
-	p := newProvider(db.Query, nil)
-
-	require.NoError(t, p.DaoTransaction(func(tx *dao.Query) error {
-		_, err := tx.KeyValue.Where(tx.KeyValue.Key.Eq("provider_test")).Count()
-
-		return err
-	}))
+	rolledBack, err := db.Query.KeyValue.WithContext(ctx).
+		Where(db.Query.KeyValue.Key.Eq("rolled_back")).Count()
+	require.NoError(t, err)
+	assert.Zero(t, rolledBack)
 }
