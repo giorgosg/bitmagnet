@@ -22,47 +22,32 @@ instance exposes the capability needed by the task.
 
 ## Three ways to serve the UI
 
-### 1. The dev server, cross-origin — what `npm run dev` does
+### 1. The same-origin HTTPS development proxy — what `npm run dev` does
 
 ```bash
 npm install
-cp public/config.example.js public/config.js   # then point it at your instance
-npm run dev                                    # builds, serves public/ on :8000
+BITMAGNET_URL=http://your-bitmagnet:3333 npm run dev
 ```
 
-`dev.js` serves `public/` and falls back to `index.html` for extensionless paths, so
-`/torrent/<hash>` survives a refresh. The page queries bitmagnet **directly from the
-browser**, so the address in `config.js` must be reachable from the browser, not from
-wherever the dev server runs. If the instance is behind an SSH tunnel, the tunnel has to
-be up in the session running the browser, and the address is the local end of it.
+`dev.js` serves `public/`, falls back to `index.html` for extensionless Elm routes, and
+proxies the browser's same-origin `/graphql` requests to `BITMAGNET_URL`. This is required
+for browser authentication: bitmagnet's credential is an HttpOnly, Secure, SameSite cookie,
+and cookie-authenticated mutations require an exact same-origin HTTPS `Origin`. A direct
+cross-origin request cannot satisfy that contract.
 
-`config.example.js` defaults to `http://localhost:3333/graphql`, bitmagnet's own default.
-That is a real address on whatever machine the browser is on, so an unedited copy fails in
-a way that looks like the server is down rather than like the config is wrong.
+The server creates a 30-day self-signed localhost certificate under the gitignored `.dev/`
+directory on first use. Accept it once in the development browser. To use a locally trusted
+certificate instead, set both `MAGNES_DEV_CERT` and `MAGNES_DEV_KEY` to existing PEM files.
+`PORT` defaults to `8000`.
 
-This arrangement depends on bitmagnet's CORS defaults:
+The default upstream is `http://localhost:3333`; always set `BITMAGNET_URL` explicitly when
+developing against another instance. The value is consumed by Node, not exposed to the
+browser. `public/config.js` should normally be absent during development so the bundle uses
+the same-origin `/graphql` default.
 
-- `AllowedOrigins` is `["*"]` by default, deliberately, because narrowing it breaks any UI
-  served from another origin — which is exactly this arrangement. bitmagnet's
-  `docs/issues/0009` proposes narrowing it; if that lands, this needs
-  `http_server.cors.allowed_origins` set explicitly.
-- `AllowedHeaders` is, since PR #45, the four headers the server actually reads —
-  `Content-Type`, `Authorization`, `X-Api-Key`, `X-Import-Id` — rather than reflecting
-  whatever was asked for. **[verified]** each of the four is allowed individually, and
-  `authorization,content-type,x-api-key` passes preflight as a set. Bearer tokens work
-  cross-origin. Any *other* header Magnes invents will now fail preflight until it is
-  added to `http_server.cors.allowed_headers`.
-
-One trap, if you ever hand-test a preflight with curl: `rs/cors` compares the requested
-header list against its own **sorted** list in a single pass, so an *unsorted*
-`Access-Control-Request-Headers` is rejected. **[verified]** `content-type,authorization`
-is refused while `authorization,content-type` is allowed. Browsers always send that header
-sorted and lowercased, per the Fetch spec, so this never bites a real page — only a
-hand-written probe. Sort your test headers rather than filing a bug.
-
-Fastest loop, and the one to use while iterating on the UI. Good enough for login and
-token handling, since `Authorization` is allowed cross-origin. Not the arrangement to sign
-off on, because it is not how the thing will be deployed.
+The proxy preserves the browser-facing `Host` and `Origin` headers. This lets bitmagnet
+verify the request as same-origin even though the proxy-to-bitmagnet hop may use plain HTTP.
+Production sign-off still uses way 2 below, where bitmagnet serves both endpoints itself.
 
 ### 2. Served by bitmagnet itself, same-origin — what to test accounts against
 
@@ -138,12 +123,11 @@ The deployed `index.html` needs the matching trailing-slash base:
 <base href="/ui/" />
 ```
 
-Those deployment values are required. `public/config.js` is gitignored and holds *your*
-development address, so rsync either copies the wrong endpoint or, with `--delete` and no
-local copy, leaves none at all — and a page with no config falls back to
-`http://localhost:3333/graphql`, which in a browser means the *viewer's* own machine. The
-relative `/graphql` is the entire point of this deployment. Without the base-path values,
-the HTML requests assets from the origin root and Elm reads `/ui` as an application route.
+Those deployment values are required. `public/config.js` is gitignored and may hold local
+runtime values, so rsync can otherwise copy the wrong mount configuration. The bundle's
+API fallback is already relative `/graphql`; the deployed config records that choice
+explicitly and supplies the base path. Without the base-path values, the HTML requests
+assets from the origin root and Elm reads `/ui` as an application route.
 
 Serving from a container means the directory must be bind-mounted into it. Read-only is
 right: bitmagnet only ever reads these files, and the build is copied in from outside.

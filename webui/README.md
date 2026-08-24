@@ -8,13 +8,10 @@ its own UI; Magnes is a second one, built against the same GraphQL API.
 
 ## Status
 
-Runs. The first milestone is the UI alone — no accounts and no mutations — which
-works because bitmagnet allows cross-origin requests, so the browser can query it
-directly. Search, sort, facet filters, infinite scroll, row expansion down to a file tree
-and `/torrent/<hash>` are all built — that is the whole of the first milestone. What is
-not built is everything the milestone deliberately left out: accounts and any mutation at
-all. See [docs/plan.md](docs/plan.md). The design decisions below separate what runs today
-from the next phase.
+Runs. Search, sort, facet filters, infinite scroll, row expansion down to a file tree and
+`/torrent/<hash>` are built. Identity and permission work is now in progress against the
+fork's browser-cookie contract. See [docs/plan.md](docs/plan.md) for the completed first
+milestone and [docs/accounts-plan.md](docs/accounts-plan.md) for the current phase.
 
 Accounts are next, and [the bitmagnet fork](https://github.com/giorgosg/bitmagnet) now
 has them — along with an option to serve a UI like this one from its own origin. Both are
@@ -25,18 +22,14 @@ live on the instance this is developed against. The next phase is worked out in
 
 ```
 npm install
-cp public/config.example.js public/config.js   # point it at your bitmagnet
-npm run dev                                    # builds, serves public/ on :8000
+BITMAGNET_URL=http://your-bitmagnet:3333 npm run dev
 ```
 
-`public/config.js` is gitignored and optional; without it Magnes uses bitmagnet's
-default address on the same machine, `http://localhost:3333/graphql`. The API address
-and static mount path are read at runtime, so one build works against any instance.
-
-It has to be reachable **from the browser** rather than from wherever the dev server
-runs, because the page queries bitmagnet directly. That also means bitmagnet must allow
-the origin; it sends `Access-Control-Allow-Origin: *` by default, which is what makes a
-serverless UI possible at all.
+The development server uses HTTPS and proxies same-origin `/graphql` requests to
+`BITMAGNET_URL`, allowing bitmagnet's Secure, HttpOnly browser cookie to behave as it does
+in production. It creates a self-signed localhost certificate on first use; accept it once
+in the development browser. The API address and static mount path remain runtime values,
+so one compiled bundle works against any instance.
 
 The fork can also serve Magnes itself, from the API's own origin, which removes CORS from
 the picture entirely. Point `http_server.static.dir` at a build of `public/`, set the

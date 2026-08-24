@@ -1,11 +1,8 @@
-// Copy to config.js and point it at your bitmagnet instance. config.js is
-// gitignored — nobody else's host belongs in the repository.
+// Copy to config.js only for a production static mount or another non-development
+// arrangement. config.js is gitignored — nobody else's host belongs in the repository.
 //
-// The file is optional: without it Magnes falls back to bitmagnet's default
-// address on this machine, http://localhost:3333/graphql.
-//
-// Whatever you set has to be reachable *from the browser*, not from wherever
-// the dev server runs, since the page queries bitmagnet directly.
+// The file is optional: without it Magnes uses same-origin /graphql. `npm run dev`
+// proxies that path to the BITMAGNET_URL supplied to the development server.
 //
 // If bitmagnet is serving Magnes itself, via its http_server.static option,
 // use a RELATIVE address instead — same origin, and no CORS involved:
@@ -16,4 +13,4 @@
 // Also set index.html's <base href> to the same mount path with a trailing
 // slash (for example <base href="/magnes/" />), so assets load on deep links.
 
-window.MAGNES_API_URL = "http://localhost:3333/graphql";
+window.MAGNES_API_URL = "/graphql";

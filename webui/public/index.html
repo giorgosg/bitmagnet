@@ -18,12 +18,24 @@
     <script>
       // The API address and mount path are runtime configuration, not build inputs:
       // the same bundle works at the origin root or beneath bitmagnet's static mount.
-      Elm.Main.init({
+      const app = Elm.Main.init({
         flags: {
-          apiUrl: window.MAGNES_API_URL || "http://localhost:3333/graphql",
+          apiUrl: window.MAGNES_API_URL || "/graphql",
           basePath: window.MAGNES_BASE_PATH || "",
         },
       });
+
+      // Authentication changes carry no credential. The HttpOnly cookie is owned by
+      // bitmagnet; tabs merely tell one another to refresh their canonical Identity.
+      if ("BroadcastChannel" in window) {
+        const authentication = new BroadcastChannel("magnes-authentication");
+        app.ports.authenticationChanged.subscribe(() => {
+          authentication.postMessage("changed");
+        });
+        authentication.addEventListener("message", () => {
+          app.ports.authenticationChanges.send(null);
+        });
+      }
     </script>
   </body>
 </html>

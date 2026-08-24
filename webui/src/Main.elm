@@ -1,4 +1,4 @@
-module Main exposing (main)
+port module Main exposing (main)
 
 import Bitmagnet exposing (Page, Row)
 import Browser
@@ -243,7 +243,22 @@ fieldFor route =
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
-    Browser.Events.onResize (\_ height -> Resized height)
+    Sub.batch
+        [ Browser.Events.onResize (\_ height -> Resized height)
+        , authenticationChanges (\_ -> AuthenticationChanged)
+        ]
+
+
+{-| Notify the other Magnes tabs after browser login or logout. The value carries no
+credential; bitmagnet's HttpOnly cookie remains unreadable to JavaScript and Elm.
+-}
+port authenticationChanged : () -> Cmd msg
+
+
+{-| A different tab changed browser authentication, so permission-sensitive state must
+be discarded and reloaded under the credential the browser now supplies.
+-}
+port authenticationChanges : (() -> msg) -> Sub msg
 
 
 type Msg
@@ -263,6 +278,8 @@ type Msg
     | ToggleFolder String String
     | GotFiles String (Result (Graphql.Http.Error Bitmagnet.FileList) Bitmagnet.FileList)
     | GotResults Int (Result (Graphql.Http.Error Page) Page)
+    | AuthenticationChangedHere
+    | AuthenticationChanged
     | Ignored
 
 
@@ -271,6 +288,28 @@ update msg model =
     case msg of
         Ignored ->
             ( model, Cmd.none )
+
+        AuthenticationChanged ->
+            let
+                epoch =
+                    model.epoch + 1
+
+                ( results, cmd ) =
+                    load model.apiUrl epoch model.route
+            in
+            ( { model
+                | results = results
+                , epoch = epoch
+                , infiniteList = InfiniteList.init
+              }
+            , Cmd.batch [ cmd, scrollListToTop ]
+            )
+
+        AuthenticationChangedHere ->
+            -- Login and logout will dispatch this after bitmagnet confirms the mutation.
+            -- Keeping local state updates in those workflows avoids bouncing our own
+            -- notification back through the channel.
+            ( model, authenticationChanged () )
 
         LinkClicked (Browser.Internal url) ->
             case ( Route.fromUrl model.basePath url, model.route ) of
