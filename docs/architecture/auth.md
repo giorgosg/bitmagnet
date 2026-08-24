@@ -96,10 +96,11 @@ as unreviewed ways to submit a cookie-backed request.
 Three enforcement points, deliberately not one:
 
 - **GraphQL** — the `@auth(object:, action:)` directive, `gql/auth/directive.go`. Deny by
-  default: no identity, or an identity without the object action, is refused. The set of
-  directives in the schema _is_ the registered set of GraphQL object actions — `gqlfx`
-  extracts them from the schema AST rather than restating them, so adding a directive is
-  all it takes to register one.
+  default: no identity, or an identity without the object action, is refused. The deliberate
+  exception is the top-level `Query.self` and `Mutation.self` recovery boundary; individual
+  key-management fields below it require a User session. The set of directives in the schema
+  _is_ the registered set of GraphQL object actions — `gqlfx` extracts them from the schema
+  AST rather than restating them, so adding a directive is all it takes to register one.
 - **Torznab** — its own handler, ignoring whatever the middleware resolved. See
   [interfaces.md](interfaces.md). Reading the ambient identity made a browser session a
   third credential type here: an operator with the web UI open had their JWT attached by
@@ -110,8 +111,9 @@ Three enforcement points, deliberately not one:
   happened to be assembled.
 
 A baseline is granted to `anon` and `user` regardless of the anonymous-access setting —
-`self::query`, `self::mutate`, `health::query`, `version::query` — because logging in is
-itself a GraphQL mutation. Without it, enabling authentication is a permanent lockout.
+`health::query` and `version::query`. Recovery calls under `self` need no baseline Permission:
+their top-level fields are intentionally outside the Role-Permission model, so no Role
+assignment can hide Identity discovery, login, registration, or browser logout.
 
 ## The permission model
 

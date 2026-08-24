@@ -58,12 +58,11 @@ var ErrAPIKeyMayNotManageKeys = errors.New("api keys may not manage api keys")
 // UserSessionFromContext resolves the user only for an interactive session,
 // refusing identities that are themselves backed by an API key.
 //
-// An API-key identity reports its owning user, and inherits whatever the anon
-// role may do — which necessarily includes the self mutations, since login
-// lives there. Without this distinction a key scoped to one narrow object
-// action can call createAPIKey and mint a second key naming any registered
-// object action, bounded only by the owner's role. Key management is an account
-// operation and requires an account session.
+// An API-key identity reports its owning user, and the top-level self boundary
+// is deliberately reachable without a Role Permission. Without this distinction
+// a key scoped to one narrow object action can call createAPIKey and mint a second
+// key naming any registered object action, bounded only by the owner's role. Key
+// management is an account operation and requires an account session.
 func UserSessionFromContext(ctx context.Context) (model.User, error) {
 	identity, ok := IdentityFromContext(ctx)
 	if !ok {

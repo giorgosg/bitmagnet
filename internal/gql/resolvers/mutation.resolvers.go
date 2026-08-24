@@ -10,6 +10,7 @@ import (
 
 	"github.com/bitmagnet-io/bitmagnet/internal/classifier"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql"
+	gqlauth "github.com/bitmagnet-io/bitmagnet/internal/gql/auth"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel/gen"
 	"github.com/bitmagnet-io/bitmagnet/internal/processor"
@@ -18,6 +19,10 @@ import (
 
 // Self is the resolver for the self field.
 func (r *mutationResolver) Self(ctx context.Context) (gqlmodel.SelfMutation, error) {
+	if err := gqlauth.AuthenticationErrorFromContext(ctx); err != nil {
+		return gqlmodel.SelfMutation{}, err
+	}
+
 	return gqlmodel.SelfMutation{
 		UserService:   r.UserService,
 		APIKeyService: r.APIKeyService,

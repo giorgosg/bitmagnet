@@ -1,5 +1,5 @@
 type Mutation {
-  self: SelfMutation! @auth(object: "self", action: "mutate")
+  self: SelfMutation!
   auth: AuthMutation! @auth(object: "auth", action: "mutate")
   torrent: TorrentMutation! @auth(object: "torrent", action: "mutate")
   queue: QueueMutation! @auth(object: "queue", action: "mutate")

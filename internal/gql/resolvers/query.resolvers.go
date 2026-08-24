@@ -11,6 +11,7 @@ import (
 
 	"github.com/bitmagnet-io/bitmagnet/internal/database/query"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql"
+	gqlauth "github.com/bitmagnet-io/bitmagnet/internal/gql/auth"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel/gen"
 	"github.com/bitmagnet-io/bitmagnet/internal/health"
@@ -25,6 +26,10 @@ func (r *queryResolver) Version(ctx context.Context) (string, error) {
 
 // Self is the resolver for the self field.
 func (r *queryResolver) Self(ctx context.Context) (gqlmodel.SelfQuery, error) {
+	if err := gqlauth.AuthenticationErrorFromContext(ctx); err != nil {
+		return gqlmodel.SelfQuery{}, err
+	}
+
 	return gqlmodel.SelfQuery{
 		UserService:   r.UserService,
 		APIKeyService: r.APIKeyService,

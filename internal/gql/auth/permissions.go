@@ -10,9 +10,8 @@ import (
 )
 
 // Permissions is the baseline granted regardless of the anonymous-access
-// setting. Without it, enabling authentication would be a permanent lockout:
-// logging in is itself a GraphQL mutation, so `self` has to stay reachable to
-// callers who have not authenticated yet.
+// setting. The top-level self fields are a recovery boundary and deliberately
+// have no object actions; fields below them enforce User sessions where needed.
 //
 // Adapted from upstream/next's equivalent. Its `index` object has no counterpart
 // on this lineage and is dropped; searching stays behind `torrent` and
@@ -30,9 +29,6 @@ func Permissions() []rbac.Permission {
 		},
 		slice.FlatMap([]rbac.SubjectRole{anon, user}, func(role rbac.SubjectRole) []rbac.Permission {
 			return []rbac.Permission{
-				// Login and registration.
-				rbac.NewPermission(role, rbac.NewObjectAction(Namespace, "self", "mutate")),
-				rbac.NewPermission(role, rbac.NewObjectAction(Namespace, "self", "query")),
 				// Harmless, and needed by the web UI shell before login.
 				rbac.NewPermission(role, rbac.NewObjectAction(Namespace, "health", "query")),
 				rbac.NewPermission(role, rbac.NewObjectAction(Namespace, "version", "query")),
