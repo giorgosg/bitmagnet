@@ -17,6 +17,7 @@ var errHTTPContextRequired = errors.New("browser session cookie requires an HTTP
 // Cookie manages the browser credential without exposing HTTP header assembly
 // to GraphQL resolvers.
 type Cookie interface {
+	Credential(request *http.Request) (string, bool)
 	Issue(ctx context.Context, credential string) error
 	Expire(ctx context.Context) error
 }
@@ -28,6 +29,19 @@ type cookie struct {
 
 func NewCookie(cfg authconfig.Config) Cookie {
 	return cookie{name: cfg.BrowserCookieName, duration: cfg.JWTDuration}
+}
+
+func (c cookie) Credential(request *http.Request) (string, bool) {
+	if request.URL.Path != cookiePath {
+		return "", false
+	}
+
+	requestCookie, err := request.Cookie(c.name)
+	if err != nil {
+		return "", false
+	}
+
+	return requestCookie.Value, true
 }
 
 func (c cookie) Issue(ctx context.Context, credential string) error {

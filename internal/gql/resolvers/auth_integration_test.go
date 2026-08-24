@@ -2,7 +2,9 @@ package resolvers_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -70,6 +72,16 @@ func newAuthTestServerWithConfig(
 ) (*httptest.Server, string) {
 	t.Helper()
 
+	return newAuthTestServerWithConfigAndAuthenticator(t, cfg, nil)
+}
+
+func newAuthTestServerWithConfigAndAuthenticator(
+	t *testing.T,
+	cfg authconfig.Config,
+	authenticatorOverride identity.Authenticator,
+) (*httptest.Server, string) {
+	t.Helper()
+
 	db := dbtest.New(t)
 
 	var provider database.DaoTransactionProvider = daoProvider{query: db.Query}
@@ -120,6 +132,9 @@ func newAuthTestServerWithConfig(
 	)
 
 	authenticator := identity.NewAuthenticator(jwtService, userService, apiKeyService, rbacService)
+	if authenticatorOverride != nil {
+		authenticator = authenticatorOverride
+	}
 
 	schema = gql.NewExecutableSchema(gql.Config{
 		Resolvers: &resolvers.Resolver{
@@ -138,7 +153,7 @@ func newAuthTestServerWithConfig(
 	// Apply the production http server option rather than mounting the
 	// middlewares by hand, so this also covers what that option installs.
 	authOption := http_auth.New(http_auth.Params{
-		Middleware: http_auth.NewMiddleware(authenticator),
+		Middleware: http_auth.NewMiddleware(authenticator, browser_session.NewCookie(cfg)),
 	}).Option
 	require.Equal(t, "auth", authOption.Key())
 	require.NoError(t, authOption.Apply(engine))
@@ -222,6 +237,18 @@ type createAPIKeyResponse struct {
 	Self selfCreateAPIKeyBody `json:"self"`
 }
 
+type invitationBody struct {
+	Code string `json:"code"`
+}
+
+type authInviteBody struct {
+	Invite invitationBody `json:"invite"`
+}
+
+type inviteResponse struct {
+	Auth authInviteBody `json:"auth"`
+}
+
 func query(t *testing.T, server *httptest.Server, token, q string) gqlResponse {
 	t.Helper()
 
@@ -234,6 +261,18 @@ func queryWithHeaders(
 	t *testing.T,
 	server *httptest.Server,
 	token, q string,
+) (gqlResponse, http.Header) {
+	t.Helper()
+
+	return queryWithCredentials(t, server, token, nil, q)
+}
+
+func queryWithCredentials(
+	t *testing.T,
+	server *httptest.Server,
+	token string,
+	cookie *http.Cookie,
+	q string,
 ) (gqlResponse, http.Header) {
 	t.Helper()
 
@@ -252,6 +291,10 @@ func queryWithHeaders(
 
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	if cookie != nil {
+		req.AddCookie(cookie)
 	}
 
 	res, err := server.Client().Do(req)
@@ -285,6 +328,24 @@ func requireBrowserCookieAttributes(t *testing.T, cookie *http.Cookie, name stri
 	assert.True(t, cookie.HttpOnly)
 	assert.True(t, cookie.Secure)
 	assert.Equal(t, http.SameSiteStrictMode, cookie.SameSite)
+}
+
+func loginBrowserCookie(
+	t *testing.T,
+	server *httptest.Server,
+	username, password string,
+) *http.Cookie {
+	t.Helper()
+
+	loggedIn, headers := queryWithHeaders(t, server, "", `mutation { self { loginBrowser(
+		username: "`+username+`", password: "`+password+`"
+	) } }`)
+	requireNoGqlErrors(t, loggedIn)
+
+	cookies := (&http.Response{Header: headers}).Cookies()
+	require.Len(t, cookies, 1)
+
+	return cookies[0]
 }
 
 // The whole point of the port: an operator can bootstrap an account and use it.
@@ -395,6 +456,202 @@ func TestBrowserLogoutIdempotentlyExpiresConfiguredCookie(t *testing.T) {
 		assert.Equal(t, -1, cookies[0].MaxAge)
 		assert.True(t, cookies[0].Expires.Before(time.Now()))
 	}
+}
+
+func TestBrowserCookieResolvesUserIdentity(t *testing.T) {
+	t.Parallel()
+
+	server, code := newAuthTestServer(t)
+
+	const password = "correct-horse-battery-staple-99"
+
+	requireNoGqlErrors(t, query(t, server, "", `mutation { self { register(input: {
+		invitationCode: "`+code+`", username: "admin", password: "`+password+`"
+	}) { user { id } } } }`))
+
+	cookie := loginBrowserCookie(t, server, "admin", password)
+
+	identified, _ := queryWithCredentials(t, server, "", cookie,
+		`{ self { identity { user { username role } } } }`)
+	requireNoGqlErrors(t, identified)
+	assert.JSONEq(t,
+		`{"self":{"identity":{"user":{"username":"admin","role":"admin"}}}}`,
+		string(identified.Data),
+	)
+}
+
+func browserCookieAndSecondUserBearer(
+	t *testing.T,
+	server *httptest.Server,
+	bootstrapCode string,
+) (*http.Cookie, string) {
+	t.Helper()
+
+	const password = "correct-horse-battery-staple-99"
+
+	adminToken := loginAsAdmin(t, server, bootstrapCode)
+
+	cookie := loginBrowserCookie(t, server, "admin", password)
+
+	invited := query(t, server, adminToken, `mutation { auth { invite(input: {role: "user"}) { code } } }`)
+	requireNoGqlErrors(t, invited)
+
+	var invitation inviteResponse
+	require.NoError(t, json.Unmarshal(invited.Data, &invitation))
+	require.NotEmpty(t, invitation.Auth.Invite.Code)
+
+	requireNoGqlErrors(t, query(t, server, "", `mutation { self { register(input: {
+		invitationCode: "`+invitation.Auth.Invite.Code+`", username: "second", password: "`+password+`"
+	}) { user { id } } } }`))
+
+	secondLogin := query(t, server, "", `mutation { self { login(
+		username: "second", password: "`+password+`"
+	) { token } } }`)
+	requireNoGqlErrors(t, secondLogin)
+
+	var login loginResponse
+	require.NoError(t, json.Unmarshal(secondLogin.Data, &login))
+	require.NotEmpty(t, login.Self.Login.Token)
+
+	return cookie, login.Self.Login.Token
+}
+
+func TestExplicitBearerTakesPrecedenceOverBrowserCookie(t *testing.T) {
+	t.Parallel()
+
+	server, code := newAuthTestServer(t)
+	cookie, secondUserToken := browserCookieAndSecondUserBearer(t, server, code)
+
+	identified, _ := queryWithCredentials(t, server, secondUserToken, cookie,
+		`{ self { identity { user { username role } } } }`)
+	requireNoGqlErrors(t, identified)
+	assert.JSONEq(t,
+		`{"self":{"identity":{"user":{"username":"second","role":"user"}}}}`,
+		string(identified.Data),
+	)
+}
+
+func TestInvalidExplicitBearerDoesNotBorrowBrowserCookie(t *testing.T) {
+	t.Parallel()
+
+	server, code := newAuthTestServer(t)
+	cookie, _ := browserCookieAndSecondUserBearer(t, server, code)
+
+	identified, headers := queryWithCredentials(t, server, "not-a-token", cookie,
+		`{ self { identity { user { username } } } }`)
+	requireNoGqlErrors(t, identified)
+	assert.JSONEq(t, `{"self":{"identity":{"user":null}}}`, string(identified.Data))
+	assert.Empty(t, headers.Values("Set-Cookie"), "an ignored ambient cookie must remain untouched")
+}
+
+func TestInvalidBrowserCookieFallsBackToAnonymousAndIsExpired(t *testing.T) {
+	t.Parallel()
+
+	server, _ := newAuthTestServer(t)
+	invalid := &http.Cookie{Name: "__Secure-bitmagnet", Value: "not-a-token"}
+
+	identified, headers := queryWithCredentials(t, server, "", invalid,
+		`{ self { identity { user { username } } } }`)
+	requireNoGqlErrors(t, identified)
+	assert.JSONEq(t, `{"self":{"identity":{"user":null}}}`, string(identified.Data))
+
+	cookies := (&http.Response{Header: headers}).Cookies()
+	require.Len(t, cookies, 1)
+	requireBrowserCookieAttributes(t, cookies[0], invalid.Name)
+	assert.Empty(t, cookies[0].Value)
+	assert.Equal(t, -1, cookies[0].MaxAge)
+	assert.True(t, cookies[0].Expires.Before(time.Now()))
+}
+
+func TestExpiredBrowserCookieFallsBackToAnonymousAndIsExpired(t *testing.T) {
+	t.Parallel()
+
+	cfg := authconfig.NewDefaultConfig()
+	cfg.JWTDuration = -time.Hour
+	server, code := newAuthTestServerWithConfig(t, cfg)
+
+	const password = "correct-horse-battery-staple-99"
+
+	requireNoGqlErrors(t, query(t, server, "", `mutation { self { register(input: {
+		invitationCode: "`+code+`", username: "admin", password: "`+password+`"
+	}) { user { id } } } }`))
+
+	browserCookie := loginBrowserCookie(t, server, "admin", password)
+
+	identified, headers := queryWithCredentials(t, server, "", browserCookie,
+		`{ self { identity { user { username } } } }`)
+	requireNoGqlErrors(t, identified)
+	assert.JSONEq(t, `{"self":{"identity":{"user":null}}}`, string(identified.Data))
+
+	expired := (&http.Response{Header: headers}).Cookies()
+	require.Len(t, expired, 1)
+	requireBrowserCookieAttributes(t, expired[0], browserCookie.Name)
+	assert.Equal(t, -1, expired[0].MaxAge)
+}
+
+func TestRevokedBrowserCookieFallsBackToAnonymousAndIsExpired(t *testing.T) {
+	t.Parallel()
+
+	for _, testCase := range []struct {
+		name     string
+		revokeOp string
+	}{
+		{
+			name:     "disabled User",
+			revokeOp: `mutation { auth { setUserEnabled(userId: 1, enabled: false) { id } } }`,
+		},
+		{
+			name:     "deleted User",
+			revokeOp: `mutation { auth { deleteUser(userId: 1) } }`,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			server, code := newAuthTestServer(t)
+			adminToken := loginAsAdmin(t, server, code)
+
+			const password = "correct-horse-battery-staple-99"
+
+			browserCookie := loginBrowserCookie(t, server, "admin", password)
+			requireNoGqlErrors(t, query(t, server, adminToken, testCase.revokeOp))
+
+			identified, headers := queryWithCredentials(t, server, "", browserCookie,
+				`{ self { identity { user { username } } } }`)
+			requireNoGqlErrors(t, identified)
+			assert.JSONEq(t, `{"self":{"identity":{"user":null}}}`, string(identified.Data))
+
+			expired := (&http.Response{Header: headers}).Cookies()
+			require.Len(t, expired, 1)
+			requireBrowserCookieAttributes(t, expired[0], browserCookie.Name)
+			assert.Equal(t, -1, expired[0].MaxAge)
+		})
+	}
+}
+
+type failingAuthenticator struct{ err error }
+
+func (a failingAuthenticator) Authenticate(context.Context, string) (identity.Identity, bool, error) {
+	return nil, true, a.err
+}
+
+func TestAuthenticationInfrastructureFailureSurvivesGraphQLBoundary(t *testing.T) {
+	t.Parallel()
+
+	backendErr := errors.New("authentication backend unavailable")
+	server, _ := newAuthTestServerWithConfigAndAuthenticator(
+		t,
+		authconfig.NewDefaultConfig(),
+		failingAuthenticator{err: backendErr},
+	)
+	browserCookie := &http.Cookie{Name: "__Secure-bitmagnet", Value: "otherwise-valid"}
+
+	response, headers := queryWithCredentials(t, server, "", browserCookie,
+		`{ self { identity { user { username } } } }`)
+	require.Len(t, response.Errors, 1)
+	assert.Contains(t, response.Errors[0].Message, backendErr.Error())
+	assert.NotContains(t, response.Errors[0].Message, "unauthorized")
+	assert.Empty(t, headers.Values("Set-Cookie"), "infrastructure failures must not clear credentials")
 }
 
 // Regression guard for the rbac.PutRole revocation defect: an empty object

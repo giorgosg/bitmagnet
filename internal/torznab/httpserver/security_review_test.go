@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/authconfig"
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/browser_session"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/http_auth"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/identity"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/rbac"
@@ -57,7 +59,11 @@ func TestTorznabRejectsBrowserBearerTokenWithoutAPIKey(t *testing.T) {
 	})
 
 	engine := gin.New()
-	engine.Use(http_auth.NewMiddleware(authenticator).AttachAuth())
+	authOption := http_auth.New(http_auth.Params{Middleware: http_auth.NewMiddleware(
+		authenticator,
+		browser_session.NewCookie(authconfig.NewDefaultConfig()),
+	)}).Option
+	require.NoError(t, authOption.Apply(engine))
 	require.NoError(t, httpserver.New(lazyClient, testCfg, authenticator).Apply(engine))
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/torznab/?t=caps", nil)
@@ -68,4 +74,32 @@ func TestTorznabRejectsBrowserBearerTokenWithoutAPIKey(t *testing.T) {
 
 	assert.Equal(t, http.StatusUnauthorized, response.Code)
 	assert.Equal(t, unauthorizedXML(t), response.Body.String())
+}
+
+func TestTorznabIgnoresBrowserCookie(t *testing.T) {
+	t.Parallel()
+
+	authenticator := browserSessionAuthenticator{}
+	clientMock := torznab_mocks.NewClient(t)
+	lazyClient := lazy.New[torznab.Client](func() (torznab.Client, error) {
+		return clientMock, nil
+	})
+
+	engine := gin.New()
+	authOption := http_auth.New(http_auth.Params{Middleware: http_auth.NewMiddleware(
+		authenticator,
+		browser_session.NewCookie(authconfig.NewDefaultConfig()),
+	)}).Option
+	require.NoError(t, authOption.Apply(engine))
+	require.NoError(t, httpserver.New(lazyClient, testCfg, authenticator).Apply(engine))
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/torznab/?t=caps", nil)
+	req.AddCookie(&http.Cookie{Name: "__Secure-bitmagnet", Value: "rejected-browser-cookie"})
+
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, req)
+
+	assert.Equal(t, http.StatusUnauthorized, response.Code)
+	assert.Equal(t, unauthorizedXML(t), response.Body.String())
+	assert.Empty(t, response.Header().Values("Set-Cookie"), "Torznab must not process browser cookies")
 }

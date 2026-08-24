@@ -55,8 +55,11 @@ applied in key order). It does two things and **never rejects**:
 
 1. Puts the client IP on the request context, because the login throttle is keyed by it
    and this is the only layer that knows it.
-2. Runs the authenticator chain over the bearer token and, on a match, stores the
-   `Identity` on the gin context.
+2. Selects an explicit bearer credential, or the configured browser cookie only when no
+   `Authorization` header is present, and runs the authenticator chain over it.
+3. Stores the resulting `Identity` together with credential source, rejection state, and
+   any infrastructure error on the gin context. GraphQL surfaces infrastructure errors
+   before authorization; it never turns them into an Anonymous identity or `unauthorized`.
 
 The chain (`identity/authenticator_chain.go`) is JWT → API key → anonymous, and its
 invariant is load-bearing:
@@ -74,6 +77,10 @@ re-sending the dead token, until the operator clears browser storage by hand.
 It took four fixes to hold this across both credential types. `revokedAPIKey` names the
 five outcomes meaning "not a usable credential" and lets them fall through, leaving only
 genuine repository failures to abort.
+
+The HTTP boundary uses the recorded source to expire rejected browser cookies. It never
+expires a cookie ignored because an explicit bearer was present, and it leaves credentials
+untouched when authentication failed because the database or RBAC service could not answer.
 
 ## Enforcing
 

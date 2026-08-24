@@ -19,6 +19,20 @@ func IdentityFromContext(ctx context.Context) (identity.Identity, bool) {
 	return http_auth.GetIdentity(ginCtx)
 }
 
+func AuthenticationErrorFromContext(ctx context.Context) error {
+	ginCtx, ok := internal_httpserver.GinContextFromContext(ctx)
+	if !ok {
+		return nil
+	}
+
+	resolution, ok := http_auth.GetResolution(ginCtx)
+	if !ok {
+		return nil
+	}
+
+	return resolution.Err
+}
+
 func UserFromContext(ctx context.Context) (model.User, bool) {
 	identity, ok := IdentityFromContext(ctx)
 	if !ok {
