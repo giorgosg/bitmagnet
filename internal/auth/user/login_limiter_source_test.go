@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/authconfig"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/http_auth"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/identity"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/user"
@@ -68,7 +69,12 @@ func loginThroughMiddleware(
 func TestLoginIsThrottledForOneSource(t *testing.T) {
 	t.Parallel()
 
-	service, query := newUserService(t)
+	service, query := newUserServiceWithConfig(t, func(config *authconfig.Config) {
+		// Password hashing can take long enough on a busy runner for the default
+		// 30-per-minute bucket to refill during this test. Keep the production
+		// burst but make replenishment slower than the test itself.
+		config.LoginRequestsPerMinute = 1
+	})
 	putInvitation(t, query, "throttlesrc1", sql.NullTime{})
 
 	_, err := service.Register(t.Context(), user.RegisterRequest{
