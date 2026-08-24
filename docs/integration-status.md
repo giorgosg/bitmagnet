@@ -64,12 +64,11 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#53](https://github.com/giorgosg/bitmagnet/pull/53) | Protect cookie-authenticated GraphQL mutations from CSRF                    | local                                                                | Credential-source and transport regressions observed red       |
 | [#54](https://github.com/giorgosg/bitmagnet/pull/54) | Make GraphQL `self` a recovery boundary                                     | local                                                                | Identity/permission/logout regressions observed red            |
 | [#55](https://github.com/giorgosg/bitmagnet/pull/55) | Add stable GraphQL authentication error codes                               | local                                                                | Error-code/metadata/redaction regressions observed red         |
+| [#56](https://github.com/giorgosg/bitmagnet/pull/56) | Return the current `lastLoginAt` from login                                 | local                                                                | Login/identity timestamp mismatch observed red                 |
 
 ## In flight
 
-| PR                                                   | Change                                      | Downstream source | Verification note                                                 |
-| ---------------------------------------------------- | ------------------------------------------- | ----------------- | ----------------------------------------------------------------- |
-| [#56](https://github.com/giorgosg/bitmagnet/pull/56) | Return the current `lastLoginAt` from login | local             | Login/identity timestamp mismatch observed red; full suite passed |
+Nothing currently in flight.
 
 ## The static review findings
 

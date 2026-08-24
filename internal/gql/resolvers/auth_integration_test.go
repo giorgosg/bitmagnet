@@ -522,6 +522,8 @@ func TestBrowserLoginIssuesSecureGraphQLCookieWithoutCredentialPayload(t *testin
 	require.Len(t, cookies, 1)
 	requireBrowserCookieAttributes(t, cookies[0], "__Secure-bitmagnet")
 	assert.NotEmpty(t, cookies[0].Value)
+	assert.NotContains(t, string(loggedIn.Data), cookies[0].Value,
+		"the browser credential must exist only in the HttpOnly cookie")
 	assert.WithinDuration(t, time.Now().Add(time.Hour), cookies[0].Expires, 5*time.Second)
 }
 
@@ -542,7 +544,7 @@ func TestBrowserLoginFailureDoesNotIssueCookie(t *testing.T) {
 		t, server, "", nil, sameOrigin(t, server),
 		`mutation { self { loginBrowser(username: "admin", password: "wrong-password") } }`,
 	)
-	require.NotEmpty(t, failed.Errors)
+	requireGraphQLErrorCode(t, failed, "INVALID_CREDENTIALS")
 	assert.Empty(t, headers.Values("Set-Cookie"))
 }
 

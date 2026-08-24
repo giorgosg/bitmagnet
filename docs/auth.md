@@ -105,6 +105,39 @@ unclassified internal failures use fixed public messages; their underlying error
 are not returned to the client. GraphQL parsing and validation errors remain gqlgen's
 ordinary protocol errors rather than being mislabeled as application failures.
 
+## Magnes integration environment
+
+Exercise Magnes against the same boundary a browser will use in production. The reference
+harness is `internal/gql/resolvers/auth_integration_test.go`; it mounts the production Gin
+authentication middleware and gqlgen server over an isolated, fully migrated PostgreSQL
+database. Run that matrix, including the unchanged Torznab boundary, with:
+
+```bash
+TEST_POSTGRES_DSN='postgres://postgres:postgres@localhost:5432/postgres' \
+  go test ./internal/gql/resolvers ./internal/torznab/httpserver -count=1
+```
+
+For a real Magnes browser run, make these three properties explicit:
+
+1. Set `auth.jwt_secret` to one fixed value shared by every bitmagnet replica and every
+   restart in the environment. A generated-per-process secret invalidates the browser
+   cookie whenever the backend restarts. A deterministic test-only value is acceptable in
+   an isolated integration environment; do not reuse it in production.
+2. Leave `http_server.trusted_proxies` empty when the browser connects directly. When TLS
+   terminates at a reverse proxy, set it to that proxy's actual CIDR — and only that CIDR —
+   so forwarded client addresses feed the login throttle without becoming caller-controlled.
+3. Serve Magnes and `/graphql` from the exact same browser-visible HTTPS origin, including
+   port. The `__Secure-` cookie is rejected over plain HTTP, and cookie-authorized mutations
+   require an `Origin` of `https://<request-host>`. A TLS-terminating proxy may use HTTP to
+   bitmagnet internally, but it must preserve the browser-facing `Host` when forwarding
+   `/graphql`.
+
+Set `auth.anonymous_access` to `false` for the authenticated Magnes scenario, and also run
+the matrix once with its default `true` value to preserve the open-installation contract.
+Registration uses the bootstrap Invitation from the bitmagnet log and remains separate
+from login; after registration, submit the username and password to `loginBrowser`, then
+query `self.identity`. Browser code must never read or store the cookie value.
+
 **Every bound in that table is enforced, and they are load-bearing.**
 `login_requests_per_minute: 0` reaches `rate.Every(time.Minute / 0)` and takes the process
 down from a config file alone; `password_min_entropy: 0` accepts any password at all; a
