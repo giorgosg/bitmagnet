@@ -16,6 +16,11 @@ not built is everything the milestone deliberately left out: the proxy server, a
 and any mutation at all. See [docs/plan.md](docs/plan.md). The design decisions below
 describe where Magnes is going, not everything that runs today.
 
+Accounts are next, and [the bitmagnet fork](https://github.com/giorgosg/bitmagnet) now
+has them — along with an option to serve a UI like this one from its own origin. Both are
+live on the instance this is developed against. What that means for the design decisions
+below — the proxy server in particular — is worked out in [docs/](docs/README.md).
+
 ## Running it
 
 ```
@@ -33,6 +38,11 @@ It has to be reachable **from the browser** rather than from wherever the dev se
 runs, because the page queries bitmagnet directly. That also means bitmagnet must allow
 the origin; it sends `Access-Control-Allow-Origin: *` by default, which is what makes a
 serverless UI possible at all.
+
+The fork can also serve Magnes itself, from the API's own origin, which removes CORS from
+the picture entirely — point `http_server.static.dir` at a build of `public/` and set
+`window.MAGNES_API_URL = "/graphql"`. See
+[docs/serving-and-testing.md](docs/serving-and-testing.md).
 
 ## Approach
 
@@ -67,6 +77,14 @@ same either way. Only runtime traffic is proxied.
 Likely JavaScript, eventually running on Cloudflare Workers — which also decides
 the database: D1 is SQLite, so the same schema and queries work locally and
 deployed.
+
+**This decision is under review, and the reasoning above has expired.** The fork enforces
+a permission model on every GraphQL field, so "bitmagnet's API has no notion of users" is
+no longer true; and its `http_server.static` option serves Magnes from the API's own
+origin, which is the deployment the proxy was going to provide. A server may still be
+worth building — for state bitmagnet has no column for, and an origin that need not be
+bitmagnet's — but not for the reason given here. See
+[docs/accounts-plan.md](docs/accounts-plan.md) before starting one.
 
 ### Guests are a permission level, not a flag
 
@@ -144,9 +162,10 @@ two are independent, and multiple rows can be open at once.
 
 ### Real paths, not fragments
 
-Routes are ordinary paths (`/search?q=…`, `/torrent/<hash>`), which requires the
-server to serve the app for unmatched paths so a deep link survives a refresh.
-Since there is a server anyway, this costs nothing, and it avoids the `#/`
+Routes are ordinary paths (`/search?q=…`, `/torrent/<hash>`), which requires whatever
+serves the app to fall back to `index.html` on unmatched paths, so a deep link survives a
+refresh. Everything that serves Magnes already does: `dev.js` in development, and
+bitmagnet's own static mount in deployment. So this costs nothing, and it avoids the `#/`
 in every URL.
 
 ## The name

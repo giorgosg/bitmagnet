@@ -6,5 +6,10 @@
 //
 // Whatever you set has to be reachable *from the browser*, not from wherever
 // the dev server runs, since the page queries bitmagnet directly.
+//
+// If bitmagnet is serving Magnes itself, via its http_server.static option,
+// use a RELATIVE address instead — same origin, and no CORS involved:
+//
+//   window.MAGNES_API_URL = "/graphql";
 
 window.MAGNES_API_URL = "http://localhost:3333/graphql";

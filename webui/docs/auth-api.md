@@ -1,0 +1,288 @@
+# The account and auth API
+
+Everything Magnes needs to know about bitmagnet's authentication surface. Transcribed
+from `../bitmagnet/graphql/schema/*.graphqls` and `../bitmagnet/internal/auth/` at `trunk`
+`77fdb9de7`, and re-checked on 2026-08-24 against a live instance running that exact
+commit. See [serving-and-testing.md](serving-and-testing.md) for what an instance needs to
+have before any of this is reachable.
+
+**[verified]** marks a claim checked by request against that instance. Everything behind a
+credential — registration, login, API keys, the whole `auth` namespace — is read off the
+source only, because the probes were anonymous.
+
+Vocabulary is fixed in `../bitmagnet/CONTEXT.md`. Identity, User, API key, Invitation,
+Object action, Permission, Role, Anonymous access. Do not write "guest", "session",
+"scope" or "account" in code or comments.
+
+## The shape of it
+
+Authentication is **off by default**. `auth.anonymous_access` defaults to `true`, which
+grants the `anon` role every registered object action except auth administration. Setting
+it to `false` is what turns authentication on. So Magnes must work in three worlds:
+
+1. **A server with no auth at all** (upstream, or any instance predating the auth port —
+   no longer either of ours) — the schema has no `self` field. Querying it is a validation error, not an authorization error.
+2. **Anonymous access on** — `self.identity` resolves, returns `user: null`, and
+   `permissions` contains nearly everything. Login exists but nothing requires it.
+3. **Anonymous access off** — an unauthenticated caller gets `self`, `health` and
+   `version` and nothing else. Searching requires a User.
+
+World 1 is a `Cannot query field "self"` validation error against the whole document, so
+a single query asking for both search results and identity fails **entirely**. Ask for
+identity in its own request.
+
+## Types
+
+```graphql
+type Self {
+  user: User            # null for an anonymous or API-key identity
+  apiKey: APIKey        # non-null only when the credential was an API key
+  permissions: [AuthObjectAction!]!
+}
+
+type User {
+  id: Int!
+  username: String!
+  role: String!         # a role NAME, not an object
+  email: String
+  lastLoginAt: DateTime
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type Role {
+  name: String!
+  core: Boolean!        # admin/editor/user/anon are core and cannot be deleted
+  permissions: [Permission!]!
+}
+
+type AuthObjectAction { namespace: String!  object: String!  action: String! }
+type AuthSubject      { type: AuthSubjectType!  name: String! }   # type is only `role`
+type Permission       { subject: AuthSubject!  objectAction: AuthObjectAction!  core: Boolean! }
+
+type APIKey {
+  id: Int!  name: String!  userId: Int!  user: User!
+  expiresAt: DateTime  createdAt: DateTime!
+}
+
+type Invitation {
+  code: String!  role: String!  email: String
+  createdBy: User  claimedBy: User
+  expiresAt: DateTime  createdAt: DateTime!
+}
+```
+
+**`User` has no `enabled` field**, even though `setUserEnabled` exists and the column does.
+A UI therefore cannot show whether an account is disabled, or reflect the result of
+disabling one. Closing that needs a schema change in bitmagnet.
+
+## Queries
+
+```graphql
+query {
+  self {
+    identity: Self!
+    passwordEntropy(password: String!): PasswordEntropyResult!   # { entropy, minEntropy, valid }
+    apiKeys: [APIKey!]!
+  }
+  auth {
+    listUsers(input: ListUsersInput): ListUsersResult!           # { users, totalCount }
+    listRoles: [Role!]!
+    listObjectActions: [AuthObjectAction!]!
+    listInvitations(input: ListInvitationsInput): ListInvitationsResult!
+  }
+}
+
+input ListUsersInput       { pagination: PaginationInput  usernameLike: String }
+input ListInvitationsInput { pagination: PaginationInput }
+input PaginationInput      { limit: Int  page: Int  offset: Int }
+```
+
+`passwordEntropy` is a **server round trip per keystroke** if used the way the Angular UI
+uses it. Debounce it. **[verified]** it answers anonymously, and reports `minEntropy: 70`
+— the default — so the meter can be drawn before anyone has logged in.
+
+## Mutations
+
+```graphql
+mutation {
+  self {
+    register(input: RegisterInput!): RegisterResult!    # { user }
+    login(username: String!, password: String!): LoginResult!
+    createAPIKey(input: CreateAPIKeyInput!): CreateAPIKeyResult!
+    deleteAPIKey(id: Int!): Void
+  }
+  auth {
+    setUserRole(userId: Int!, roleName: String!): User!
+    setUserEnabled(userId: Int!, enabled: Boolean!): User!
+    deleteUser(userId: Int!): Void
+    putRole(role: String!, objectActions: [AuthObjectActionInput!]!): Role!
+    deleteRole(role: String!): Void
+    invite(input: InviteInput!): Invitation!
+    deleteInvitation(code: String!): Void
+  }
+}
+
+input RegisterInput    { invitationCode: String  username: String!  password: String!  email: String }
+input CreateAPIKeyInput{ name: String!  permissions: [AuthObjectActionInput!]!  expiry: Duration }
+input InviteInput      { email: String  role: String  expiry: Duration }
+
+type LoginResult       { token: String!  user: User!  permissions: [Permission!]! }
+type CreateAPIKeyResult{ id: Int!  apiKey: String!  name: String!  expiresAt: DateTime }
+```
+
+**There is no password-change mutation.** `user.Service.UpdatePassword` is implemented in
+`../bitmagnet/internal/auth/user/method_update_password.go` and called from nowhere — no
+resolver, no schema field. A user cannot change their own password through any API.
+Closing that needs a schema change in bitmagnet.
+
+`putRole` is a **replace, not a merge**: the object actions given become the role's entire
+permission set. Read the role first, or an edit silently revokes everything unlisted.
+
+`Duration` is gqlgen's `graphql.Duration` — a Go duration string, `"24h0m0s"`, parsed with
+`time.ParseDuration`. Not seconds, not ISO 8601.
+
+## Two shapes for the same idea
+
+`Self.permissions` is `[AuthObjectAction!]!` — flat triples. `LoginResult.permissions` is
+`[Permission!]!` — triples wrapped with a subject and a `core` flag. The same information
+arrives in two shapes depending on which call produced it. Normalise to the flat form at
+the boundary; the subject is always the caller's own role and carries nothing.
+
+## Authorization
+
+An **object action** is `namespace/object/action`. Three namespaces exist, seventeen
+actions in total:
+
+- `graphql` (13) — derived from the `@auth` directives in the schema, not listed anywhere
+  by hand: `self::query`, `self::mutate`, `auth::query`, `auth::mutate`, `version::query`,
+  `health::query`, `workers::query`, `queue::query`, `queue::mutate`, `torrent::query`,
+  `torrent::mutate`, `torrent::delete`, `torrentContent::query`.
+- `http` (3) — `import::mutate`, `pprof::query`, `metrics::query`, for the non-GraphQL
+  endpoints.
+- `torznab` (1) — `torznab::query`, registered by
+  `../bitmagnet/internal/torznab/httpserver/auth.go`.
+
+Only the `graphql` ones are reachable from a browser, but **all seventeen appear in
+`listObjectActions`**, and therefore in any role editor or API-key scoping form. Scoping a
+key to Torznab and nothing else is the case that makes the last one matter.
+
+**[verified]** on a live instance the anonymous identity holds exactly 15 of the 17 — every
+one except `graphql::auth::query` and `graphql::auth::mutate`, and `{auth{…}}` accordingly
+returns `"unauthorized"`. That is the deliberate exclusion below, confirmed in the field.
+
+Enforcement is per **top-level field**. `Mutation.torrent` is gated by
+`torrent::mutate`, and every field beneath it inherits that, with `delete` additionally
+gated by `torrent::delete`. There is no per-argument or per-row authorization.
+
+### Roles
+
+`admin`, `editor`, `user`, `anon` are core and seeded by migration `00022_auth.sql`, with
+**no permissions rows**. What each actually gets:
+
+| Role     | Where its permissions come from                                                     |
+| -------- | ------------------------------------------------------------------------------------ |
+| `admin`  | An in-memory core permission of `**/**/**`. Everything, always.                       |
+| `user`   | The baseline below, plus `torrent::query` and `torrentContent::query`.                |
+| `anon`   | The baseline below; plus everything except `auth::*` while anonymous access is on.    |
+| `editor` | **Nothing.** It is a name with no grants until an admin uses `putRole`.               |
+
+The baseline granted to `anon` and `user` regardless of the anonymous-access setting is
+`self::query`, `self::mutate`, `health::query`, `version::query` — because logging in is
+itself a GraphQL mutation, and without it enabling authentication is a permanent lockout.
+
+Permissions match by **glob**, not equality: admin's `**` is a pattern. Server-side this
+is casbin with `globMatch` over three fields — the subject as `role::<name>`, the object as
+`<namespace>::<object>`, and the action on its own
+(`../bitmagnet/internal/auth/rbac/service.go`, `casbin_model.conf`). A client only ever
+sees the flat triple, so it matches component by component.
+
+**A client-side enforcer has to glob-match too, or it will deny an admin everything** —
+admin's sole permission is `**/**/**`. The Angular UI uses picomatch for this; an Elm
+implementation needs the equivalent, and the only patterns the server actually emits today
+are `**` and literals.
+
+Revocation takes up to `auth.rbac_cache_ttl` (default 1 minute) to take effect.
+
+## Credentials
+
+**Session token**: a JWT, sent as `Authorization: Bearer <token>`. HS256, pinned. Its
+lifetime is `auth.jwt_duration`, default 24h. If `auth.jwt_secret` is unset the server
+generates one per process, so **every restart invalidates every token** — expect this
+constantly in development.
+
+**API key**: 22 base62 characters, sent as `?apikey=` or `X-Api-Key`, and used by \*arr
+clients over Torznab. Torznab **refuses a JWT** in the apikey slot and ignores the bearer
+middleware entirely, so a browser session is never a Torznab credential. A UI creates and
+deletes keys; it never authenticates with one.
+
+**Invitation**: a single-use 128-bit code. `auth.invitation_required` defaults to `true`,
+so registration normally needs one. The first administrator's invitation is minted by a
+startup worker and **logged, not displayed** — an operator reads it out of the journal.
+
+## The failure mode that decides the client design
+
+The authenticator chain is JWT → API key → anonymous, and its invariant is:
+
+> A revoked, expired, unparseable, deleted or disabled credential reports **no match** and
+> falls through to anonymous. Only an infrastructure failure reports an error.
+
+So **a dead token does not produce an error.** It produces a successful `self.identity`
+with `user: null`. **[verified]** both halves: `Authorization: Bearer not.a.jwt` and a
+well-formed JWT with a bogus signature each returned `200` with the full anonymous
+identity and no error at all. That is deliberate — a credential path that aborted the chain left the
+request with no identity at all, which refused `self.identity` and `self.login`, the two
+calls a client needs to notice its token is dead and recover. The session then stayed
+wedged across reloads until the operator cleared browser storage by hand.
+
+**The client-side consequence, and it is not optional:** holding a token while the server
+reports `user: null` means the token is stale. Detect that and clear it. Nothing else will
+tell you.
+
+## Anonymous abuse controls a client will hit
+
+- **Login is throttled and refuses rather than queues.** Buckets are keyed by
+  `(account, source)` and by source alone. An attempt that cannot be served immediately is
+  refused immediately with `too many login requests`. Defaults are 30/minute, burst 5.
+- **Registration validates the invitation before hashing.** A bad code fails fast; a good
+  one costs a bcrypt.
+- **Login compares against a decoy hash when the account does not exist**, so timing does
+  not disclose whether a username is taken. Do not build a "username available?" check on
+  top of login latency.
+
+## Error strings
+
+Errors arrive as ordinary GraphQL errors with the message text below, and **there is no
+machine-readable detail on any of them** — no `extensions`, no codes.
+
+That includes authorization. A refusal looks like this, and nothing more **[verified]**:
+
+```json
+{"errors":[{"message":"unauthorized","path":["auth"],"locations":[...]}],"data":null}
+```
+
+`unauthorizedError` in `../bitmagnet/internal/gql/auth/directive.go` does define a
+`GraphQLExtensions()` method returning `{namespace, object, action}` — but **nothing calls
+it**. gqlgen's extension hook is `Extensions() map[string]any` (`graphql.ExtendedError`),
+the name does not match, and bitmagnet sets no custom `ErrorPresenter`, so
+`DefaultErrorPresenter` wraps the error and drops the method. The extensions are dead
+code; the live response has no `extensions` key at all. Worth a one-line fix upstream in
+the fork — until then, **`path` is the only thing that says what was refused**, and it
+names the top-level field (`["auth"]`, `["self","login"]`).
+
+From `../bitmagnet/internal/auth/user/errors.go`, wrapped as `user: <verb> failed: <cause>`.
+**[verified]** two of them, exactly in that form: `user: login failed: invalid username or
+password` and `user: register failed: invitation code is required`.
+
+| Message                            | Means                                          |
+| ---------------------------------- | ----------------------------------------------- |
+| `invalid username or password`     | Login miss — covers "no such user" too         |
+| `account is disabled`              | Login against a disabled User                  |
+| `too many login requests`          | Throttled; back off, do not retry immediately  |
+| `user already exists`              | Registration, username or email taken          |
+| `invitation code is required`      | `invitation_required` is on and none was given |
+| `invitation not found` / `expired` / `already claimed` | Registration, bad code   |
+| `password has insufficient entropy`| Below `auth.password_min_entropy` (default 70) |
+| `invalid username` / `invalid email` / `email is required` | Registration validation |
+
+Match on the **substring**, not equality: the message is a wrapped chain.

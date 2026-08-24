@@ -4,3 +4,8 @@ public/main.js
 
 # Local instance address; see public/config.example.js
 public/config.js
+
+# Working notes about a particular deployment — addresses, hostnames, paths.
+# The docs in docs/ describe bitmagnet and Magnes; anything naming *your*
+# instances belongs in a *.local.md beside them, and stays out of the repo.
+*.local.md
