@@ -276,6 +276,17 @@ func requireNoGqlErrors(t *testing.T, res gqlResponse) {
 	require.Empty(t, res.Errors)
 }
 
+func requireBrowserCookieAttributes(t *testing.T, cookie *http.Cookie, name string) {
+	t.Helper()
+
+	assert.Equal(t, name, cookie.Name)
+	assert.Equal(t, "/graphql", cookie.Path)
+	assert.Empty(t, cookie.Domain)
+	assert.True(t, cookie.HttpOnly)
+	assert.True(t, cookie.Secure)
+	assert.Equal(t, http.SameSiteStrictMode, cookie.SameSite)
+}
+
 // The whole point of the port: an operator can bootstrap an account and use it.
 func TestAuthRegisterLoginIdentityFlow(t *testing.T) {
 	t.Parallel()
@@ -340,13 +351,8 @@ func TestBrowserLoginIssuesSecureGraphQLCookieWithoutCredentialPayload(t *testin
 
 	cookies := (&http.Response{Header: headers}).Cookies()
 	require.Len(t, cookies, 1)
-	assert.Equal(t, "__Secure-bitmagnet", cookies[0].Name)
+	requireBrowserCookieAttributes(t, cookies[0], "__Secure-bitmagnet")
 	assert.NotEmpty(t, cookies[0].Value)
-	assert.Equal(t, "/graphql", cookies[0].Path)
-	assert.Empty(t, cookies[0].Domain)
-	assert.True(t, cookies[0].HttpOnly)
-	assert.True(t, cookies[0].Secure)
-	assert.Equal(t, http.SameSiteStrictMode, cookies[0].SameSite)
 	assert.WithinDuration(t, time.Now().Add(time.Hour), cookies[0].Expires, 5*time.Second)
 }
 
@@ -384,13 +390,8 @@ func TestBrowserLogoutIdempotentlyExpiresConfiguredCookie(t *testing.T) {
 
 		cookies := (&http.Response{Header: headers}).Cookies()
 		require.Len(t, cookies, 1)
-		assert.Equal(t, cfg.BrowserCookieName, cookies[0].Name)
+		requireBrowserCookieAttributes(t, cookies[0], cfg.BrowserCookieName)
 		assert.Empty(t, cookies[0].Value)
-		assert.Equal(t, "/graphql", cookies[0].Path)
-		assert.Empty(t, cookies[0].Domain)
-		assert.True(t, cookies[0].HttpOnly)
-		assert.True(t, cookies[0].Secure)
-		assert.Equal(t, http.SameSiteStrictMode, cookies[0].SameSite)
 		assert.Equal(t, -1, cookies[0].MaxAge)
 		assert.True(t, cookies[0].Expires.Before(time.Now()))
 	}
