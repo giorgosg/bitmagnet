@@ -32,6 +32,10 @@ func NewCookie(cfg authconfig.Config) Cookie {
 }
 
 func (c cookie) Credential(request *http.Request) (string, bool) {
+	if request.URL.Path != cookiePath {
+		return "", false
+	}
+
 	requestCookie, err := request.Cookie(c.name)
 	if err != nil {
 		return "", false

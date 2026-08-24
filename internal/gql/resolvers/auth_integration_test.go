@@ -330,6 +330,24 @@ func requireBrowserCookieAttributes(t *testing.T, cookie *http.Cookie, name stri
 	assert.Equal(t, http.SameSiteStrictMode, cookie.SameSite)
 }
 
+func loginBrowserCookie(
+	t *testing.T,
+	server *httptest.Server,
+	username, password string,
+) *http.Cookie {
+	t.Helper()
+
+	loggedIn, headers := queryWithHeaders(t, server, "", `mutation { self { loginBrowser(
+		username: "`+username+`", password: "`+password+`"
+	) } }`)
+	requireNoGqlErrors(t, loggedIn)
+
+	cookies := (&http.Response{Header: headers}).Cookies()
+	require.Len(t, cookies, 1)
+
+	return cookies[0]
+}
+
 // The whole point of the port: an operator can bootstrap an account and use it.
 func TestAuthRegisterLoginIdentityFlow(t *testing.T) {
 	t.Parallel()
@@ -451,15 +469,9 @@ func TestBrowserCookieResolvesUserIdentity(t *testing.T) {
 		invitationCode: "`+code+`", username: "admin", password: "`+password+`"
 	}) { user { id } } } }`))
 
-	loggedIn, headers := queryWithHeaders(t, server, "", `mutation { self { loginBrowser(
-		username: "admin", password: "`+password+`"
-	) } }`)
-	requireNoGqlErrors(t, loggedIn)
+	cookie := loginBrowserCookie(t, server, "admin", password)
 
-	cookies := (&http.Response{Header: headers}).Cookies()
-	require.Len(t, cookies, 1)
-
-	identified, _ := queryWithCredentials(t, server, "", cookies[0],
+	identified, _ := queryWithCredentials(t, server, "", cookie,
 		`{ self { identity { user { username role } } } }`)
 	requireNoGqlErrors(t, identified)
 	assert.JSONEq(t,
@@ -479,13 +491,7 @@ func browserCookieAndSecondUserBearer(
 
 	adminToken := loginAsAdmin(t, server, bootstrapCode)
 
-	browserLogin, browserHeaders := queryWithHeaders(t, server, "", `mutation { self { loginBrowser(
-		username: "admin", password: "`+password+`"
-	) } }`)
-	requireNoGqlErrors(t, browserLogin)
-
-	cookies := (&http.Response{Header: browserHeaders}).Cookies()
-	require.Len(t, cookies, 1)
+	cookie := loginBrowserCookie(t, server, "admin", password)
 
 	invited := query(t, server, adminToken, `mutation { auth { invite(input: {role: "user"}) { code } } }`)
 	requireNoGqlErrors(t, invited)
@@ -507,7 +513,7 @@ func browserCookieAndSecondUserBearer(
 	require.NoError(t, json.Unmarshal(secondLogin.Data, &login))
 	require.NotEmpty(t, login.Self.Login.Token)
 
-	return cookies[0], login.Self.Login.Token
+	return cookie, login.Self.Login.Token
 }
 
 func TestExplicitBearerTakesPrecedenceOverBrowserCookie(t *testing.T) {
@@ -570,22 +576,16 @@ func TestExpiredBrowserCookieFallsBackToAnonymousAndIsExpired(t *testing.T) {
 		invitationCode: "`+code+`", username: "admin", password: "`+password+`"
 	}) { user { id } } } }`))
 
-	loggedIn, loginHeaders := queryWithHeaders(t, server, "", `mutation { self { loginBrowser(
-		username: "admin", password: "`+password+`"
-	) } }`)
-	requireNoGqlErrors(t, loggedIn)
+	browserCookie := loginBrowserCookie(t, server, "admin", password)
 
-	browserCookies := (&http.Response{Header: loginHeaders}).Cookies()
-	require.Len(t, browserCookies, 1)
-
-	identified, headers := queryWithCredentials(t, server, "", browserCookies[0],
+	identified, headers := queryWithCredentials(t, server, "", browserCookie,
 		`{ self { identity { user { username } } } }`)
 	requireNoGqlErrors(t, identified)
 	assert.JSONEq(t, `{"self":{"identity":{"user":null}}}`, string(identified.Data))
 
 	expired := (&http.Response{Header: headers}).Cookies()
 	require.Len(t, expired, 1)
-	requireBrowserCookieAttributes(t, expired[0], browserCookies[0].Name)
+	requireBrowserCookieAttributes(t, expired[0], browserCookie.Name)
 	assert.Equal(t, -1, expired[0].MaxAge)
 }
 
@@ -613,23 +613,17 @@ func TestRevokedBrowserCookieFallsBackToAnonymousAndIsExpired(t *testing.T) {
 
 			const password = "correct-horse-battery-staple-99"
 
-			loggedIn, loginHeaders := queryWithHeaders(t, server, "", `mutation { self { loginBrowser(
-				username: "admin", password: "`+password+`"
-			) } }`)
-			requireNoGqlErrors(t, loggedIn)
-
-			browserCookies := (&http.Response{Header: loginHeaders}).Cookies()
-			require.Len(t, browserCookies, 1)
+			browserCookie := loginBrowserCookie(t, server, "admin", password)
 			requireNoGqlErrors(t, query(t, server, adminToken, testCase.revokeOp))
 
-			identified, headers := queryWithCredentials(t, server, "", browserCookies[0],
+			identified, headers := queryWithCredentials(t, server, "", browserCookie,
 				`{ self { identity { user { username } } } }`)
 			requireNoGqlErrors(t, identified)
 			assert.JSONEq(t, `{"self":{"identity":{"user":null}}}`, string(identified.Data))
 
 			expired := (&http.Response{Header: headers}).Cookies()
 			require.Len(t, expired, 1)
-			requireBrowserCookieAttributes(t, expired[0], browserCookies[0].Name)
+			requireBrowserCookieAttributes(t, expired[0], browserCookie.Name)
 			assert.Equal(t, -1, expired[0].MaxAge)
 		})
 	}
