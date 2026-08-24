@@ -111,10 +111,6 @@ func (m SelfMutation) Login(ctx context.Context, username, password string) (gen
 }
 
 func (m SelfMutation) LoginBrowser(ctx context.Context, username, password string) (*string, error) {
-	if err := m.BrowserCookie.RequireSameOrigin(ctx); err != nil {
-		return nil, err
-	}
-
 	result, err := m.UserService.Login(ctx, username, password)
 	if err != nil {
 		return nil, err
@@ -124,10 +120,6 @@ func (m SelfMutation) LoginBrowser(ctx context.Context, username, password strin
 }
 
 func (m SelfMutation) LogoutBrowser(ctx context.Context) (*string, error) {
-	if err := m.BrowserCookie.RequireSameOrigin(ctx); err != nil {
-		return nil, err
-	}
-
 	return nil, m.BrowserCookie.Expire(ctx)
 }
 

@@ -530,33 +530,6 @@ func TestBrowserCookieResolvesUserIdentity(t *testing.T) {
 	)
 }
 
-func TestBrowserLoginRequiresSameOrigin(t *testing.T) {
-	t.Parallel()
-
-	server, code := newAuthTestServer(t)
-
-	const password = "correct-horse-battery-staple-99"
-
-	requireNoGqlErrors(t, query(t, server, "", `mutation { self { register(input: {
-		invitationCode: "`+code+`", username: "admin", password: "`+password+`"
-	}) { user { id } } } }`))
-
-	assertRejected := func(origin string) {
-		response, headers, _ := queryWithOrigin(t, server, "", nil, origin,
-			`mutation { self { loginBrowser(username: "admin", password: "`+password+`") } }`)
-
-		require.NotEmpty(t, response.Errors)
-		assert.Empty(t, headers.Values("Set-Cookie"))
-	}
-	assertRejected("")
-	assertRejected("https://attacker.example")
-
-	loggedIn, headers, _ := queryWithOrigin(t, server, "", nil, sameOrigin(t, server),
-		`mutation { self { loginBrowser(username: "admin", password: "`+password+`") } }`)
-	requireNoGqlErrors(t, loggedIn)
-	require.Len(t, (&http.Response{Header: headers}).Cookies(), 1)
-}
-
 func TestCookieAuthenticatedGraphQLRequiresSameOrigin(t *testing.T) {
 	t.Parallel()
 
@@ -617,23 +590,30 @@ func TestForeignOriginDoesNotRestrictExplicitBearer(t *testing.T) {
 	adminToken := loginAsAdmin(t, server, code)
 	cookie := loginBrowserCookie(t, server, "admin", "correct-horse-battery-staple-99")
 
-	invited, _, status := queryWithOrigin(t, server, adminToken, cookie, "https://attacker.example",
-		`mutation { auth { invite(input: {role: "user"}) { code } } }`)
+	loggedOut, headers, status := queryWithOrigin(
+		t, server, adminToken, cookie, "https://attacker.example",
+		`mutation { self { logoutBrowser } }`,
+	)
 
 	assert.Equal(t, http.StatusOK, status)
-	requireNoGqlErrors(t, invited)
+	requireNoGqlErrors(t, loggedOut)
+	require.Len(t, (&http.Response{Header: headers}).Cookies(), 1)
 }
 
 func TestForeignOriginDoesNotRestrictAnonymousGraphQL(t *testing.T) {
 	t.Parallel()
 
-	server, _ := newAuthTestServer(t)
+	server, code := newAuthTestServer(t)
+	_ = loginAsAdmin(t, server, code)
 
-	checked, _, status := queryWithOrigin(t, server, "", nil, "https://attacker.example",
-		`{ self { passwordEntropy(password: "test") { entropy } } }`)
+	loggedIn, headers, status := queryWithOrigin(t, server, "", nil, "https://attacker.example",
+		`mutation { self { loginBrowser(
+			username: "admin", password: "correct-horse-battery-staple-99"
+		) } }`)
 
 	assert.Equal(t, http.StatusOK, status)
-	requireNoGqlErrors(t, checked)
+	requireNoGqlErrors(t, loggedIn)
+	require.Len(t, (&http.Response{Header: headers}).Cookies(), 1)
 }
 
 func TestGraphQLRejectsMultipartAndWebSocketTransports(t *testing.T) {
