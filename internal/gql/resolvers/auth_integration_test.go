@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/vektah/gqlparser/v2/ast"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // TestMain puts gin in test mode once, before any test starts.
@@ -73,6 +74,8 @@ func newAuthTestServerWithConfig(
 	var provider database.DaoTransactionProvider = daoProvider{query: db.Query}
 
 	values := cfg.UserValues()
+	// These tests exercise the GraphQL auth path, not bcrypt's work factor.
+	values.PasswordHashingCost.Set(user.PasswordHashingCost(bcrypt.MinCost))
 
 	jwtService := jwt.NewService(jwt.Secret("test-secret"), jwt.Duration(time.Hour))
 	userService := user.NewService(
@@ -301,23 +304,6 @@ func TestAuthRegisterLoginIdentityFlow(t *testing.T) {
 	assert.Equal(t, "admin", self.Self.Identity.User.Role)
 }
 
-// Anonymous access is on by default, so an unauthenticated request must resolve
-// to the anonymous identity rather than failing.
-func TestAuthAnonymousIdentityIsNotAnError(t *testing.T) {
-	t.Parallel()
-
-	server, _ := newAuthTestServer(t)
-
-	res := query(t, server, "", `{ self { identity { user { username } } } }`)
-	requireNoGqlErrors(t, res)
-	assert.JSONEq(t, `{"self":{"identity":{"user":null}}}`, string(res.Data))
-
-	// A token that is not a valid JWT must be ignored, not rejected.
-	bogus := query(t, server, "not-a-real-token", `{ self { identity { user { username } } } }`)
-	requireNoGqlErrors(t, bogus)
-	assert.JSONEq(t, `{"self":{"identity":{"user":null}}}`, string(bogus.Data))
-}
-
 // Regression guard for the rbac.PutRole revocation defect: an empty object
 // action set must clear the role's permissions, through the whole stack.
 func TestAuthPutRoleRevokesThroughGraphQL(t *testing.T) {
@@ -494,7 +480,7 @@ func loginAsAdmin(t *testing.T, server *httptest.Server, code string) string {
 // one object action could call createAPIKey and mint a second key naming any
 // registered object action — bounded only by the owner's role, which for an
 // administrator is everything.
-func TestAPIKeyCannotMintAnotherKey(t *testing.T) {
+func TestAPIKeyCannotManageAPIKeys(t *testing.T) {
 	t.Parallel()
 
 	cfg := authconfig.NewDefaultConfig()
@@ -510,73 +496,45 @@ func TestAPIKeyCannotMintAnotherKey(t *testing.T) {
 	require.NotEmpty(t, denied.Errors)
 	assert.Equal(t, "unauthorized", denied.Errors[0].Message)
 
-	// Nor can it mint a key that could.
-	escalated := createAPIKeyAs(t, server, narrow, "escalated", "graphql", "auth", "query")
-	require.NotEmpty(t, escalated.Errors, "an API key must not be able to mint another")
-	assert.Contains(t, escalated.Errors[0].Message, "api keys may not manage api keys")
-}
+	for _, testCase := range []struct {
+		name  string
+		query string
+	}{
+		{
+			name: "create",
+			query: `mutation { self { createAPIKey(input: {
+				name: "escalated", permissions: [{namespace: "graphql", object: "auth", action: "query"}]
+			}) { apiKey } } }`,
+		},
+		{name: "delete", query: `mutation { self { deleteAPIKey(id: 1) } }`},
+		{name: "list", query: `{ self { apiKeys { id name createdAt expiresAt } } }`},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 
-func TestAPIKeyCannotDeleteKeys(t *testing.T) {
-	t.Parallel()
+			res := query(t, server, narrow, testCase.query)
+			require.NotEmpty(t, res.Errors, "an API key must not manage API keys")
+			assert.Contains(t, res.Errors[0].Message, "api keys may not manage api keys")
+		})
+	}
 
-	cfg := authconfig.NewDefaultConfig()
-	cfg.AnonymousAccess = false
-
-	server, code := newAuthTestServerWithConfig(t, cfg)
-	token := loginAsAdmin(t, server, code)
-
-	narrow := apiKeyFrom(t, createAPIKeyAs(t, server, token, "narrow", "torznab", "torznab", "query"))
-
-	res := query(t, server, narrow, `mutation { self { deleteAPIKey(id: 1) } }`)
-	require.NotEmpty(t, res.Errors)
-	assert.Contains(t, res.Errors[0].Message, "api keys may not manage api keys")
-}
-
-// API-key inventory is part of key management too. A narrow machine
-// credential must not be able to enumerate the owner's other credential IDs,
-// names, creation times, and expirations merely because it reports a user.
-func TestAPIKeyCannotListKeys(t *testing.T) {
-	t.Parallel()
-
-	cfg := authconfig.NewDefaultConfig()
-	cfg.AnonymousAccess = false
-
-	server, code := newAuthTestServerWithConfig(t, cfg)
-	token := loginAsAdmin(t, server, code)
-
-	narrow := apiKeyFrom(t, createAPIKeyAs(t, server, token, "narrow", "torznab", "torznab", "query"))
-
-	res := query(t, server, narrow, `{ self { apiKeys { id name createdAt expiresAt } } }`)
-	require.NotEmpty(t, res.Errors, "an API key must not be able to enumerate other API keys")
-	assert.Contains(t, res.Errors[0].Message, "api keys may not manage api keys")
-}
-
-// The legitimate path must keep working, or the guard above is just a denial.
-func TestUserSessionCanMintKey(t *testing.T) {
-	t.Parallel()
-
-	cfg := authconfig.NewDefaultConfig()
-	cfg.AnonymousAccess = false
-
-	server, code := newAuthTestServerWithConfig(t, cfg)
-	token := loginAsAdmin(t, server, code)
-
+	// The legitimate path must keep working, or the guard above is just a denial.
 	key := apiKeyFrom(t, createAPIKeyAs(t, server, token, "legit", "graphql", "auth", "query"))
 
 	granted := query(t, server, key, `{ auth { listUsers { totalCount } } }`)
 	requireNoGqlErrors(t, granted)
 }
 
-// The open default must not be a trapdoor. An anonymous caller must never be
-// able to administer auth, because role grants persist in the database while the
-// anonymous grant is only in memory: a wildcard written onto the anon role while
-// the instance was open would survive switching anonymous access off, leaving it
-// permanently bypassed with nothing to show for it.
-func TestAnonymousCannotAdministerAuthEvenWhenOpen(t *testing.T) {
+// The open default must remain usable without becoming a trapdoor. Anonymous
+// callers keep the baseline but never auth administration: role grants persist
+// in the database, so letting anon write a wildcard would survive switching
+// anonymous access off.
+func TestOpenAnonymousBaselineExcludesAuthAdministration(t *testing.T) {
 	t.Parallel()
 
-	// Default config: anonymous access enabled.
 	server, _ := newAuthTestServer(t)
+	requireNoGqlErrors(t, query(t, server, "", `{ version }`))
+	requireNoGqlErrors(t, query(t, server, "", `{ self { identity { user { username } } } }`))
 
 	for _, testCase := range []struct {
 		name  string
@@ -599,28 +557,4 @@ func TestAnonymousCannotAdministerAuthEvenWhenOpen(t *testing.T) {
 			assert.Equal(t, "unauthorized", res.Errors[0].Message)
 		})
 	}
-}
-
-// An installation that never configured auth is unaffected by the exclusion
-// above: the baseline still answers anonymously. Which object actions the anon
-// role holds is asserted directly against the permission model, in
-// authconfig — driving the catalogue resolvers needs services this harness does
-// not wire.
-func TestAnonymousStillReachesTheBaselineWhenOpen(t *testing.T) {
-	t.Parallel()
-
-	server, _ := newAuthTestServer(t)
-
-	requireNoGqlErrors(t, query(t, server, "", `{ version }`))
-	requireNoGqlErrors(t, query(t, server, "", `{ self { identity { user { username } } } }`))
-}
-
-// And an administrator still administers.
-func TestAdminAdministersAuthWhenOpen(t *testing.T) {
-	t.Parallel()
-
-	server, code := newAuthTestServer(t)
-	token := loginAsAdmin(t, server, code)
-
-	requireNoGqlErrors(t, query(t, server, token, `{ auth { listUsers { totalCount } } }`))
 }

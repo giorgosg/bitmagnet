@@ -16,6 +16,7 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type daoProvider struct{ query *dao.Query }
@@ -41,6 +42,9 @@ func newTestStack(t *testing.T) testStack {
 	var provider database.DaoTransactionProvider = daoProvider{query: db.Query}
 
 	values := authconfig.NewDefaultConfig().UserValues()
+	// These tests exercise credential lifecycle, not bcrypt's work factor.
+	values.PasswordHashingCost.Set(user.PasswordHashingCost(bcrypt.MinCost))
+
 	jwtService := jwt.NewService(jwt.Secret("test-secret"), jwt.Duration(time.Hour))
 	userService := user.NewService(
 		provider,
@@ -234,6 +238,8 @@ func TestExpiredTokenFallsBackToAnonymous(t *testing.T) {
 	var provider database.DaoTransactionProvider = daoProvider{query: db.Query}
 
 	values := authconfig.NewDefaultConfig().UserValues()
+	// This test exercises token expiry, not bcrypt's work factor.
+	values.PasswordHashingCost.Set(user.PasswordHashingCost(bcrypt.MinCost))
 	// A lifetime already in the past, so the token is born expired.
 	jwtService := jwt.NewService(jwt.Secret("test-secret"), jwt.Duration(-time.Hour))
 	userService := user.NewService(

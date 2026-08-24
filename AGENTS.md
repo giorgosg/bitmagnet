@@ -186,12 +186,16 @@ not tell you.
 
 ```bash
 task test-go          # DB tests skip silently without TEST_POSTGRES_DSN
-task test-webui       # Angular; needs Chromium and `task install-webui` first
 task lint             # golangci-lint, web UI ESLint, and Prettier
 task lint-golangci    # just the Go linter; must end in "0 issues."
 task migrate          # needs a running PostgreSQL; docker-compose.yml brings one up
 go build ./... && go vet ./...   # quickest Go sanity check
 ```
+
+The web UI is checked by `task lint-webui` and by the production build in
+`task build-webui`. There is no separate `task test-webui`: the former Karma suite only
+constructed each component and asserted that it existed, duplicating the build without
+checking behavior.
 
 `flake.nix` supplies Go, go-task, Node 22, golangci-lint, protoc, and Chromium on Linux;
 reach for `nix develop` or `direnv allow` when the host lacks them. PostgreSQL and `goose`
