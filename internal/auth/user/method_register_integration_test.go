@@ -28,6 +28,8 @@ func (p daoProvider) DaoTransaction(fn func(tx *dao.Query) error) error {
 }
 
 func newUserService(t *testing.T) (user.Service, *dao.Query) {
+	t.Helper()
+
 	return newUserServiceWithConfig(t, func(*authconfig.Config) {})
 }
 
