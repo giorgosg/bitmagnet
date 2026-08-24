@@ -66,19 +66,22 @@ func (s *service) Login(ctx context.Context, username, password string) (LoginRe
 
 	// PostgreSQL stores timestamps at microsecond precision. Reuse that exact
 	// value for both the write and the returned User so login and a subsequent
-	// identity query agree without another database round trip.
+	// identity query agree without another database round trip. The update
+	// remains best-effort, but an unpersisted value must not be reported.
 	lastLoginAt := sql.NullTime{
 		Time:  time.Now().Truncate(time.Microsecond),
 		Valid: true,
 	}
 
-	_, _ = dao.WithContext(ctx).
+	updateInfo, updateErr := dao.WithContext(ctx).
 		User.
 		Where(dao.User.ID.Eq(user.ID)).
 		UpdateSimple(
 			dao.User.LastLoginAt.Value(lastLoginAt),
 		)
-	user.LastLoginAt = lastLoginAt
+	if updateErr == nil && updateInfo.RowsAffected > 0 {
+		user.LastLoginAt = lastLoginAt
+	}
 
 	// Clear password from response
 	user.Password = nil
