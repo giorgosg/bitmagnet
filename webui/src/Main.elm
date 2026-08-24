@@ -1,5 +1,6 @@
 port module Main exposing (main)
 
+import ApiError
 import Bitmagnet exposing (Page, Row)
 import Browser
 import Browser.Dom
@@ -325,7 +326,7 @@ update msg model =
                     Err error ->
                         let
                             message =
-                                Bitmagnet.errorToString error
+                                ApiError.toMessage (ApiError.fromError error)
                         in
                         ( { model | identity = Identity.Failed message, results = Failed message }
                         , Cmd.none
@@ -508,12 +509,12 @@ update msg model =
             )
 
         GotFiles rowId (Err error) ->
-            if Identity.isUnauthorized error then
-                beginIdentityRefresh model
-
-            else
-                ( mapItem rowId (\item -> { item | files = FilesFailed (Bitmagnet.errorToString error) }) model
-                , Cmd.none
+            onRequestFailure error
+                model
+                (\message current ->
+                    ( mapItem rowId (\item -> { item | files = FilesFailed message }) current
+                    , Cmd.none
+                    )
                 )
 
         Scrolled event ->
@@ -549,11 +550,33 @@ update msg model =
                                 fillViewport appended
 
                     Err error ->
-                        if Identity.isUnauthorized error then
-                            beginIdentityRefresh model
+                        onRequestFailure error
+                            model
+                            (\message current ->
+                                ( { current | results = Failed message }, Cmd.none )
+                            )
 
-                        else
-                            ( { model | results = Failed (Bitmagnet.errorToString error) }, Cmd.none )
+
+{-| Every failed request asks the same question first: does this say the Identity Magnes
+is holding has gone stale? If so the answer is always to refetch it, and whatever the call
+site wanted to show instead never happens. Only once that is ruled out does the call site
+get its message.
+-}
+onRequestFailure :
+    Graphql.Http.Error a
+    -> Model
+    -> (String -> Model -> ( Model, Cmd Msg ))
+    -> ( Model, Cmd Msg )
+onRequestFailure error model toFailed =
+    let
+        failure =
+            ApiError.fromError error
+    in
+    if ApiError.isUnauthorized failure then
+        beginIdentityRefresh model
+
+    else
+        toFailed (ApiError.toMessage failure) model
 
 
 {-| The URL is the source of truth for what was searched, but not for what is in the box:

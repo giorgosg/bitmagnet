@@ -1,4 +1,4 @@
-module Identity exposing (Identity(..), ObjectAction, User, can, fetch, graphql, isUnauthorized, permissions)
+module Identity exposing (Identity(..), ObjectAction, User, can, fetch, graphql, permissions)
 
 {-| The canonical browser Identity comes from `self.identity`; the browser credential is
 an implementation detail owned by bitmagnet and never appears in this module.
@@ -154,17 +154,3 @@ can requested identity =
 componentMatches : String -> String -> Bool
 componentMatches granted requested =
     granted == "**" || granted == requested
-
-
-{-| Temporary compatibility with bitmagnet's string-only errors. Issue 08 replaces this
-single substring check with stable `extensions.code` handling after the server contract
-lands.
--}
-isUnauthorized : Graphql.Http.Error a -> Bool
-isUnauthorized error =
-    case error of
-        Graphql.Http.GraphqlError _ errors ->
-            List.any (\item -> String.contains "unauthorized" (String.toLower item.message)) errors
-
-        Graphql.Http.HttpError _ ->
-            False

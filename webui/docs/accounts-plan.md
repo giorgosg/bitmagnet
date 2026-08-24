@@ -178,14 +178,15 @@ In dependency order, each usable before the next exists:
 Sign-out is a client-side act: clear the token, refetch identity. There is no logout
 mutation and the JWT stays valid until it expires.
 
-### 9. Errors, which are strings
+### 9. Errors, which are codes
 
-[auth-api.md](auth-api.md#error-strings) is the source of truth for live error shapes and
-message substrings. Keep their mapping in one place, and use `path` to distinguish an
-authorization refusal from another failure of the same call.
+[auth-api.md](auth-api.md#error-codes) is the source of truth for live error shapes.
+bitmagnet now emits a stable `extensions.code` on every identity and authorization
+failure, and an authorization refusal carries the refused `{namespace, object, action}`,
+so the mapping switches on the code and never on message text.
 
-If the extensions get fixed in the fork — a one-line rename — this becomes a switch on
-`{namespace, object, action}` instead. Write the mapping so that swap is local.
+That mapping lives in one place, `src/ApiError.elm`. `path` remains useful for telling
+which of several top-level fields failed, but it is no longer the only signal.
 
 `GraphqlError` can carry partial data. For account operations, treat any error as total
 failure; a half-applied permission change is not something to render optimistically.

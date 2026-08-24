@@ -29,7 +29,7 @@ fork:
 
 ```graphql
 type Self {
-  user: User            # null for an anonymous or API-key identity
+  user: User            # null for anonymous; the owning User for an API-key identity
   apiKey: APIKey        # non-null only when the credential was an API key
   permissions: [AuthObjectAction!]!
 }
@@ -206,9 +206,20 @@ generates one per process, so **every restart invalidates every token** — expe
 constantly in development.
 
 **API key**: 22 base62 characters, sent as `?apikey=` or `X-Api-Key`, and used by \*arr
-clients over Torznab. Torznab **refuses a JWT** in the apikey slot and ignores the bearer
-middleware entirely, so a browser JWT is never a Torznab credential. A UI creates and
-deletes keys; it never authenticates with one.
+clients over Torznab. An API-key Identity reports both the key and its owning User, but it
+is not a User-authenticated Identity and cannot use operations that require one. Torznab
+**refuses a JWT** in the apikey slot and ignores the bearer middleware entirely, so a
+browser credential is never a Torznab credential. A UI creates and deletes keys; it never
+authenticates with one.
+
+The current API-key enforcement first requires the owning User's Role to permit an Object
+action, then requires either the key's stored action list or the Anonymous identity to
+permit it. Disabling the owning User makes the key unusable. Two current contract gaps are
+being corrected as part of the Magnes work: creation accepts unregistered and wildcard
+action strings without validation, and `Self.permissions` concatenates the stored and
+Anonymous actions without intersecting them with the owning User's Role, so it can report
+an action that enforcement denies. The `APIKey` GraphQL type also does not yet expose its
+stored or effective actions.
 
 **Invitation**: a single-use 128-bit code. `auth.invitation_required` defaults to `true`,
 so registration normally needs one. The first administrator's invitation is minted by a
@@ -244,39 +255,42 @@ tell you.
   not disclose whether a username is taken. Do not build a "username available?" check on
   top of login latency.
 
-## Error strings
+## Error codes
 
-Errors arrive as ordinary GraphQL errors with the message text below, and **there is no
-machine-readable detail on any of them** — no `extensions`, no codes.
+Errors arrive as ordinary GraphQL errors carrying a stable `extensions.code`, emitted by
+the `errorPresenter` in `../bitmagnet/internal/gql/httpserver/error_presenter.go`. The code
+is the contract; the message is presentation and may be reworded. **Never match on message
+text.**
 
-That includes authorization. A refusal looks like this, and nothing more **[verified]**:
+An authorization refusal also carries the refused Object action **[verified 2026-08-24
+against the homeserver on trunk]**:
 
 ```json
-{"errors":[{"message":"unauthorized","path":["auth"],"locations":[...]}],"data":null}
+{"errors":[{"message":"unauthorized","path":["auth"],"locations":[...],
+  "extensions":{"code":"UNAUTHORIZED","namespace":"graphql","object":"auth","action":"query"}}],
+ "data":null}
 ```
 
-`unauthorizedError` in `../bitmagnet/internal/gql/auth/directive.go` does define a
-`GraphQLExtensions()` method returning `{namespace, object, action}` — but **nothing calls
-it**. gqlgen's extension hook is `Extensions() map[string]any` (`graphql.ExtendedError`),
-the name does not match, and bitmagnet sets no custom `ErrorPresenter`, so
-`DefaultErrorPresenter` wraps the error and drops the method. The extensions are dead
-code; the live response has no `extensions` key at all. Worth a one-line fix in the fork —
-until then, **`path` is the only thing that says what was refused**, and it
-names the top-level field (`["auth"]`, `["self","login"]`).
+`path` still names the top-level field (`["auth"]`, `["self","login"]`) and remains useful
+for telling which of several fields failed, but it is no longer the only signal.
 
-From `../bitmagnet/internal/auth/user/errors.go`, wrapped as `user: <verb> failed: <cause>`.
-**[verified]** two of them, exactly in that form: `user: login failed: invalid username or
-password` and `user: register failed: invitation code is required`.
+| Code | Means |
+| ---- | ----- |
+| `INVALID_CREDENTIALS` | Login miss — covers "no such user" too |
+| `USER_DISABLED` | Login against a disabled User |
+| `LOGIN_THROTTLED` | Throttled; back off, do not retry immediately |
+| `USER_ALREADY_EXISTS` | Registration, username or email taken |
+| `USERNAME_INVALID` | Registration validation |
+| `INVITATION_REQUIRED` | `invitation_required` is on and none was given |
+| `INVITATION_INVALID` | Registration, no such code |
+| `INVITATION_EXPIRED` | Registration, code past its expiry |
+| `INVITATION_CLAIMED` | Registration, code already used |
+| `PASSWORD_INSUFFICIENT_ENTROPY` | Below `auth.password_min_entropy` (default 70) |
+| `UNAUTHORIZED` | Refusal; carries `namespace`, `object`, `action` |
+| `USER_SESSION_REQUIRED` | Operation needs a User-authenticated Identity |
+| `API_KEY_MANAGEMENT_FORBIDDEN` | An API-key Identity may not manage API keys |
+| `AUTHENTICATION_INFRASTRUCTURE_FAILURE` | Authentication service unavailable |
+| `INTERNAL_SERVER_ERROR` | Unknown internal error; details deliberately withheld |
 
-| Message                            | Means                                          |
-| ---------------------------------- | ----------------------------------------------- |
-| `invalid username or password`     | Login miss — covers "no such user" too         |
-| `account is disabled`              | Login against a disabled User                  |
-| `too many login requests`          | Throttled; back off, do not retry immediately  |
-| `user already exists`              | Registration, username or email taken          |
-| `invitation code is required`      | `invitation_required` is on and none was given |
-| `invitation not found` / `expired` / `already claimed` | Registration, bad code   |
-| `password has insufficient entropy`| Below `auth.password_min_entropy` (default 70) |
-| `invalid username` / `invalid email` / `email is required` | Registration validation |
-
-Match on the **substring**, not equality: the message is a wrapped chain.
+Codes without a case in `src/ApiError.elm` fall back to the server's own message, so a
+newer bitmagnet stays legible without a client change.

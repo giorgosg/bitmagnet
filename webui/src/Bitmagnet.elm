@@ -1,4 +1,4 @@
-module Bitmagnet exposing (File, FileList, Page, Row, SearchArgs, byInfoHash, errorToString, fileLimit, files, mutationRequest, queryRequest, search)
+module Bitmagnet exposing (File, FileList, Page, Row, SearchArgs, byInfoHash, fileLimit, files, mutationRequest, queryRequest, search)
 
 {-| Every call Magnes makes to bitmagnet. Queries and mutations cross one request
 boundary, which always lets the browser attach bitmagnet's HttpOnly cookie. Call sites
@@ -390,32 +390,3 @@ fileSelection =
         TorrentFile.index
         TorrentFile.path
         TorrentFile.size
-
-
-errorToString : Graphql.Http.Error a -> String
-errorToString error =
-    case error of
-        Graphql.Http.GraphqlError _ errors ->
-            case errors of
-                first :: _ ->
-                    first.message
-
-                [] ->
-                    "The server rejected the query."
-
-        Graphql.Http.HttpError httpError ->
-            case httpError of
-                Graphql.Http.NetworkError ->
-                    "Could not reach bitmagnet."
-
-                Graphql.Http.Timeout ->
-                    "bitmagnet took too long to answer."
-
-                Graphql.Http.BadStatus metadata _ ->
-                    "bitmagnet answered with status " ++ String.fromInt metadata.statusCode ++ "."
-
-                Graphql.Http.BadUrl url ->
-                    "Not a usable bitmagnet URL: " ++ url
-
-                Graphql.Http.BadPayload _ ->
-                    "bitmagnet's answer did not match the schema Magnes was built against."
