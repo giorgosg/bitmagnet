@@ -67,7 +67,9 @@ review in [porting.md](porting.md) and a test seen **red**.
 
 ## In flight
 
-Nothing currently in flight.
+| PR                                                   | Change                                      | Downstream source | Verification note                                                 |
+| ---------------------------------------------------- | ------------------------------------------- | ----------------- | ----------------------------------------------------------------- |
+| [#56](https://github.com/giorgosg/bitmagnet/pull/56) | Return the current `lastLoginAt` from login | local             | Login/identity timestamp mismatch observed red; full suite passed |
 
 ## The static review findings
 
