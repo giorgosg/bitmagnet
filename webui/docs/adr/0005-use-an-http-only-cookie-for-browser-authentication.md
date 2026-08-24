@@ -1,0 +1,3 @@
+# Use an HttpOnly cookie for browser authentication
+
+Magnes authenticates browser requests with a configurable `__Secure-` cookie scoped to `/graphql` and marked `HttpOnly`, `Secure`, and `SameSite=Strict`; separate browser login and logout mutations issue and clear it without returning the credential to JavaScript. Bitmagnet continues accepting bearer credentials from non-browser clients, with an explicit bearer taking precedence over the ambient cookie. Credentialed development therefore uses a same-origin HTTPS proxy, reducing credential theft through browser JavaScript at the cost of origin validation, explicit logout, and a different development serving arrangement.

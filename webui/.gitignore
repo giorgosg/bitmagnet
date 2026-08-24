@@ -3,6 +3,10 @@ elm-stuff/
 public/main.js
 .dev/
 
+# Issue tracker working notes (see docs/agents/issue-tracker.md). The tickets are
+# scratch state for agents, not a record the repo needs to carry.
+.scratch/
+
 # Local instance address; see public/config.example.js
 public/config.js
 
