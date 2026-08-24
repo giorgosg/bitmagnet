@@ -93,6 +93,8 @@ and it is served at `http_server.static.path` (default `/ui`), from the same ori
 API — which takes CORS out of the picture entirely for that UI, and lets it send
 credentials the way a same-origin page does. It refuses `/` and `/webui`, because two
 options claiming one route make gin panic at startup rather than report a conflict. The
+mount sends `Cache-Control: no-store`: alternative UI builds replace stable filenames on
+disk, so every page load must observe the current index, runtime config, and bundle. The
 bundled UI can be turned off independently by omitting `webui` from `http_server.options`.
 
 ## CORS
