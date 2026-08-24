@@ -85,6 +85,24 @@ func TestUnknownPathFallsBackToIndex(t *testing.T) {
 	assert.Contains(t, res.Body.String(), "magnes")
 }
 
+func TestStaticMountDisablesBrowserCaching(t *testing.T) {
+	t.Parallel()
+
+	engine, err := engineWith(t, httpserver.StaticConfig{Dir: uiDir(t), Path: "/ui"})
+	require.NoError(t, err)
+
+	for name, path := range map[string]string{
+		"asset":     "/ui/main.js",
+		"spa route": "/ui/torrent/deadbeef",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, "no-store", get(t, engine, path).Header().Get("Cache-Control"))
+		})
+	}
+}
+
 func TestDisabledWhenNoDirectoryIsConfigured(t *testing.T) {
 	t.Parallel()
 

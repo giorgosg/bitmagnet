@@ -30,11 +30,22 @@ func (p daoProvider) DaoTransaction(fn func(tx *dao.Query) error) error {
 func newUserService(t *testing.T) (user.Service, *dao.Query) {
 	t.Helper()
 
+	return newUserServiceWithConfig(t, func(*authconfig.Config) {})
+}
+
+func newUserServiceWithConfig(
+	t *testing.T,
+	configure func(*authconfig.Config),
+) (user.Service, *dao.Query) {
+	t.Helper()
+
 	db := dbtest.New(t)
 
 	var provider database.DaoTransactionProvider = daoProvider{query: db.Query}
 
-	values := authconfig.NewDefaultConfig().UserValues()
+	config := authconfig.NewDefaultConfig()
+	configure(&config)
+	values := config.UserValues()
 
 	return user.NewService(
 		provider,

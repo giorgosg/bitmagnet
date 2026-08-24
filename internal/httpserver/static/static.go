@@ -78,7 +78,13 @@ func (b *builder) Apply(e *gin.Engine) error {
 
 	b.logger.Infof("serving %s at %s", b.config.Dir, b.config.Path)
 
-	e.StaticFS(b.config.Path, spaFileSystem{http.Dir(b.config.Dir)})
+	staticRoutes := e.Group("")
+	staticRoutes.Use(func(c *gin.Context) {
+		// Alternative UIs are replaced on disk without changing their URLs. Never let a
+		// browser reuse an old index, runtime config, or bundle after such a deployment.
+		c.Header("Cache-Control", "no-store")
+	})
+	staticRoutes.StaticFS(b.config.Path, spaFileSystem{http.Dir(b.config.Dir)})
 
 	return nil
 }
