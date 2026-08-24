@@ -68,7 +68,9 @@ review in [porting.md](porting.md) and a test seen **red**.
 
 ## In flight
 
-Nothing currently in flight.
+| PR                                                   | Change                                       | Source | Evidence seen red  |
+| ---------------------------------------------------- | -------------------------------------------- | ------ | ------------------ |
+| [#57](https://github.com/giorgosg/bitmagnet/pull/57) | Sign off the browser authentication contract | local  | Covered by #51–#56 |
 
 ## The static review findings
 
