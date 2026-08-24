@@ -65,7 +65,9 @@ review in [porting.md](porting.md) and a test seen **red**.
 
 ## In flight
 
-Nothing currently in flight.
+| PR                                                   | Change                                  | Downstream source | Verification note                                                      |
+| ---------------------------------------------------- | --------------------------------------- | ----------------- | ---------------------------------------------------------------------- |
+| [#54](https://github.com/giorgosg/bitmagnet/pull/54) | Make GraphQL `self` a recovery boundary | local             | Identity/permission/logout regressions observed red; full suite passed |
 
 ## The static review findings
 
