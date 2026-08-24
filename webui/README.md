@@ -8,18 +8,18 @@ its own UI; Magnes is a second one, built against the same GraphQL API.
 
 ## Status
 
-Runs. The first milestone is the UI alone — no server, no accounts, no mutations — which
+Runs. The first milestone is the UI alone — no accounts and no mutations — which
 works because bitmagnet allows cross-origin requests, so the browser can query it
 directly. Search, sort, facet filters, infinite scroll, row expansion down to a file tree
 and `/torrent/<hash>` are all built — that is the whole of the first milestone. What is
-not built is everything the milestone deliberately left out: the proxy server, accounts,
-and any mutation at all. See [docs/plan.md](docs/plan.md). The design decisions below
-describe where Magnes is going, not everything that runs today.
+not built is everything the milestone deliberately left out: accounts and any mutation at
+all. See [docs/plan.md](docs/plan.md). The design decisions below separate what runs today
+from the next phase.
 
 Accounts are next, and [the bitmagnet fork](https://github.com/giorgosg/bitmagnet) now
 has them — along with an option to serve a UI like this one from its own origin. Both are
-live on the instance this is developed against. What that means for the design decisions
-below — the proxy server in particular — is worked out in [docs/](docs/README.md).
+live on the instance this is developed against. The next phase is worked out in
+[docs/](docs/README.md).
 
 ## Running it
 
@@ -30,9 +30,8 @@ npm run dev                                    # builds, serves public/ on :8000
 ```
 
 `public/config.js` is gitignored and optional; without it Magnes uses bitmagnet's
-default address on the same machine, `http://localhost:3333/graphql`. The address is
-read at runtime, so one build works against any instance — and against the proxy
-described below, when there is one.
+default address on the same machine, `http://localhost:3333/graphql`. The API address
+and static mount path are read at runtime, so one build works against any instance.
 
 It has to be reachable **from the browser** rather than from wherever the dev server
 runs, because the page queries bitmagnet directly. That also means bitmagnet must allow
@@ -40,7 +39,8 @@ the origin; it sends `Access-Control-Allow-Origin: *` by default, which is what 
 serverless UI possible at all.
 
 The fork can also serve Magnes itself, from the API's own origin, which removes CORS from
-the picture entirely — point `http_server.static.dir` at a build of `public/` and set
+the picture entirely. Point `http_server.static.dir` at a build of `public/`, set the
+deployed HTML base and `window.MAGNES_BASE_PATH` to the mount path, and set
 `window.MAGNES_API_URL = "/graphql"`. See
 [docs/serving-and-testing.md](docs/serving-and-testing.md).
 
@@ -49,7 +49,7 @@ the picture entirely — point `http_server.static.dir` at a build of `public/` 
 Bitmagnet's entire API is GraphQL, so the client is generated rather than
 hand-written: [`dillonkearns/elm-graphql`](https://github.com/dillonkearns/elm-graphql)
 introspects the live schema and emits type-safe Elm for every query, object,
-input and enum. A schema change upstream becomes a compile error here, not a
+input and enum. A schema change in the fork becomes a compile error here, not a
 runtime surprise.
 
 The generated modules are committed under `src/Magnes/Api`, so a checkout builds without
@@ -61,42 +61,24 @@ BITMAGNET_URL=http://your-bitmagnet:3333 npm run codegen
 
 ## Design decisions
 
-### A server sits in front
+### Bitmagnet serves Magnes and enforces access
 
-Magnes is not a purely static client. A small server holds a SQLite database of
-users, and all bitmagnet API traffic is routed through it rather than going from
-the browser to bitmagnet directly.
+The current deployment is the static Elm bundle served by bitmagnet's
+`http_server.static` mount. Runtime GraphQL traffic stays on that origin, and the fork
+enforces its permission model on every top-level field. Magnes reads those permissions to
+present only reachable controls; bitmagnet remains the protection boundary.
 
-Bitmagnet's API has no notion of users or authentication — anything that can
-reach it can do everything. Putting the server in the path gives one place to
-enforce access, and keeps bitmagnet itself off any network the browser is on.
+A separate Magnes server is deferred. It would be justified by state bitmagnet does not
+hold, such as saved searches, or by an independently hosted origin—not by access control
+the fork already provides. Raise that decision before adding a server. See
+[docs/accounts-plan.md](docs/accounts-plan.md).
 
-Code generation still introspects bitmagnet directly, since the schema is the
-same either way. Only runtime traffic is proxied.
+### Anonymous access is a permission set
 
-Likely JavaScript, eventually running on Cloudflare Workers — which also decides
-the database: D1 is SQLite, so the same schema and queries work locally and
-deployed.
-
-**This decision is under review, and the reasoning above has expired.** The fork enforces
-a permission model on every GraphQL field, so "bitmagnet's API has no notion of users" is
-no longer true; and its `http_server.static` option serves Magnes from the API's own
-origin, which is the deployment the proxy was going to provide. A server may still be
-worth building — for state bitmagnet has no column for, and an origin that need not be
-bitmagnet's — but not for the reason given here. See
-[docs/accounts-plan.md](docs/accounts-plan.md) before starting one.
-
-### Guests are a permission level, not a flag
-
-What an unauthenticated visitor can do is configured per server: nothing, search
-only, or search plus the dashboard. Access is checked at the proxy, so a
-permission level is a statement about which API operations are reachable, not
-about which buttons the UI draws.
-
-This is the setting that decides whether accounts matter at all. A server that
-grants guests everything has, in effect, disabled accounts — that is a legitimate
-way to run a private instance, and it should be one config value rather than a
-separate mode.
+`auth.anonymous_access` decides what an unauthenticated identity may reach. When enabled,
+bitmagnet grants that identity its configured object actions; when disabled, search waits
+for login. The UI derives its navigation and controls from `self.identity.permissions`,
+while the server enforces the same permissions regardless of what the UI draws.
 
 ### Search state lives in the URL
 

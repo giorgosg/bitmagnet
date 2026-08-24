@@ -14,70 +14,21 @@ established. This page is only the plan.
 
 ---
 
-## A decision to take before any of it
+## Deployment decision
 
-**The README's argument for a Magnes proxy server no longer holds.** It says:
-
-> Bitmagnet's API has no notion of users or authentication — anything that can reach it
-> can do everything. Putting the server in the path gives one place to enforce access.
-
-That was true of upstream. It is not true of this fork: `internal/auth` enforces every
-GraphQL field against a permission model, and `auth.anonymous_access` is exactly the
-"guests are a permission level, not a flag" idea the README describes, implemented
-server-side and configured with one value.
-
-Meanwhile the fork added `http_server.static.dir` (PR #48), whose stated purpose is
-serving an alternative UI **from the API's own origin** — no CORS, credentials sent the
-way a same-origin page sends them, and a single-page app's routing preserved by an
-index.html fallback. That is the deployment the proxy was going to provide, minus the
-proxy.
-
-So there are two paths, and they lead to different codebases:
-
-| | **Serve Magnes from bitmagnet** | **Build the Magnes server** |
-| --- | --- | --- |
-| Deployment | `http_server.static.dir`, working on a real instance today | Cloudflare Worker + D1, or similar |
-| Auth | bitmagnet's, entirely | duplicated, or delegated anyway |
-| Users | bitmagnet's `users` table | a second user store to reconcile |
-| CORS | none | none |
-| Deep links | handled by the static mount | handled by the Worker |
-| What Magnes writes | Elm only | Elm plus a server plus a schema |
-
-The second column buys things the first does not: a UI that can outlive this fork,
-per-user state bitmagnet has no column for (saved searches, history), and an origin that
-does not have to be bitmagnet's. Those may be worth it. But "bitmagnet has no auth" is no
-longer the reason, and the plan below is written for the first column, because it is what
-the fork now supports and what can be tested today. **Nothing in it is wasted if the
-server arrives later** — the endpoint is already one runtime string, and every item below
-is client-side.
-
-Raise this with the user before writing a server.
+Build this phase in Elm against the fork's identity and permission model, and sign it off
+from bitmagnet's same-origin `http_server.static` mount. A separate Magnes server is a new
+architecture branch, justified only by independently hosted state or origin requirements;
+raise that decision before adding one. Every work item below remains client-side.
 
 ---
 
-## The three worlds a build has to survive
+## Supported configurations
 
-The same bundle can meet three servers, and they fail differently:
-
-1. **No auth in the schema** — upstream, and any instance predating the auth port.
-   `self` is not a field. Asking for it is a **document validation error that fails the whole request**,
-   so identity must never be bundled into the search query. Magnes should degrade to
-   phase-1 behaviour: no account UI, everything open.
-2. **Anonymous access on** — `self.identity` resolves with `user: null` and near-total
-   permissions. Login exists; nothing requires it.
-3. **Anonymous access off** — an unauthenticated caller can reach `self`, `health` and
-   `version`. Search itself is refused until login.
-
-World 1 is detected by the validation error on a standalone identity query, worlds 2 and 3
-by whether `permissions` contains `torrentContent::query`. Treat "no auth surface" as a
-first-class state, not an error to display.
-
-Do not assume one instance per world. Any instance built since the auth port is world 2
-out of the box, and world 1 needs a build from *before* it — a local bitmagnet pinned to an
-older tag is the reliable way to exercise that path, not an instance you expect to lag.
-World 3 is world 2 plus `auth.anonymous_access: false`, which alters what every other
-client of that instance can do, so ask before flipping it and pick an instance nothing else
-depends on. `docs/environment.local.md` records which of these is reachable here.
+[auth-api.md](auth-api.md#the-shape-of-it) defines the fork's anonymous-access-on and
+anonymous-access-off configurations. This phase is complete when one bundle behaves
+correctly in both; [serving-and-testing.md](serving-and-testing.md) and
+`docs/environment.local.md` identify instances for exercising them.
 
 ---
 
@@ -87,9 +38,9 @@ depends on. `docs/environment.local.md` records which of these is reachable here
 
 `src/Magnes/Api/` is build output. Nothing below compiles until it contains `Self`, `User`,
 `Role`, `APIKey`, `Invitation`, `AuthQuery` and `AuthMutation`, and today it contains none
-of them — it was generated from the pre-auth instance.
+of them.
 
-Generate against an instance that **has the auth port** — see
+Generate against an instance running the target fork — see
 [serving-and-testing.md](serving-and-testing.md), and
 `docs/environment.local.md` for which one that is here:
 
@@ -99,10 +50,9 @@ npm run format
 ```
 
 Be explicit about the URL rather than relying on the `http://localhost:3333` default.
-**[verified]** an instance at `trunk` `77fdb9de7` introspects to 135 types including all
-seven above; one predating the auth port returns 101 and none of them, and codegen against
-it fails silently — you get a client, it just has no accounts in it. Check before
-committing.
+**[verified]** `trunk` `77fdb9de7` introspects to 135 types including all seven above.
+Check for them before committing; codegen can succeed against the wrong schema while
+producing a client without the required surface.
 
 Commit the result — a checkout builds without reaching an instance, and that stays true.
 
@@ -139,12 +89,11 @@ when there is one, and are the only way a request is built.
 This is also where the module comment changes: `Magnes.Api.Mutation` gets imported for the
 first time, and "read-only by construction" stops being true. Say what replaced it.
 
-### 5. Session as a type, and the stale-token check
+### 5. Identity state, and the stale-token check
 
 ```elm
-type Session
+type IdentityState
     = Unknown            -- before the first identity response
-    | NoAuthSurface      -- world 1: the server has no accounts
     | Anonymous (List ObjectAction)
     | SignedIn { user : User, permissions : List ObjectAction }
 ```
@@ -153,11 +102,8 @@ type Session
 `[Permission!]!` — the same information in two shapes. Normalise to the flat one at the
 boundary.
 
-**The check that is not optional:** if a token is held and the response reports
-`user: null`, the token is dead — clear it. A revoked, expired or deleted credential
-produces *no error*; it falls through to the anonymous identity, deliberately, so that
-`self.login` stays reachable to recover with. The mismatch is the only signal there is.
-See [auth-api.md](auth-api.md) for why the server is built that way.
+Apply the stale-token rule from [auth-api.md](auth-api.md#the-failure-mode-that-decides-the-client-design):
+holding a token while `self.identity.user` is null clears the token.
 
 Refresh identity on load, on window focus, and after any `unauthorized` error. Not on a
 timer.
@@ -172,7 +118,7 @@ next pattern will silently fail closed.
 ```elm
 type alias ObjectAction = { namespace : String, object : String, action : String }
 
-can : ObjectAction -> Session -> Bool
+can : ObjectAction -> IdentityState -> Bool
 ```
 
 Default the namespace to `graphql` at call sites; the `http` namespace exists in
@@ -198,7 +144,7 @@ New routes, following the existing "real paths, not fragments" rule in `Route.el
 `toHref` is the inverse of the parser and the only way links are built — adding a variant
 breaks it at compile time, which is the property to preserve.
 
-Guards are a function of `Session` evaluated in `update` on route change, not a wrapper
+Guards are a function of `IdentityState` evaluated in `update` on route change, not a wrapper
 type: `/login` and `/register` redirect to `/account` when signed in; the account routes
 redirect to `/login?returnUrl=…` when not; the admin routes require the matching object
 action and otherwise render a refusal rather than redirecting — a signed-in user sent to a
@@ -234,11 +180,9 @@ mutation and the JWT stays valid until it expires.
 
 ### 9. Errors, which are strings
 
-**There are no error codes and no extensions at all** — including on `unauthorized`, whose
-extensions are dead code in the fork ([auth-api.md](auth-api.md) has the diagnosis). Every
-error is a wrapped message chain plus a `path` naming the top-level field. Match on
-substring against the table in [auth-api.md](auth-api.md), keep the mapping in one place,
-and use `path` to tell an authorization refusal apart from a failure of the same call.
+[auth-api.md](auth-api.md#error-strings) is the source of truth for live error shapes and
+message substrings. Keep their mapping in one place, and use `path` to distinguish an
+authorization refusal from another failure of the same call.
 
 If the extensions get fixed in the fork — a one-line rename — this becomes a switch on
 `{namespace, object, action}` instead. Write the mapping so that swap is local.

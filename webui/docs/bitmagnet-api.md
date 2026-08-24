@@ -1,20 +1,15 @@
 # bitmagnet's GraphQL API
 
-Transcribed from the schema files in `../bitmagnet/graphql/schema/`, which are the source
-of truth — re-read them when something here looks wrong. bitmagnet publishes no API
-reference of its own, which is why this exists.
+Transcribed from `../bitmagnet/graphql/schema/*.graphqls` in the fork at `trunk`
+`77fdb9de7`, the source of truth for every shape below. Re-read that schema when the fork
+is upgraded. This page exists because bitmagnet publishes no API reference of its own.
 
 Read it before writing a query. For how to *express* a query in Elm, see the `elm` skill;
 this page is only about what bitmagnet offers.
 
-Schema facts below are verbatim from `graphql/schema/*.graphqls` in
-[bitmagnet-io/bitmagnet](https://github.com/bitmagnet-io/bitmagnet) (`main`). There is no
-published API reference — bitmagnet's own docs only mention "a single search query" and
-the playground at `/graphql`. The schema files are the source of truth; re-read them when
-bitmagnet is upgraded.
-
-Statements marked **[verified]** were checked by read-only query against a live v0.10.0
-instance holding ~2.9M torrents. Everything else is read off the schema. Set
+Statements marked **[verified]** were checked on 2026-08-24 by read-only query against a
+live instance running that commit and holding ~2.9M torrents. Everything else is read off
+the same snapshot of the schema. Set
 `BITMAGNET_URL` to point the tooling at an instance; the address itself is local
 configuration and is not recorded here.
 

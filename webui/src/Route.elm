@@ -1,4 +1,4 @@
-module Route exposing (Route(..), SearchParams, emptySearch, fromUrl, toHref)
+module Route exposing (BasePath, Route(..), SearchParams, basePath, emptySearch, fromUrl, toHref)
 
 {-| Routes are real paths, not fragments — see the README.
 
@@ -19,6 +19,28 @@ type Route
     = Search SearchParams
     | Torrent String
     | NotFound
+
+
+{-| The URL prefix where Magnes is mounted. An empty value means the origin root.
+Normalising it once keeps parsing and link building exact inverses.
+-}
+type BasePath
+    = BasePath String
+
+
+basePath : String -> BasePath
+basePath raw =
+    raw
+        |> String.split "/"
+        |> List.filter (not << String.isEmpty)
+        |> String.join "/"
+        |> (\path ->
+                if String.isEmpty path then
+                    BasePath ""
+
+                else
+                    BasePath ("/" ++ path)
+           )
 
 
 {-| Everything the URL says about a search. The model derives from this, never the
@@ -89,30 +111,60 @@ nonBlank raw =
             Just trimmed
 
 
-fromUrl : Url -> Route
-fromUrl url =
-    Parser.parse parser url |> Maybe.withDefault NotFound
+fromUrl : BasePath -> Url -> Route
+fromUrl (BasePath prefix) url =
+    pathWithin prefix url.path
+        |> Maybe.andThen
+            (\path ->
+                Parser.parse parser
+                    { url
+                        | path =
+                            if String.isEmpty path then
+                                "/"
+
+                            else
+                                path
+                    }
+            )
+        |> Maybe.withDefault NotFound
 
 
-toHref : Route -> String
-toHref route =
-    case route of
-        Search params ->
-            -- The default sort is left out, so an ordinary search is still a bare ?q=.
-            Builder.absolute [ "search" ]
-                (List.filterMap identity
-                    [ Maybe.map (Builder.string "q") params.q
-                    , if params.sort == Sort.default then
-                        Nothing
+pathWithin : String -> String -> Maybe String
+pathWithin prefix path =
+    if String.isEmpty prefix then
+        Just path
 
-                      else
-                        Just (Builder.string "sort" (Sort.toParam params.sort))
-                    ]
-                    ++ Facet.toQueryParams params.filters
-                )
+    else if path == prefix then
+        Just "/"
 
-        Torrent hash ->
-            Builder.absolute [ "torrent", hash ] []
+    else if String.startsWith (prefix ++ "/") path then
+        Just (String.dropLeft (String.length prefix) path)
 
-        NotFound ->
-            Builder.absolute [] []
+    else
+        Nothing
+
+
+toHref : BasePath -> Route -> String
+toHref (BasePath prefix) route =
+    prefix
+        ++ (case route of
+                Search params ->
+                    -- The default sort is left out, so an ordinary search is still a bare ?q=.
+                    Builder.absolute [ "search" ]
+                        (List.filterMap identity
+                            [ Maybe.map (Builder.string "q") params.q
+                            , if params.sort == Sort.default then
+                                Nothing
+
+                              else
+                                Just (Builder.string "sort" (Sort.toParam params.sort))
+                            ]
+                            ++ Facet.toQueryParams params.filters
+                        )
+
+                Torrent hash ->
+                    Builder.absolute [ "torrent", hash ] []
+
+                NotFound ->
+                    Builder.absolute [] []
+           )

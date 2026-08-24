@@ -16,20 +16,14 @@ Object action, Permission, Role, Anonymous access. Do not write "guest", "sessio
 
 ## The shape of it
 
-Authentication is **off by default**. `auth.anonymous_access` defaults to `true`, which
-grants the `anon` role every registered object action except auth administration. Setting
-it to `false` is what turns authentication on. So Magnes must work in three worlds:
+`auth.anonymous_access` defaults to `true`, granting the `anon` role every registered
+object action except auth administration. Magnes supports both configurations of the
+fork:
 
-1. **A server with no auth at all** (upstream, or any instance predating the auth port —
-   no longer either of ours) — the schema has no `self` field. Querying it is a validation error, not an authorization error.
-2. **Anonymous access on** — `self.identity` resolves, returns `user: null`, and
-   `permissions` contains nearly everything. Login exists but nothing requires it.
-3. **Anonymous access off** — an unauthenticated caller gets `self`, `health` and
-   `version` and nothing else. Searching requires a User.
-
-World 1 is a `Cannot query field "self"` validation error against the whole document, so
-a single query asking for both search results and identity fails **entirely**. Ask for
-identity in its own request.
+1. **Anonymous access on** — `self.identity` returns `user: null` with the anonymous
+   permissions. Login exists but search does not require it.
+2. **Anonymous access off** — an unauthenticated caller reaches `self`, `health`, and
+   `version`; search requires a User.
 
 ## Types
 
@@ -206,14 +200,14 @@ Revocation takes up to `auth.rbac_cache_ttl` (default 1 minute) to take effect.
 
 ## Credentials
 
-**Session token**: a JWT, sent as `Authorization: Bearer <token>`. HS256, pinned. Its
+**JWT**: sent as `Authorization: Bearer <token>`. HS256, pinned. Its
 lifetime is `auth.jwt_duration`, default 24h. If `auth.jwt_secret` is unset the server
 generates one per process, so **every restart invalidates every token** — expect this
 constantly in development.
 
 **API key**: 22 base62 characters, sent as `?apikey=` or `X-Api-Key`, and used by \*arr
 clients over Torznab. Torznab **refuses a JWT** in the apikey slot and ignores the bearer
-middleware entirely, so a browser session is never a Torznab credential. A UI creates and
+middleware entirely, so a browser JWT is never a Torznab credential. A UI creates and
 deletes keys; it never authenticates with one.
 
 **Invitation**: a single-use 128-bit code. `auth.invitation_required` defaults to `true`,
@@ -232,7 +226,7 @@ with `user: null`. **[verified]** both halves: `Authorization: Bearer not.a.jwt`
 well-formed JWT with a bogus signature each returned `200` with the full anonymous
 identity and no error at all. That is deliberate — a credential path that aborted the chain left the
 request with no identity at all, which refused `self.identity` and `self.login`, the two
-calls a client needs to notice its token is dead and recover. The session then stayed
+calls a client needs to notice its token is dead and recover. The identity then stayed
 wedged across reloads until the operator cleared browser storage by hand.
 
 **The client-side consequence, and it is not optional:** holding a token while the server
@@ -266,8 +260,8 @@ That includes authorization. A refusal looks like this, and nothing more **[veri
 it**. gqlgen's extension hook is `Extensions() map[string]any` (`graphql.ExtendedError`),
 the name does not match, and bitmagnet sets no custom `ErrorPresenter`, so
 `DefaultErrorPresenter` wraps the error and drops the method. The extensions are dead
-code; the live response has no `extensions` key at all. Worth a one-line fix upstream in
-the fork — until then, **`path` is the only thing that says what was refused**, and it
+code; the live response has no `extensions` key at all. Worth a one-line fix in the fork —
+until then, **`path` is the only thing that says what was refused**, and it
 names the top-level field (`["auth"]`, `["self","login"]`).
 
 From `../bitmagnet/internal/auth/user/errors.go`, wrapped as `user: <verb> failed: <cause>`.

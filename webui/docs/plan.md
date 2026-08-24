@@ -1,13 +1,9 @@
-# Phase 1 — the UI, with no server
+# Phase 1 — the browser UI
 
-The README describes Magnes as it should end up: a proxy server in front of bitmagnet,
-guest permission levels, accounts. None of that is needed to build the interface, and
-building it first would mean designing an access model before there is anything to
-access.
-
-Phase 1 is therefore the browser client alone. **No server, no database, no accounts, no
-mutations, no dashboard.** The bitmagnet URL is a runtime flag, so when the proxy does
-arrive it changes one string.
+Phase 1 deliberately built the browser client before identity or write operations:
+search, filters, sort, expansion, and stable routes. **No Magnes server, database,
+accounts, mutations, or dashboard.** The bitmagnet URL and static mount are runtime flags,
+so the same bundle works in cross-origin development and same-origin deployment.
 
 ## This works because bitmagnet allows cross-origin requests
 
@@ -19,10 +15,9 @@ Access-Control-Allow-Methods: POST
 Access-Control-Allow-Headers: content-type
 ```
 
-So the browser can query bitmagnet directly. This is a fact about bitmagnet, not a
-decision, and it is also the reason the proxy eventually matters: a permissive API on a
-reachable host is exactly what the proxy exists to cover. Phase 1 accepts that, because a
-UI with no mutation code cannot delete anything regardless of what the network allows.
+So the browser can query bitmagnet directly during development. Production uses the
+same-origin static mount described in [serving-and-testing.md](serving-and-testing.md).
+Phase 1 contains no mutation code regardless of which serving mode is used.
 
 Only two things are actually deferred by dropping the server: unmatched-path fallback for
 deep links (a dev-server setting until deployment), and any access control (nothing to
@@ -79,7 +74,7 @@ folded away until asked for, and unfold themselves when a link arrives with filt
 already applied, so a shared search shows what is narrowing it.
 
 A `?` beside the field carries bitmagnet's query syntax as a native tooltip. Everything
-the upstream guide documents fits in six lines — `"exact phrase"`, `a | b`, `!term`,
+the bitmagnet guide documents fits in six lines — `"exact phrase"`, `a | b`, `!term`,
 `appl*`, `( )`, `a . b` — and most of it is what people already expect from a search box,
 so it is a reminder rather than a manual, and the browser places it instead of a popover
 this code would have to manage.
@@ -96,8 +91,8 @@ imports them. Done when the generated code compiles.
 
 **2. Shell.** ✅ `Browser.application`, `Route` = `Search` | `Torrent String` | `NotFound`,
 with the `toHref` inverse written alongside the parser so a new route breaks the link
-builder at compile time. bitmagnet's URL arrives as a flag from `index.html`. Dev serving
-needs unmatched-path fallback or a deep link 404s on refresh.
+builder at compile time. bitmagnet's URL and the static mount path arrive as flags from
+`index.html`. Dev serving needs unmatched-path fallback or a deep link 404s on refresh.
 
 **3. One query, no styling.** ✅ `torrentContent.search` rendered as a flat list. Always set
 `totalCount: true` and `hasNextPage: true` — omitting them fails silently and plausibly

@@ -6,19 +6,22 @@
     <!-- Repeated from the stylesheet so the browser knows before any CSS arrives, which
          is what avoids a white flash on a dark system while loading. -->
     <meta name="color-scheme" content="light dark" />
+    <!-- Set this to the static mount (for example /magnes/) in a deployed copy. -->
+    <base href="/" />
     <title>magnes</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <!-- Optional, gitignored, and absent by default: see config.example.js. -->
-    <script src="/config.js"></script>
-    <script src="/main.js"></script>
+    <script src="config.js"></script>
+    <script src="main.js"></script>
     <script>
-      // bitmagnet's address is runtime configuration, not a build input: the same
-      // bundle works against any instance, and against the proxy when there is one.
+      // The API address and mount path are runtime configuration, not build inputs:
+      // the same bundle works at the origin root or beneath bitmagnet's static mount.
       Elm.Main.init({
         flags: {
           apiUrl: window.MAGNES_API_URL || "http://localhost:3333/graphql",
+          basePath: window.MAGNES_BASE_PATH || "",
         },
       });
     </script>

@@ -63,14 +63,10 @@ about client behaviour, not about the schema.
 
 ### The stale-token heuristic
 
-`auth.service.ts` polls `self.identity` every 10 seconds and treats *"I hold a token but
-the server reports no user"* as proof the token is dead, clearing it. This is the correct
-response to the chain-never-rejects invariant in [auth-api.md](auth-api.md) — there is no
-error to catch, so the only signal is the mismatch. **Magnes needs this exact check.**
-
-The 10-second poll itself is worth reconsidering: it is a request every 10 seconds forever
-to notice an event that happens once a day at most. Checking on load, on focus, and after
-any `unauthorized` error covers the same ground for a fraction of the traffic.
+`auth.service.ts` implements the stale-token rule defined in
+[auth-api.md](auth-api.md#the-failure-mode-that-decides-the-client-design), but polls every
+10 seconds. Magnes should run that check on load, on focus, and after an `unauthorized`
+error instead.
 
 ### Token storage
 

@@ -22,14 +22,10 @@ where Magnes is going; these pages describe what is actually true today.
 
 ## Which instance to point at
 
-Nothing in this directory names a host, an address or a path on anyone's machine. Those
-live in **`docs/environment.local.md`**, which is gitignored (`*.local.md`) because it is a
-map of one person's deployment and has no business in a public repository.
-
 Write one if it is missing. What it needs to answer:
 
 - Which instances exist, how each is reached, and what version each reports.
-- Which of them has the **auth port** — nothing about accounts can be tested without it.
+- Which fork version each instance runs.
 - Which has `http_server.static` configured, at what path, and whether anything is
   actually deployed there.
 - Whether `auth.anonymous_access` is still on, and which instance is safe to turn it off
@@ -39,8 +35,8 @@ Write one if it is missing. What it needs to answer:
 [serving-and-testing.md](serving-and-testing.md) covers the general shape of all of that —
 the three ways to serve, what each requires, and the failure modes worth recognising.
 
-`src/Magnes/Api/` has no auth types: it was generated against an instance that predated the
-auth port. Regenerating against one that has it is the first step of any account work.
+`src/Magnes/Api/` has no auth types. Regenerating it against the target fork is the first
+step of identity or permission work.
 
 ## Where the truth lives
 

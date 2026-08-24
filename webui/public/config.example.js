@@ -11,5 +11,9 @@
 // use a RELATIVE address instead — same origin, and no CORS involved:
 //
 //   window.MAGNES_API_URL = "/graphql";
+//   window.MAGNES_BASE_PATH = "/magnes";
+//
+// Also set index.html's <base href> to the same mount path with a trailing
+// slash (for example <base href="/magnes/" />), so assets load on deep links.
 
 window.MAGNES_API_URL = "http://localhost:3333/graphql";

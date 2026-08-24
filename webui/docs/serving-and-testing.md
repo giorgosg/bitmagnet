@@ -9,17 +9,16 @@ are pointing at.
 
 ## What the instance has to be
 
-Two capabilities matter, and they arrived separately:
+The target fork needs these two capabilities:
 
 | Needed for | Capability | How to check |
 | --- | --- | --- |
-| Anything to do with accounts | the auth port | `{self{identity{user{username}}}}` resolves rather than failing validation |
+| Identity and permission work | the fork's auth surface | `{self{identity{user{username}}}}` resolves |
 | Same-origin serving (way 2) | `http_server.static` (PR #48) | the configured static path returns something other than 404 |
 
-An instance predating the auth port has no `self` field, and asking for it is a
-**document validation error that fails the whole request** — which is why identity must
-never be bundled into the search query. That is world 1 in
-[accounts-plan.md](accounts-plan.md).
+[auth-api.md](auth-api.md#the-shape-of-it) is authoritative for the two supported
+anonymous-access configurations. The serving check here answers only whether this
+instance exposes the capability needed by the task.
 
 ## Three ways to serve the UI
 
@@ -79,7 +78,10 @@ http_server:
 
 Unknown paths beneath it fall back to `index.html`, so Magnes keeps its own routing and
 `dev.js` becomes unnecessary. Set `window.MAGNES_API_URL = "/graphql"` in the deployed
-`config.js`: a **relative** endpoint, same origin, no CORS in the picture at all.
+`config.js`: a **relative** endpoint, same origin, no CORS in the picture at all. Magnes
+also needs the mount path twice: as `window.MAGNES_BASE_PATH` without a trailing slash,
+so Elm parses and builds routes beneath it, and in `index.html`'s `<base href>` with a
+trailing slash, so assets load from it even on a deep link.
 
 This is the deployment the account work should be signed off against, because it is the
 one where the browser sends credentials the way a same-origin page does.
@@ -121,15 +123,27 @@ the mount reads, plus one extra step:
 ```bash
 npm run build:optimize
 rsync -a --delete public/ <host>:<dir>/
-# then write config.js at the destination:
-window.MAGNES_API_URL = "/graphql";
 ```
 
-That last step is not optional. `public/config.js` is gitignored and holds *your*
+Set these two values in the deployed `config.js`:
+
+```js
+window.MAGNES_API_URL = "/graphql";
+window.MAGNES_BASE_PATH = "/ui";
+```
+
+The deployed `index.html` needs the matching trailing-slash base:
+
+```html
+<base href="/ui/" />
+```
+
+Those deployment values are required. `public/config.js` is gitignored and holds *your*
 development address, so rsync either copies the wrong endpoint or, with `--delete` and no
 local copy, leaves none at all — and a page with no config falls back to
 `http://localhost:3333/graphql`, which in a browser means the *viewer's* own machine. The
-relative `/graphql` is the entire point of this deployment.
+relative `/graphql` is the entire point of this deployment. Without the base-path values,
+the HTML requests assets from the origin root and Elm reads `/ui` as an application route.
 
 Serving from a container means the directory must be bind-mounted into it. Read-only is
 right: bitmagnet only ever reads these files, and the build is copied in from outside.
@@ -144,8 +158,7 @@ instance, which weakens the case further. Do not start on it without raising tha
 
 Authentication is off by default: `auth.anonymous_access` defaults to `true`, which grants
 the anonymous identity every registered object action except the two in the `auth`
-namespace. World 3 in [accounts-plan.md](accounts-plan.md) — where an unauthenticated
-caller cannot even search — needs:
+namespace. Requiring a User for search needs:
 
 ```yaml
 auth:
@@ -178,9 +191,7 @@ npm run format
 ```
 
 Be explicit about the URL rather than relying on the `http://localhost:3333` default, and
-generate against an instance that **has the auth port** — otherwise the result silently
-lacks every account type and nothing in [accounts-plan.md](accounts-plan.md) compiles.
-Confirm before committing: the schema should introspect to include `Self`, `User`, `Role`,
-`APIKey`, `Invitation`, `AuthQuery` and `AuthMutation`.
+generate against the target fork. Confirm before committing: the schema should introspect
+to include `Self`, `User`, `Role`, `APIKey`, `Invitation`, `AuthQuery` and `AuthMutation`.
 
 Commit the result — a checkout should build without reaching an instance.

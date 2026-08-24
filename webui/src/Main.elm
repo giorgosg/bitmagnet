@@ -39,16 +39,19 @@ main =
         }
 
 
-{-| bitmagnet's address arrives at runtime from `index.html`, so the same build works
-against any instance — and against the proxy, when there is one.
+{-| The API address and mount path arrive at runtime from `index.html`, so the same build
+works against any instance and at either the origin root or a static subpath.
 -}
 type alias Flags =
-    { apiUrl : String }
+    { apiUrl : String
+    , basePath : String
+    }
 
 
 type alias Model =
     { key : Nav.Key
     , apiUrl : String
+    , basePath : Route.BasePath
     , route : Route
     , field : String
     , results : Results
@@ -188,14 +191,18 @@ debounceMs =
 init : Flags -> Url -> Nav.Key -> ( Model, Cmd Msg )
 init flags url key =
     let
+        basePath =
+            Route.basePath flags.basePath
+
         route =
-            Route.fromUrl url
+            Route.fromUrl basePath url
 
         ( results, cmd ) =
             load flags.apiUrl 0 route
     in
     ( { key = key
       , apiUrl = flags.apiUrl
+      , basePath = basePath
       , route = route
       , field = fieldFor route
       , results = results
@@ -266,7 +273,7 @@ update msg model =
             ( model, Cmd.none )
 
         LinkClicked (Browser.Internal url) ->
-            case ( Route.fromUrl url, model.route ) of
+            case ( Route.fromUrl model.basePath url, model.route ) of
                 -- A row's name links to the torrent's own page, which is what makes
                 -- middle-click and "open in new tab" work. But an ordinary click on a
                 -- result should open it where it already is, so the navigation is turned
@@ -294,7 +301,7 @@ update msg model =
         UrlChanged url ->
             let
                 route =
-                    Route.fromUrl url
+                    Route.fromUrl model.basePath url
             in
             if route == model.route then
                 -- Same query re-submitted; don't throw away results to fetch them again.
@@ -334,18 +341,18 @@ update msg model =
 
             else
                 ( model
-                , Nav.replaceUrl model.key (Route.toHref (currentSearch model))
+                , Nav.replaceUrl model.key (Route.toHref model.basePath (currentSearch model))
                 )
 
         Submitted ->
-            ( model, Nav.pushUrl model.key (Route.toHref (currentSearch model)) )
+            ( model, Nav.pushUrl model.key (Route.toHref model.basePath (currentSearch model)) )
 
         SortChanged raw ->
             -- Choosing an ordering is a deliberate act, so it earns a history entry —
             -- unlike the keystrokes that `replaceUrl` collapses.
             ( model
             , Nav.pushUrl model.key
-                (Route.toHref (searchRoute model (Sort.fromParam raw) (currentFilters model)))
+                (Route.toHref model.basePath (searchRoute model (Sort.fromParam raw) (currentFilters model)))
             )
 
         FiltersToggled ->
@@ -354,7 +361,7 @@ update msg model =
         FilterChanged filters ->
             ( model
             , Nav.pushUrl model.key
-                (Route.toHref (searchRoute model (currentSort model) filters))
+                (Route.toHref model.basePath (searchRoute model (currentSort model) filters))
             )
 
         Resized height ->
@@ -735,7 +742,7 @@ view model =
     , body =
         [ header []
             [ div [ class "bar" ]
-                [ a [ class "wordmark", href (Route.toHref (Route.Search Route.emptySearch)) ]
+                [ a [ class "wordmark", href (Route.toHref model.basePath (Route.Search Route.emptySearch)) ]
                     [ h1 [] [ text "magnes" ] ]
                 , searchBox model
                 ]
@@ -994,7 +1001,7 @@ viewTorrent model =
         Feed feed ->
             case feed.items of
                 item :: _ ->
-                    div [ class "single" ] [ viewItem item ]
+                    div [ class "single" ] [ viewItem model.basePath item ]
 
                 [] ->
                     p [ class "notice" ] [ text "No torrent with that hash is in the index." ]
@@ -1040,7 +1047,7 @@ viewResults model =
 listConfig : Model -> InfiniteList.Config Item Msg
 listConfig model =
     InfiniteList.config
-        { itemView = \_ _ item -> viewItem item
+        { itemView = \_ _ item -> viewItem model.basePath item
         , itemHeight = InfiniteList.withVariableHeight (\_ item -> itemHeight item)
         , containerHeight = listHeight model
         }
@@ -1134,10 +1141,10 @@ plural n noun =
         noun ++ "s"
 
 
-viewItem : Item -> Html Msg
-viewItem item =
+viewItem : Route.BasePath -> Item -> Html Msg
+viewItem basePath item =
     div [ class "item" ]
-        (viewRow item
+        (viewRow basePath item
             :: (if item.expanded then
                     viewMeta item ++ viewFiles item
 
@@ -1150,8 +1157,8 @@ viewItem item =
 {-| One line: chevron, name, size, magnet. Everything else is behind the chevron — on a
 real index most rows have no metadata, so a column of it is a column of blanks.
 -}
-viewRow : Item -> Html Msg
-viewRow item =
+viewRow : Route.BasePath -> Item -> Html Msg
+viewRow basePath item =
     div [ class "row", onRowClick item.row.id ]
         [ button
             [ class "twist"
@@ -1174,7 +1181,7 @@ viewRow item =
             [ chevronIcon ]
         , a
             [ class "name"
-            , href (Route.toHref (Route.Torrent item.row.infoHash))
+            , href (Route.toHref basePath (Route.Torrent item.row.infoHash))
 
             -- Elm installs its own click listener on every anchor, and it runs before
             -- anything on an ancestor — so the row's handler would fire *as well*, toggling
