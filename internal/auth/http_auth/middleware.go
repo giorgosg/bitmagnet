@@ -30,6 +30,11 @@ type Resolution struct {
 	Err      error
 }
 
+func (r Resolution) UsesBrowserAuthority() bool {
+	return r.Source == CredentialSourceCookie && r.Err == nil && r.Identity != nil &&
+		!r.Rejected && !isAnonymous(r.Identity)
+}
+
 type Middleware interface {
 	AttachAuth() gin.HandlerFunc
 }

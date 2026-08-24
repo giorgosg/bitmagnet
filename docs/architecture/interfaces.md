@@ -45,8 +45,10 @@ line verbatim including a Torznab `apikey`).
   namespace field being gated. The set of directives in the schema _is_ the registered set
   of GraphQL object actions — `gqlfx` extracts them from the schema AST rather than
   restating them.
-- The handler enables the GET, POST, websocket and multipart transports, introspection,
-  automatic persisted queries, and serves the playground at `GET /graphql`.
+- The handler accepts JSON POST, introspection, and automatic persisted queries, and serves
+  the playground at `GET /graphql`. Multipart and WebSocket transports are disabled because
+  the schema has neither uploads nor subscriptions. A valid browser-cookie mutation must
+  pass the same-origin check described in [auth.md](auth.md) before any resolver runs.
 
 Adding a field means: edit the schema, `task gen-gql`, implement in `resolvers/`, then
 `task gen-webui-graphql` if the web UI consumes it.

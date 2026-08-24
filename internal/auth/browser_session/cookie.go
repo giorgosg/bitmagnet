@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/authconfig"
@@ -12,12 +14,17 @@ import (
 
 const cookiePath = "/graphql"
 
-var errHTTPContextRequired = errors.New("browser session cookie requires an HTTP request context")
+var (
+	errHTTPContextRequired = errors.New("browser session cookie requires an HTTP request context")
+	errOriginRequired      = errors.New("browser session request requires an Origin")
+	errCrossOrigin         = errors.New("browser session request must be same-origin")
+)
 
 // Cookie manages the browser credential without exposing HTTP header assembly
 // to GraphQL resolvers.
 type Cookie interface {
 	Credential(request *http.Request) (string, bool)
+	RequireSameOrigin(ctx context.Context) error
 	Issue(ctx context.Context, credential string) error
 	Expire(ctx context.Context) error
 }
@@ -42,6 +49,27 @@ func (c cookie) Credential(request *http.Request) (string, bool) {
 	}
 
 	return requestCookie.Value, true
+}
+
+func (cookie) RequireSameOrigin(ctx context.Context) error {
+	ginCtx, ok := internalhttpserver.GinContextFromContext(ctx)
+	if !ok {
+		return errHTTPContextRequired
+	}
+
+	originValue := ginCtx.GetHeader("Origin")
+	if originValue == "" {
+		return errOriginRequired
+	}
+
+	origin, err := url.Parse(originValue)
+	if err != nil || origin.Scheme != "https" || origin.Host == "" ||
+		origin.User != nil || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" ||
+		!strings.EqualFold(origin.Host, ginCtx.Request.Host) {
+		return errCrossOrigin
+	}
+
+	return nil
 }
 
 func (c cookie) Issue(ctx context.Context, credential string) error {

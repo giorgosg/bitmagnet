@@ -5,15 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"testing"
 	"time"
 
-	"github.com/99designs/gqlgen/graphql/handler"
-	"github.com/99designs/gqlgen/graphql/handler/lru"
-	"github.com/99designs/gqlgen/graphql/handler/transport"
+	"github.com/99designs/gqlgen/graphql"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/api_key"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/authconfig"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/browser_session"
@@ -28,11 +28,13 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/gql"
 	gqlauth "github.com/bitmagnet-io/bitmagnet/internal/gql/auth"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql/directive"
+	gqlhttpserver "github.com/bitmagnet-io/bitmagnet/internal/gql/httpserver"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql/resolvers"
+	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/vektah/gqlparser/v2/ast"
+	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -158,12 +160,15 @@ func newAuthTestServerWithConfigAndAuthenticator(
 	require.Equal(t, "auth", authOption.Key())
 	require.NoError(t, authOption.Apply(engine))
 
-	srv := handler.New(schema)
-	srv.AddTransport(transport.POST{})
-	srv.SetQueryCache(lru.New[*ast.QueryDocument](10))
-	engine.POST("/graphql", func(c *gin.Context) {
-		srv.ServeHTTP(c.Writer, c.Request)
-	})
+	graphQLOption := gqlhttpserver.New(gqlhttpserver.Params{
+		Schema: lazy.New(func() (graphql.ExecutableSchema, error) {
+			return schema, nil
+		}),
+		Logger:        zap.NewNop().Sugar(),
+		BrowserCookie: browser_session.NewCookie(cfg),
+	}).Option
+	require.Equal(t, "graphql", graphQLOption.Key())
+	require.NoError(t, graphQLOption.Apply(engine))
 
 	// The bootstrap invitation is what makes the first registration possible.
 	invitation, err := userService.CreateInitialInvitation(t.Context())
@@ -276,6 +281,21 @@ func queryWithCredentials(
 ) (gqlResponse, http.Header) {
 	t.Helper()
 
+	response, headers, _ := queryWithOrigin(t, server, token, cookie, "", q)
+
+	return response, headers
+}
+
+func queryWithOrigin(
+	t *testing.T,
+	server *httptest.Server,
+	token string,
+	cookie *http.Cookie,
+	origin string,
+	q string,
+) (gqlResponse, http.Header, int) {
+	t.Helper()
+
 	body, err := json.Marshal(map[string]string{"query": q})
 	require.NoError(t, err)
 
@@ -297,6 +317,10 @@ func queryWithCredentials(
 		req.AddCookie(cookie)
 	}
 
+	if origin != "" {
+		req.Header.Set("Origin", origin)
+	}
+
 	res, err := server.Client().Do(req)
 	require.NoError(t, err)
 
@@ -306,7 +330,16 @@ func queryWithCredentials(
 
 	require.NoError(t, json.NewDecoder(res.Body).Decode(&decoded))
 
-	return decoded, res.Header
+	return decoded, res.Header, res.StatusCode
+}
+
+func sameOrigin(t *testing.T, server *httptest.Server) string {
+	t.Helper()
+
+	serverURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	return "https://" + serverURL.Host
 }
 
 func requireNoGqlErrors(t *testing.T, res gqlResponse) {
@@ -337,9 +370,10 @@ func loginBrowserCookie(
 ) *http.Cookie {
 	t.Helper()
 
-	loggedIn, headers := queryWithHeaders(t, server, "", `mutation { self { loginBrowser(
-		username: "`+username+`", password: "`+password+`"
-	) } }`)
+	loggedIn, headers, _ := queryWithOrigin(
+		t, server, "", nil, sameOrigin(t, server),
+		`mutation { self { loginBrowser(username: "`+username+`", password: "`+password+`") } }`,
+	)
 	requireNoGqlErrors(t, loggedIn)
 
 	cookies := (&http.Response{Header: headers}).Cookies()
@@ -404,9 +438,10 @@ func TestBrowserLoginIssuesSecureGraphQLCookieWithoutCredentialPayload(t *testin
 		invitationCode: "`+code+`", username: "admin", password: "`+password+`"
 	}) { user { id } } } }`))
 
-	loggedIn, headers := queryWithHeaders(t, server, "", `mutation { self { loginBrowser(
-		username: "admin", password: "`+password+`"
-	) } }`)
+	loggedIn, headers, _ := queryWithOrigin(
+		t, server, "", nil, sameOrigin(t, server),
+		`mutation { self { loginBrowser(username: "admin", password: "`+password+`") } }`,
+	)
 	requireNoGqlErrors(t, loggedIn)
 	assert.JSONEq(t, `{"self":{"loginBrowser":null}}`, string(loggedIn.Data))
 
@@ -430,9 +465,10 @@ func TestBrowserLoginFailureDoesNotIssueCookie(t *testing.T) {
 		invitationCode: "`+code+`", username: "admin", password: "`+password+`"
 	}) { user { id } } } }`))
 
-	failed, headers := queryWithHeaders(t, server, "", `mutation { self { loginBrowser(
-		username: "admin", password: "wrong-password"
-	) } }`)
+	failed, headers, _ := queryWithOrigin(
+		t, server, "", nil, sameOrigin(t, server),
+		`mutation { self { loginBrowser(username: "admin", password: "wrong-password") } }`,
+	)
 	require.NotEmpty(t, failed.Errors)
 	assert.Empty(t, headers.Values("Set-Cookie"))
 }
@@ -445,7 +481,9 @@ func TestBrowserLogoutIdempotentlyExpiresConfiguredCookie(t *testing.T) {
 	server, _ := newAuthTestServerWithConfig(t, cfg)
 
 	for range 2 {
-		loggedOut, headers := queryWithHeaders(t, server, "", `mutation { self { logoutBrowser } }`)
+		loggedOut, headers, _ := queryWithOrigin(
+			t, server, "", nil, sameOrigin(t, server), `mutation { self { logoutBrowser } }`,
+		)
 		requireNoGqlErrors(t, loggedOut)
 		assert.JSONEq(t, `{"self":{"logoutBrowser":null}}`, string(loggedOut.Data))
 
@@ -471,13 +509,141 @@ func TestBrowserCookieResolvesUserIdentity(t *testing.T) {
 
 	cookie := loginBrowserCookie(t, server, "admin", password)
 
-	identified, _ := queryWithCredentials(t, server, "", cookie,
+	identified, _, _ := queryWithOrigin(t, server, "", cookie, sameOrigin(t, server),
 		`{ self { identity { user { username role } } } }`)
 	requireNoGqlErrors(t, identified)
 	assert.JSONEq(t,
 		`{"self":{"identity":{"user":{"username":"admin","role":"admin"}}}}`,
 		string(identified.Data),
 	)
+}
+
+func TestBrowserLoginRequiresSameOrigin(t *testing.T) {
+	t.Parallel()
+
+	server, code := newAuthTestServer(t)
+
+	const password = "correct-horse-battery-staple-99"
+
+	requireNoGqlErrors(t, query(t, server, "", `mutation { self { register(input: {
+		invitationCode: "`+code+`", username: "admin", password: "`+password+`"
+	}) { user { id } } } }`))
+
+	assertRejected := func(origin string) {
+		response, headers, _ := queryWithOrigin(t, server, "", nil, origin,
+			`mutation { self { loginBrowser(username: "admin", password: "`+password+`") } }`)
+
+		require.NotEmpty(t, response.Errors)
+		assert.Empty(t, headers.Values("Set-Cookie"))
+	}
+	assertRejected("")
+	assertRejected("https://attacker.example")
+
+	loggedIn, headers, _ := queryWithOrigin(t, server, "", nil, sameOrigin(t, server),
+		`mutation { self { loginBrowser(username: "admin", password: "`+password+`") } }`)
+	requireNoGqlErrors(t, loggedIn)
+	require.Len(t, (&http.Response{Header: headers}).Cookies(), 1)
+}
+
+func TestCookieAuthenticatedGraphQLRequiresSameOrigin(t *testing.T) {
+	t.Parallel()
+
+	server, code := newAuthTestServer(t)
+	_ = loginAsAdmin(t, server, code)
+	cookie := loginBrowserCookie(t, server, "admin", "correct-horse-battery-staple-99")
+
+	read, _, status := queryWithOrigin(t, server, "", cookie, "",
+		`{ self { identity { user { username } } } }`)
+	assert.Equal(t, http.StatusOK, status)
+	requireNoGqlErrors(t, read)
+	assert.JSONEq(t, `{"self":{"identity":{"user":{"username":"admin"}}}}`, string(read.Data))
+
+	assertRejected := func(origin string) {
+		response, headers, status := queryWithOrigin(
+			t, server, "", cookie, origin, `mutation { self { logoutBrowser } }`,
+		)
+
+		assert.Equal(t, http.StatusForbidden, status)
+		require.NotEmpty(t, response.Errors)
+		assert.Empty(t, headers.Values("Set-Cookie"), "a rejected request must not reach logout")
+	}
+	assertRejected("")
+	assertRejected("https://attacker.example")
+
+	loggedOut, headers, status := queryWithOrigin(
+		t, server, "", cookie, sameOrigin(t, server), `mutation { self { logoutBrowser } }`,
+	)
+	assert.Equal(t, http.StatusOK, status)
+	requireNoGqlErrors(t, loggedOut)
+	require.Len(t, (&http.Response{Header: headers}).Cookies(), 1)
+}
+
+func TestForeignOriginDoesNotRestrictExplicitBearer(t *testing.T) {
+	t.Parallel()
+
+	server, code := newAuthTestServer(t)
+	adminToken := loginAsAdmin(t, server, code)
+	cookie := loginBrowserCookie(t, server, "admin", "correct-horse-battery-staple-99")
+
+	invited, _, status := queryWithOrigin(t, server, adminToken, cookie, "https://attacker.example",
+		`mutation { auth { invite(input: {role: "user"}) { code } } }`)
+
+	assert.Equal(t, http.StatusOK, status)
+	requireNoGqlErrors(t, invited)
+}
+
+func TestForeignOriginDoesNotRestrictAnonymousGraphQL(t *testing.T) {
+	t.Parallel()
+
+	server, _ := newAuthTestServer(t)
+
+	checked, _, status := queryWithOrigin(t, server, "", nil, "https://attacker.example",
+		`{ self { passwordEntropy(password: "test") { entropy } } }`)
+
+	assert.Equal(t, http.StatusOK, status)
+	requireNoGqlErrors(t, checked)
+}
+
+func TestGraphQLRejectsMultipartAndWebSocketTransports(t *testing.T) {
+	t.Parallel()
+
+	server, _ := newAuthTestServer(t)
+
+	var body bytes.Buffer
+
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("operations", `{"query":"{ version }"}`))
+	require.NoError(t, writer.WriteField("map", `{}`))
+	require.NoError(t, writer.Close())
+
+	multipartRequest, err := http.NewRequestWithContext(
+		t.Context(), http.MethodPost, server.URL+"/graphql", &body,
+	)
+	require.NoError(t, err)
+	multipartRequest.Header.Set("Content-Type", writer.FormDataContentType())
+
+	multipartResponse, err := server.Client().Do(multipartRequest)
+	require.NoError(t, err)
+
+	defer func() { require.NoError(t, multipartResponse.Body.Close()) }()
+
+	assert.NotEqual(t, http.StatusOK, multipartResponse.StatusCode)
+
+	webSocketRequest, err := http.NewRequestWithContext(
+		t.Context(), http.MethodGet, server.URL+"/graphql", nil,
+	)
+	require.NoError(t, err)
+	webSocketRequest.Header.Set("Connection", "Upgrade")
+	webSocketRequest.Header.Set("Upgrade", "websocket")
+	webSocketRequest.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+	webSocketRequest.Header.Set("Sec-WebSocket-Version", "13")
+
+	webSocketResponse, err := server.Client().Do(webSocketRequest)
+	require.NoError(t, err)
+
+	defer func() { require.NoError(t, webSocketResponse.Body.Close()) }()
+
+	assert.Equal(t, http.StatusBadRequest, webSocketResponse.StatusCode)
 }
 
 func browserCookieAndSecondUserBearer(
