@@ -72,7 +72,7 @@ A full static review of the Go tree (2026-08-22) produced eleven findings, kept 
 untracked notes under `docs/issues/`. PRs #38-#45 above close six of them, plus four of
 the small defects collected in 0008. What remains open there, hardest last:
 `files_count`/`size` consistency for rows already written, the breaking half of the CORS
-decision (same-origin default and GraphQL-over-GET), the crawler and importer shutdown
+decision (same-origin default), the crawler and importer shutdown
 paths, the queue job that runs inside its claiming transaction, the search SQL
 re-execution, and the two serialisation points in the auth path.
 

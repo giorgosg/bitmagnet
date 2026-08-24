@@ -52,6 +52,18 @@ func TestMain(m *testing.M) {
 
 type daoProvider struct{ query *dao.Query }
 
+type invitationCountResponse struct {
+	Auth invitationCountAuth `json:"auth"`
+}
+
+type invitationCountAuth struct {
+	ListInvitations invitationCountResult `json:"listInvitations"`
+}
+
+type invitationCountResult struct {
+	TotalCount int `json:"totalCount"`
+}
+
 func (p daoProvider) Dao() (*dao.Query, error) { return p.query, nil }
 
 func (p daoProvider) DaoTransaction(fn func(tx *dao.Query) error) error {
@@ -558,24 +570,44 @@ func TestCookieAuthenticatedGraphQLRequiresSameOrigin(t *testing.T) {
 	requireNoGqlErrors(t, read)
 	assert.JSONEq(t, `{"self":{"identity":{"user":{"username":"admin"}}}}`, string(read.Data))
 
+	invitationCount := func() int {
+		response, _, status := queryWithOrigin(
+			t, server, "", cookie, "", `{ auth { listInvitations { totalCount } } }`,
+		)
+		assert.Equal(t, http.StatusOK, status)
+		requireNoGqlErrors(t, response)
+
+		var result invitationCountResponse
+		require.NoError(t, json.Unmarshal(response.Data, &result))
+
+		return result.Auth.ListInvitations.TotalCount
+	}
+	initialInvitationCount := invitationCount()
+
 	assertRejected := func(origin string) {
 		response, headers, status := queryWithOrigin(
-			t, server, "", cookie, origin, `mutation { self { logoutBrowser } }`,
+			t, server, "", cookie, origin,
+			`mutation { auth { invite(input: {role: "user"}) { code } } }`,
 		)
 
 		assert.Equal(t, http.StatusForbidden, status)
 		require.NotEmpty(t, response.Errors)
-		assert.Empty(t, headers.Values("Set-Cookie"), "a rejected request must not reach logout")
+		assert.Empty(t, headers.Values("Set-Cookie"))
+		assert.Equal(
+			t, initialInvitationCount, invitationCount(),
+			"a rejected request must not create an invitation",
+		)
 	}
 	assertRejected("")
 	assertRejected("https://attacker.example")
 
-	loggedOut, headers, status := queryWithOrigin(
-		t, server, "", cookie, sameOrigin(t, server), `mutation { self { logoutBrowser } }`,
+	invited, _, status := queryWithOrigin(
+		t, server, "", cookie, sameOrigin(t, server),
+		`mutation { auth { invite(input: {role: "user"}) { code } } }`,
 	)
 	assert.Equal(t, http.StatusOK, status)
-	requireNoGqlErrors(t, loggedOut)
-	require.Len(t, (&http.Response{Header: headers}).Cookies(), 1)
+	requireNoGqlErrors(t, invited)
+	assert.Equal(t, initialInvitationCount+1, invitationCount())
 }
 
 func TestForeignOriginDoesNotRestrictExplicitBearer(t *testing.T) {
