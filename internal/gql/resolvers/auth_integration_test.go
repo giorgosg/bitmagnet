@@ -224,6 +224,7 @@ type permissionBody struct {
 
 type loginBody struct {
 	Token       string           `json:"token"`
+	User        userBody         `json:"user"`
 	Permissions []permissionBody `json:"permissions"`
 }
 
@@ -236,8 +237,9 @@ type loginResponse struct {
 }
 
 type userBody struct {
-	Username string `json:"username"`
-	Role     string `json:"role"`
+	Username    string     `json:"username"`
+	Role        string     `json:"role"`
+	LastLoginAt *time.Time `json:"lastLoginAt"`
 }
 
 type identityBody struct {
@@ -459,6 +461,41 @@ func TestAuthRegisterLoginIdentityFlow(t *testing.T) {
 	require.NotNil(t, self.Self.Identity.User, "the bearer token must resolve to a user")
 	assert.Equal(t, "admin", self.Self.Identity.User.Username)
 	assert.Equal(t, "admin", self.Self.Identity.User.Role)
+}
+
+func TestLoginReturnsCurrentLastLoginAt(t *testing.T) {
+	t.Parallel()
+
+	server, code := newAuthTestServer(t)
+
+	const password = "correct-horse-battery-staple-99"
+
+	requireNoGqlErrors(t, query(t, server, "", `mutation { self { register(input: {
+		invitationCode: "`+code+`", username: "admin", password: "`+password+`"
+	}) { user { id } } } }`))
+
+	loginStartedAt := time.Now()
+	loggedIn := query(t, server, "", `mutation { self { login(
+		username: "admin", password: "`+password+`"
+	) { token user { lastLoginAt } } } }`)
+	loginFinishedAt := time.Now()
+
+	requireNoGqlErrors(t, loggedIn)
+
+	var login loginResponse
+	require.NoError(t, json.Unmarshal(loggedIn.Data, &login))
+	require.NotNil(t, login.Self.Login.User.LastLoginAt)
+	assert.WithinRange(t, *login.Self.Login.User.LastLoginAt, loginStartedAt, loginFinishedAt)
+
+	identified := query(t, server, login.Self.Login.Token,
+		`{ self { identity { user { lastLoginAt } } } }`)
+	requireNoGqlErrors(t, identified)
+
+	var self identityResponse
+	require.NoError(t, json.Unmarshal(identified.Data, &self))
+	require.NotNil(t, self.Self.Identity.User)
+	require.NotNil(t, self.Self.Identity.User.LastLoginAt)
+	assert.Equal(t, login.Self.Login.User.LastLoginAt, self.Self.Identity.User.LastLoginAt)
 }
 
 func TestBrowserLoginIssuesSecureGraphQLCookieWithoutCredentialPayload(t *testing.T) {
