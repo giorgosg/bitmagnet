@@ -7,11 +7,13 @@ Mapped away from the default `String`-backed wrappers:
   - `DateTime` and `Date` become `Time.Posix`. bitmagnet sends RFC-3339 with microsecond
     precision (`2026-08-06T04:42:29.862002Z`); `Iso8601` accepts up to nine fractional
     digits, and a bare `2019-09-05` parses as midnight UTC.
+  - `Duration` becomes `String`. bitmagnet accepts Go duration strings such as
+    `24h0m0s`, not a number of seconds or an ISO 8601 duration.
   - `Year` becomes `Int` — it arrives as a JSON number, not a string.
 
 `Hash20` stays opaque: it is an info hash, only ever passed through to a URL or back to
-the API, and wrapping it keeps it from being confused with any other string. `Void` is
-the return type of mutations, which Magnes does not call.
+the API, and wrapping it keeps it from being confused with any other string. `Void`
+remains opaque because mutations returning it carry no useful response value.
 
 -}
 
@@ -31,7 +33,7 @@ type alias DateTime =
 
 
 type alias Duration =
-    Magnes.Api.Scalar.Duration
+    String
 
 
 type alias Hash20 =
@@ -55,7 +57,10 @@ codecs =
     Magnes.Api.Scalar.defineCodecs
         { codecDate = posixCodec
         , codecDateTime = posixCodec
-        , codecDuration = defaultCodecs.codecDuration
+        , codecDuration =
+            { encoder = Encode.string
+            , decoder = Decode.string
+            }
         , codecHash20 = defaultCodecs.codecHash20
         , codecId = defaultCodecs.codecId
         , codecVoid = defaultCodecs.codecVoid
