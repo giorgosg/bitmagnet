@@ -5,6 +5,26 @@
 module Magnes.Api.Object exposing (..)
 
 
+type APIKey
+    = APIKey
+
+
+type AuthMutation
+    = AuthMutation
+
+
+type AuthObjectAction
+    = AuthObjectAction
+
+
+type AuthQuery
+    = AuthQuery
+
+
+type AuthSubject
+    = AuthSubject
+
+
 type Content
     = Content
 
@@ -19,6 +39,10 @@ type ContentCollection
 
 type ContentTypeAgg
     = ContentTypeAgg
+
+
+type CreateAPIKeyResult
+    = CreateAPIKeyResult
 
 
 type Episodes
@@ -41,6 +65,10 @@ type HealthQuery
     = HealthQuery
 
 
+type Invitation
+    = Invitation
+
+
 type LanguageAgg
     = LanguageAgg
 
@@ -49,8 +77,28 @@ type LanguageInfo
     = LanguageInfo
 
 
+type ListInvitationsResult
+    = ListInvitationsResult
+
+
+type ListUsersResult
+    = ListUsersResult
+
+
+type LoginResult
+    = LoginResult
+
+
 type MetadataSource
     = MetadataSource
+
+
+type PasswordEntropyResult
+    = PasswordEntropyResult
+
+
+type Permission
+    = Permission
 
 
 type QueueJob
@@ -89,12 +137,32 @@ type QueueQuery
     = QueueQuery
 
 
+type RegisterResult
+    = RegisterResult
+
+
 type ReleaseYearAgg
     = ReleaseYearAgg
 
 
+type Role
+    = Role
+
+
 type Season
     = Season
+
+
+type Self
+    = Self
+
+
+type SelfMutation
+    = SelfMutation
+
+
+type SelfQuery
+    = SelfQuery
 
 
 type SuggestedTag
@@ -171,6 +239,10 @@ type TorrentSuggestTagsResult
 
 type TorrentTagAgg
     = TorrentTagAgg
+
+
+type User
+    = User
 
 
 type VideoResolutionAgg

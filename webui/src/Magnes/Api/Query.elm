@@ -24,6 +24,20 @@ version =
     Object.selectionForField "String" "version" [] Decode.string
 
 
+self :
+    SelectionSet decodesTo Magnes.Api.Object.SelfQuery
+    -> SelectionSet decodesTo RootQuery
+self object____ =
+    Object.selectionForCompositeField "self" [] object____ Basics.identity
+
+
+auth :
+    SelectionSet decodesTo Magnes.Api.Object.AuthQuery
+    -> SelectionSet decodesTo RootQuery
+auth object____ =
+    Object.selectionForCompositeField "auth" [] object____ Basics.identity
+
+
 workers :
     SelectionSet decodesTo Magnes.Api.Object.WorkersQuery
     -> SelectionSet decodesTo RootQuery

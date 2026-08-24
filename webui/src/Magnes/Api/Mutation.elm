@@ -19,6 +19,20 @@ import Magnes.Api.ScalarCodecs
 import Magnes.Api.Union
 
 
+self :
+    SelectionSet decodesTo Magnes.Api.Object.SelfMutation
+    -> SelectionSet decodesTo RootMutation
+self object____ =
+    Object.selectionForCompositeField "self" [] object____ Basics.identity
+
+
+auth :
+    SelectionSet decodesTo Magnes.Api.Object.AuthMutation
+    -> SelectionSet decodesTo RootMutation
+auth object____ =
+    Object.selectionForCompositeField "auth" [] object____ Basics.identity
+
+
 torrent :
     SelectionSet decodesTo Magnes.Api.Object.TorrentMutation
     -> SelectionSet decodesTo RootMutation

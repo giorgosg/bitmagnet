@@ -8,7 +8,8 @@ import Json.Decode as Decode exposing (Decoder)
 
 
 type VideoCodec
-    = H264
+    = Av1
+    | H264
     | X264
     | X265
     | XviD
@@ -19,7 +20,7 @@ type VideoCodec
 
 list : List VideoCodec
 list =
-    [ H264, X264, X265, XviD, DivX, Mpeg2, Mpeg4 ]
+    [ Av1, H264, X264, X265, XviD, DivX, Mpeg2, Mpeg4 ]
 
 
 decoder : Decoder VideoCodec
@@ -28,6 +29,9 @@ decoder =
         |> Decode.andThen
             (\string ->
                 case string of
+                    "AV1" ->
+                        Decode.succeed Av1
+
                     "H264" ->
                         Decode.succeed H264
 
@@ -59,6 +63,9 @@ decoder =
 toString : VideoCodec -> String
 toString enum____ =
     case enum____ of
+        Av1 ->
+            "AV1"
+
         H264 ->
             "H264"
 
@@ -95,6 +102,9 @@ This can be useful for generating Strings to use for <select> menus to check whi
 fromString : String -> Maybe VideoCodec
 fromString enumString____ =
     case enumString____ of
+        "AV1" ->
+            Just Av1
+
         "H264" ->
             Just H264
 

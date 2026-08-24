@@ -28,6 +28,37 @@ import Magnes.Api.ScalarCodecs
 import Magnes.Api.Union
 
 
+buildAuthObjectActionInput :
+    AuthObjectActionInputRequiredFields
+    -> AuthObjectActionInput
+buildAuthObjectActionInput required____ =
+    { namespace = required____.namespace, object = required____.object, action = required____.action }
+
+
+type alias AuthObjectActionInputRequiredFields =
+    { namespace : String
+    , object : String
+    , action : String
+    }
+
+
+{-| Type for the AuthObjectActionInput input object.
+-}
+type alias AuthObjectActionInput =
+    { namespace : String
+    , object : String
+    , action : String
+    }
+
+
+{-| Encode a AuthObjectActionInput into a value that can be used as an argument.
+-}
+encodeAuthObjectActionInput : AuthObjectActionInput -> Value
+encodeAuthObjectActionInput input____ =
+    Encode.maybeObject
+        [ ( "namespace", Encode.string input____.namespace |> Just ), ( "object", Encode.string input____.object |> Just ), ( "action", Encode.string input____.action |> Just ) ]
+
+
 buildContentTypeFacetInput :
     (ContentTypeFacetInputOptionalFields -> ContentTypeFacetInputOptionalFields)
     -> ContentTypeFacetInput
@@ -60,6 +91,46 @@ encodeContentTypeFacetInput : ContentTypeFacetInput -> Value
 encodeContentTypeFacetInput input____ =
     Encode.maybeObject
         [ ( "aggregate", Encode.bool |> Encode.optional input____.aggregate ), ( "filter", (Encode.enum Magnes.Api.Enum.ContentType.toString |> Encode.maybe |> Encode.list) |> Encode.optional input____.filter ) ]
+
+
+buildCreateAPIKeyInput :
+    CreateAPIKeyInputRequiredFields
+    -> (CreateAPIKeyInputOptionalFields -> CreateAPIKeyInputOptionalFields)
+    -> CreateAPIKeyInput
+buildCreateAPIKeyInput required____ fillOptionals____ =
+    let
+        optionals____ =
+            fillOptionals____
+                { expiry = Absent }
+    in
+    { name = required____.name, permissions = required____.permissions, expiry = optionals____.expiry }
+
+
+type alias CreateAPIKeyInputRequiredFields =
+    { name : String
+    , permissions : List AuthObjectActionInput
+    }
+
+
+type alias CreateAPIKeyInputOptionalFields =
+    { expiry : OptionalArgument Magnes.Api.ScalarCodecs.Duration }
+
+
+{-| Type for the CreateAPIKeyInput input object.
+-}
+type alias CreateAPIKeyInput =
+    { name : String
+    , permissions : List AuthObjectActionInput
+    , expiry : OptionalArgument Magnes.Api.ScalarCodecs.Duration
+    }
+
+
+{-| Encode a CreateAPIKeyInput into a value that can be used as an argument.
+-}
+encodeCreateAPIKeyInput : CreateAPIKeyInput -> Value
+encodeCreateAPIKeyInput input____ =
+    Encode.maybeObject
+        [ ( "name", Encode.string input____.name |> Just ), ( "permissions", (encodeAuthObjectActionInput |> Encode.list) input____.permissions |> Just ), ( "expiry", (Magnes.Api.ScalarCodecs.codecs |> Magnes.Api.Scalar.unwrapEncoder .codecDuration) |> Encode.optional input____.expiry ) ]
 
 
 buildGenreFacetInput :
@@ -98,6 +169,42 @@ encodeGenreFacetInput input____ =
         [ ( "aggregate", Encode.bool |> Encode.optional input____.aggregate ), ( "logic", Encode.enum Magnes.Api.Enum.FacetLogic.toString |> Encode.optional input____.logic ), ( "filter", (Encode.string |> Encode.list) |> Encode.optional input____.filter ) ]
 
 
+buildInviteInput :
+    (InviteInputOptionalFields -> InviteInputOptionalFields)
+    -> InviteInput
+buildInviteInput fillOptionals____ =
+    let
+        optionals____ =
+            fillOptionals____
+                { email = Absent, role = Absent, expiry = Absent }
+    in
+    { email = optionals____.email, role = optionals____.role, expiry = optionals____.expiry }
+
+
+type alias InviteInputOptionalFields =
+    { email : OptionalArgument String
+    , role : OptionalArgument String
+    , expiry : OptionalArgument Magnes.Api.ScalarCodecs.Duration
+    }
+
+
+{-| Type for the InviteInput input object.
+-}
+type alias InviteInput =
+    { email : OptionalArgument String
+    , role : OptionalArgument String
+    , expiry : OptionalArgument Magnes.Api.ScalarCodecs.Duration
+    }
+
+
+{-| Encode a InviteInput into a value that can be used as an argument.
+-}
+encodeInviteInput : InviteInput -> Value
+encodeInviteInput input____ =
+    Encode.maybeObject
+        [ ( "email", Encode.string |> Encode.optional input____.email ), ( "role", Encode.string |> Encode.optional input____.role ), ( "expiry", (Magnes.Api.ScalarCodecs.codecs |> Magnes.Api.Scalar.unwrapEncoder .codecDuration) |> Encode.optional input____.expiry ) ]
+
+
 buildLanguageFacetInput :
     (LanguageFacetInputOptionalFields -> LanguageFacetInputOptionalFields)
     -> LanguageFacetInput
@@ -130,6 +237,106 @@ encodeLanguageFacetInput : LanguageFacetInput -> Value
 encodeLanguageFacetInput input____ =
     Encode.maybeObject
         [ ( "aggregate", Encode.bool |> Encode.optional input____.aggregate ), ( "filter", (Encode.enum Magnes.Api.Enum.Language.toString |> Encode.list) |> Encode.optional input____.filter ) ]
+
+
+buildListInvitationsInput :
+    (ListInvitationsInputOptionalFields -> ListInvitationsInputOptionalFields)
+    -> ListInvitationsInput
+buildListInvitationsInput fillOptionals____ =
+    let
+        optionals____ =
+            fillOptionals____
+                { pagination = Absent }
+    in
+    { pagination = optionals____.pagination }
+
+
+type alias ListInvitationsInputOptionalFields =
+    { pagination : OptionalArgument PaginationInput }
+
+
+{-| Type for the ListInvitationsInput input object.
+-}
+type alias ListInvitationsInput =
+    { pagination : OptionalArgument PaginationInput }
+
+
+{-| Encode a ListInvitationsInput into a value that can be used as an argument.
+-}
+encodeListInvitationsInput : ListInvitationsInput -> Value
+encodeListInvitationsInput input____ =
+    Encode.maybeObject
+        [ ( "pagination", encodePaginationInput |> Encode.optional input____.pagination ) ]
+
+
+buildListUsersInput :
+    (ListUsersInputOptionalFields -> ListUsersInputOptionalFields)
+    -> ListUsersInput
+buildListUsersInput fillOptionals____ =
+    let
+        optionals____ =
+            fillOptionals____
+                { pagination = Absent, usernameLike = Absent }
+    in
+    { pagination = optionals____.pagination, usernameLike = optionals____.usernameLike }
+
+
+type alias ListUsersInputOptionalFields =
+    { pagination : OptionalArgument PaginationInput
+    , usernameLike : OptionalArgument String
+    }
+
+
+{-| Type for the ListUsersInput input object.
+-}
+type alias ListUsersInput =
+    { pagination : OptionalArgument PaginationInput
+    , usernameLike : OptionalArgument String
+    }
+
+
+{-| Encode a ListUsersInput into a value that can be used as an argument.
+-}
+encodeListUsersInput : ListUsersInput -> Value
+encodeListUsersInput input____ =
+    Encode.maybeObject
+        [ ( "pagination", encodePaginationInput |> Encode.optional input____.pagination ), ( "usernameLike", Encode.string |> Encode.optional input____.usernameLike ) ]
+
+
+buildPaginationInput :
+    (PaginationInputOptionalFields -> PaginationInputOptionalFields)
+    -> PaginationInput
+buildPaginationInput fillOptionals____ =
+    let
+        optionals____ =
+            fillOptionals____
+                { limit = Absent, page = Absent, offset = Absent }
+    in
+    { limit = optionals____.limit, page = optionals____.page, offset = optionals____.offset }
+
+
+type alias PaginationInputOptionalFields =
+    { limit : OptionalArgument Int
+    , page : OptionalArgument Int
+    , offset : OptionalArgument Int
+    }
+
+
+{-| Type for the PaginationInput input object.
+-}
+type alias PaginationInput =
+    { limit : OptionalArgument Int
+    , page : OptionalArgument Int
+    , offset : OptionalArgument Int
+    }
+
+
+{-| Encode a PaginationInput into a value that can be used as an argument.
+-}
+encodePaginationInput : PaginationInput -> Value
+encodePaginationInput input____ =
+    Encode.maybeObject
+        [ ( "limit", Encode.int |> Encode.optional input____.limit ), ( "page", Encode.int |> Encode.optional input____.page ), ( "offset", Encode.int |> Encode.optional input____.offset ) ]
 
 
 buildQueueEnqueueReprocessTorrentsBatchInput :
@@ -443,6 +650,49 @@ encodeQueuePurgeJobsInput : QueuePurgeJobsInput -> Value
 encodeQueuePurgeJobsInput input____ =
     Encode.maybeObject
         [ ( "queues", (Encode.string |> Encode.list) |> Encode.optional input____.queues ), ( "statuses", (Encode.enum Magnes.Api.Enum.QueueJobStatus.toString |> Encode.list) |> Encode.optional input____.statuses ) ]
+
+
+buildRegisterInput :
+    RegisterInputRequiredFields
+    -> (RegisterInputOptionalFields -> RegisterInputOptionalFields)
+    -> RegisterInput
+buildRegisterInput required____ fillOptionals____ =
+    let
+        optionals____ =
+            fillOptionals____
+                { invitationCode = Absent, email = Absent }
+    in
+    { invitationCode = optionals____.invitationCode, username = required____.username, password = required____.password, email = optionals____.email }
+
+
+type alias RegisterInputRequiredFields =
+    { username : String
+    , password : String
+    }
+
+
+type alias RegisterInputOptionalFields =
+    { invitationCode : OptionalArgument String
+    , email : OptionalArgument String
+    }
+
+
+{-| Type for the RegisterInput input object.
+-}
+type alias RegisterInput =
+    { invitationCode : OptionalArgument String
+    , username : String
+    , password : String
+    , email : OptionalArgument String
+    }
+
+
+{-| Encode a RegisterInput into a value that can be used as an argument.
+-}
+encodeRegisterInput : RegisterInput -> Value
+encodeRegisterInput input____ =
+    Encode.maybeObject
+        [ ( "invitationCode", Encode.string |> Encode.optional input____.invitationCode ), ( "username", Encode.string input____.username |> Just ), ( "password", Encode.string input____.password |> Just ), ( "email", Encode.string |> Encode.optional input____.email ) ]
 
 
 buildReleaseYearFacetInput :
