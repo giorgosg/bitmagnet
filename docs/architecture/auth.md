@@ -21,6 +21,7 @@ to fx because `next` assembles it through a plugin registry this lineage does no
 | --------------------------- | -------------------------------------------------------------------- |
 | `auth/authconfig`           | The config struct, its validation bounds, and `AnonymousPermissions` |
 | `auth/authfx`               | fx wiring, and the bootstrap worker that mints the first invitation  |
+| `auth/browser_session`      | Issues and expires the secure browser credential cookie              |
 | `auth/identity`             | Resolving a credential to an `Identity` — the authenticator chain    |
 | `auth/rbac`                 | Permissions, roles, object actions; casbin behind a repository       |
 | `auth/user`                 | Accounts, registration, login, password rules, the login throttle    |
@@ -157,6 +158,10 @@ than a mutex, because the processes racing here do not share memory.
   algorithm a token nominates, and checks the issuer it emits — which costs nothing while
   the signing key is unique to the instance, and everything when an operator reuses one
   across services.
+- **Browser session cookies** carry the same JWT without returning it through GraphQL.
+  `loginBrowser` reuses the User login path, then the authentication-owned cookie service
+  writes the credential with the configured `__Secure-` name, `/graphql` path, and strict
+  browser-only attributes. `logoutBrowser` expires the identical name and path.
 - **API keys** are `secret(12 random bytes) || uint32 id`, base62-encoded to 22 chars,
   bcrypt-hashed in the database. Two fixed defects are recorded in the comments: a
   decoded-length formula borrowed from base32 that rejected one key in 256, and a dropped

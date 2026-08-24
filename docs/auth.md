@@ -24,22 +24,36 @@ than issuing another — and safe to run as multiple replicas.
 
 ## Configuration
 
-| Key                              | Default        |                                                                   |
-| -------------------------------- | -------------- | ----------------------------------------------------------------- |
-| `auth.anonymous_access`          | `true`         | `false` enables auth; `true` grants anon all but auth admin       |
-| `auth.jwt_secret`                | _(none)_       | random per process when unset, so tokens do not survive a restart |
-| `auth.jwt_duration`              | `24h`          |                                                                   |
-| `auth.rbac_cache_ttl`            | `1m`           | how long a revoked permission stays in force                      |
-| `auth.invitation_required`       | `true`         |                                                                   |
-| `auth.email_required`            | `false`        |                                                                   |
-| `auth.email_verification`        | `false`        | inert — see Known gaps                                            |
-| `auth.password_min_entropy`      | `70`           |                                                                   |
-| `auth.password_hashing_cost`     | bcrypt default | applies to registration _and_ password changes                    |
-| `auth.login_requests_per_minute` | `30`           | per bucket, not per process                                       |
-| `auth.login_request_burst`       | `5`            | per bucket, not per process                                       |
+| Key                              | Default              |                                                                   |
+| -------------------------------- | -------------------- | ----------------------------------------------------------------- |
+| `auth.anonymous_access`          | `true`               | `false` enables auth; `true` grants anon all but auth admin       |
+| `auth.jwt_secret`                | _(none)_             | random per process when unset, so tokens do not survive a restart |
+| `auth.jwt_duration`              | `24h`                |                                                                   |
+| `auth.browser_cookie_name`       | `__Secure-bitmagnet` | must retain the `__Secure-` prefix                                |
+| `auth.rbac_cache_ttl`            | `1m`                 | how long a revoked permission stays in force                      |
+| `auth.invitation_required`       | `true`               |                                                                   |
+| `auth.email_required`            | `false`              |                                                                   |
+| `auth.email_verification`        | `false`              | inert — see Known gaps                                            |
+| `auth.password_min_entropy`      | `70`                 |                                                                   |
+| `auth.password_hashing_cost`     | bcrypt default       | applies to registration _and_ password changes                    |
+| `auth.login_requests_per_minute` | `30`                 | per bucket, not per process                                       |
+| `auth.login_request_burst`       | `5`                  | per bucket, not per process                                       |
 
 **Set `auth.jwt_secret` if you do not want every restart to log everyone out.** Unset, it
 is generated per process.
+
+## Browser login
+
+Same-origin browser clients can call `self.loginBrowser` to receive the session credential
+as an `HttpOnly`, `Secure`, `SameSite=Strict` cookie on `/graphql`. The mutation returns no
+credential or Identity snapshot; query `self.identity` after it succeeds. `self.logoutBrowser`
+expires the same cookie and succeeds even when the browser has no usable credential.
+
+The cookie name defaults to `__Secure-bitmagnet` and is configurable through
+`auth.browser_cookie_name`, but the `__Secure-` prefix is required. Its expiry follows
+`auth.jwt_duration`. Because browsers reject `Secure` cookies over plain HTTP, browser login
+requires HTTPS in development as well as production. Bearer login remains available through
+`self.login` for clients that manage their own credential.
 
 **Every bound in that table is enforced, and they are load-bearing.**
 `login_requests_per_minute: 0` reaches `rate.Every(time.Minute / 0)` and takes the process

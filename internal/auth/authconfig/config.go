@@ -24,6 +24,9 @@ type Config struct {
 	// A non-positive duration issues tokens that are already expired, which is
 	// a lockout rather than a strict setting.
 	JWTDuration time.Duration `validate:"gt=0"`
+	// BrowserCookieName names the HttpOnly credential used by same-origin web
+	// clients. The __Secure- prefix requires HTTPS and forbids insecure cookies.
+	BrowserCookieName string `validate:"startswith=__Secure-"`
 
 	RBACCacheTTL time.Duration
 
@@ -53,6 +56,7 @@ func NewDefaultConfig() Config {
 	return Config{
 		AnonymousAccess:        true,
 		JWTDuration:            time.Hour * 24,
+		BrowserCookieName:      "__Secure-bitmagnet",
 		RBACCacheTTL:           time.Minute,
 		InvitationRequired:     true,
 		EmailVerification:      false,

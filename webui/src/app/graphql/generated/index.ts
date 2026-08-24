@@ -660,6 +660,8 @@ export type SelfMutation = {
   createAPIKey: CreateApiKeyResult;
   deleteAPIKey?: Maybe<Scalars['Void']['output']>;
   login: LoginResult;
+  loginBrowser?: Maybe<Scalars['Void']['output']>;
+  logoutBrowser?: Maybe<Scalars['Void']['output']>;
   register: RegisterResult;
 };
 
@@ -675,6 +677,12 @@ export type SelfMutationDeleteApiKeyArgs = {
 
 
 export type SelfMutationLoginArgs = {
+  password: Scalars['String']['input'];
+  username: Scalars['String']['input'];
+};
+
+
+export type SelfMutationLoginBrowserArgs = {
   password: Scalars['String']['input'];
   username: Scalars['String']['input'];
 };

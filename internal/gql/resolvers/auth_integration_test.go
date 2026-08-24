@@ -14,6 +14,7 @@ import (
 	"github.com/99designs/gqlgen/graphql/handler/transport"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/api_key"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/authconfig"
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/browser_session"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/http_auth"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/identity"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/jwt"
@@ -77,7 +78,7 @@ func newAuthTestServerWithConfig(
 	// These tests exercise the GraphQL auth path, not bcrypt's work factor.
 	values.PasswordHashingCost.Set(user.PasswordHashingCost(bcrypt.MinCost))
 
-	jwtService := jwt.NewService(jwt.Secret("test-secret"), jwt.Duration(time.Hour))
+	jwtService := jwt.NewService(jwt.Secret("test-secret"), jwt.Duration(cfg.JWTDuration))
 	userService := user.NewService(
 		provider,
 		jwtService,
@@ -125,6 +126,7 @@ func newAuthTestServerWithConfig(
 			UserService:   userService,
 			APIKeyService: apiKeyService,
 			RBACService:   rbacService,
+			BrowserCookie: browser_session.NewCookie(cfg),
 		},
 		Directives: gql.DirectiveRoot{
 			Auth: gqlauth.NewDirective(),
@@ -223,6 +225,18 @@ type createAPIKeyResponse struct {
 func query(t *testing.T, server *httptest.Server, token, q string) gqlResponse {
 	t.Helper()
 
+	res, _ := queryWithHeaders(t, server, token, q)
+
+	return res
+}
+
+func queryWithHeaders(
+	t *testing.T,
+	server *httptest.Server,
+	token, q string,
+) (gqlResponse, http.Header) {
+	t.Helper()
+
 	body, err := json.Marshal(map[string]string{"query": q})
 	require.NoError(t, err)
 
@@ -249,7 +263,7 @@ func query(t *testing.T, server *httptest.Server, token, q string) gqlResponse {
 
 	require.NoError(t, json.NewDecoder(res.Body).Decode(&decoded))
 
-	return decoded
+	return decoded, res.Header
 }
 
 func requireNoGqlErrors(t *testing.T, res gqlResponse) {
@@ -279,10 +293,11 @@ func TestAuthRegisterLoginIdentityFlow(t *testing.T) {
 		string(registered.Data),
 	)
 
-	loggedIn := query(t, server, "", `mutation { self { login(
+	loggedIn, headers := queryWithHeaders(t, server, "", `mutation { self { login(
 		username: "admin", password: "`+password+`"
 	) { token user { username role } permissions { objectAction { namespace object action } } } } }`)
 	requireNoGqlErrors(t, loggedIn)
+	assert.Empty(t, headers.Values("Set-Cookie"), "bearer login must not change its credential contract")
 
 	var login loginResponse
 
@@ -302,6 +317,83 @@ func TestAuthRegisterLoginIdentityFlow(t *testing.T) {
 	require.NotNil(t, self.Self.Identity.User, "the bearer token must resolve to a user")
 	assert.Equal(t, "admin", self.Self.Identity.User.Username)
 	assert.Equal(t, "admin", self.Self.Identity.User.Role)
+}
+
+func TestBrowserLoginIssuesSecureGraphQLCookieWithoutCredentialPayload(t *testing.T) {
+	t.Parallel()
+
+	cfg := authconfig.NewDefaultConfig()
+	cfg.JWTDuration = time.Hour
+	server, code := newAuthTestServerWithConfig(t, cfg)
+
+	const password = "correct-horse-battery-staple-99"
+
+	requireNoGqlErrors(t, query(t, server, "", `mutation { self { register(input: {
+		invitationCode: "`+code+`", username: "admin", password: "`+password+`"
+	}) { user { id } } } }`))
+
+	loggedIn, headers := queryWithHeaders(t, server, "", `mutation { self { loginBrowser(
+		username: "admin", password: "`+password+`"
+	) } }`)
+	requireNoGqlErrors(t, loggedIn)
+	assert.JSONEq(t, `{"self":{"loginBrowser":null}}`, string(loggedIn.Data))
+
+	cookies := (&http.Response{Header: headers}).Cookies()
+	require.Len(t, cookies, 1)
+	assert.Equal(t, "__Secure-bitmagnet", cookies[0].Name)
+	assert.NotEmpty(t, cookies[0].Value)
+	assert.Equal(t, "/graphql", cookies[0].Path)
+	assert.Empty(t, cookies[0].Domain)
+	assert.True(t, cookies[0].HttpOnly)
+	assert.True(t, cookies[0].Secure)
+	assert.Equal(t, http.SameSiteStrictMode, cookies[0].SameSite)
+	assert.WithinDuration(t, time.Now().Add(time.Hour), cookies[0].Expires, 5*time.Second)
+}
+
+func TestBrowserLoginFailureDoesNotIssueCookie(t *testing.T) {
+	t.Parallel()
+
+	cfg := authconfig.NewDefaultConfig()
+	cfg.BrowserCookieName = "__Secure-custom-browser"
+	server, code := newAuthTestServerWithConfig(t, cfg)
+
+	const password = "correct-horse-battery-staple-99"
+
+	requireNoGqlErrors(t, query(t, server, "", `mutation { self { register(input: {
+		invitationCode: "`+code+`", username: "admin", password: "`+password+`"
+	}) { user { id } } } }`))
+
+	failed, headers := queryWithHeaders(t, server, "", `mutation { self { loginBrowser(
+		username: "admin", password: "wrong-password"
+	) } }`)
+	require.NotEmpty(t, failed.Errors)
+	assert.Empty(t, headers.Values("Set-Cookie"))
+}
+
+func TestBrowserLogoutIdempotentlyExpiresConfiguredCookie(t *testing.T) {
+	t.Parallel()
+
+	cfg := authconfig.NewDefaultConfig()
+	cfg.BrowserCookieName = "__Secure-custom-browser"
+	server, _ := newAuthTestServerWithConfig(t, cfg)
+
+	for range 2 {
+		loggedOut, headers := queryWithHeaders(t, server, "", `mutation { self { logoutBrowser } }`)
+		requireNoGqlErrors(t, loggedOut)
+		assert.JSONEq(t, `{"self":{"logoutBrowser":null}}`, string(loggedOut.Data))
+
+		cookies := (&http.Response{Header: headers}).Cookies()
+		require.Len(t, cookies, 1)
+		assert.Equal(t, cfg.BrowserCookieName, cookies[0].Name)
+		assert.Empty(t, cookies[0].Value)
+		assert.Equal(t, "/graphql", cookies[0].Path)
+		assert.Empty(t, cookies[0].Domain)
+		assert.True(t, cookies[0].HttpOnly)
+		assert.True(t, cookies[0].Secure)
+		assert.Equal(t, http.SameSiteStrictMode, cookies[0].SameSite)
+		assert.Equal(t, -1, cookies[0].MaxAge)
+		assert.True(t, cookies[0].Expires.Before(time.Now()))
+	}
 }
 
 // Regression guard for the rbac.PutRole revocation defect: an empty object

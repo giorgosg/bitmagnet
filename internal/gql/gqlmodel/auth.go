@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/api_key"
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/browser_session"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/rbac"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/user"
 	gqlauth "github.com/bitmagnet-io/bitmagnet/internal/gql/auth"
@@ -70,6 +71,7 @@ type SelfMutation struct {
 	UserService   user.Service
 	APIKeyService api_key.Service
 	RBACService   rbac.Service
+	BrowserCookie browser_session.Cookie
 }
 
 func (m SelfMutation) Register(ctx context.Context, input gen.RegisterInput) (gen.RegisterResult, error) {
@@ -106,6 +108,19 @@ func (m SelfMutation) Login(ctx context.Context, username, password string) (gen
 		User:        result.User,
 		Permissions: PermissionsToGql(roleInfo.Permissions),
 	}, nil
+}
+
+func (m SelfMutation) LoginBrowser(ctx context.Context, username, password string) (*string, error) {
+	result, err := m.UserService.Login(ctx, username, password)
+	if err != nil {
+		return nil, err
+	}
+
+	return nil, m.BrowserCookie.Issue(ctx, result.Token)
+}
+
+func (m SelfMutation) LogoutBrowser(ctx context.Context) (*string, error) {
+	return nil, m.BrowserCookie.Expire(ctx)
 }
 
 func (m SelfMutation) CreateAPIKey(ctx context.Context, input gen.CreateAPIKeyInput) (gen.CreateAPIKeyResult, error) {

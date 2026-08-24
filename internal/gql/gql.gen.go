@@ -341,10 +341,12 @@ type ComplexityRoot struct {
 	}
 
 	SelfMutation struct {
-		CreateAPIKey func(childComplexity int, input gen.CreateAPIKeyInput) int
-		DeleteAPIKey func(childComplexity int, id int) int
-		Login        func(childComplexity int, username string, password string) int
-		Register     func(childComplexity int, input gen.RegisterInput) int
+		CreateAPIKey  func(childComplexity int, input gen.CreateAPIKeyInput) int
+		DeleteAPIKey  func(childComplexity int, id int) int
+		Login         func(childComplexity int, username string, password string) int
+		LoginBrowser  func(childComplexity int, username string, password string) int
+		LogoutBrowser func(childComplexity int) int
+		Register      func(childComplexity int, input gen.RegisterInput) int
 	}
 
 	SelfQuery struct {
@@ -1753,6 +1755,23 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.SelfMutation.Login(childComplexity, args["username"].(string), args["password"].(string)), true
+	case "SelfMutation.loginBrowser":
+		if e.ComplexityRoot.SelfMutation.LoginBrowser == nil {
+			break
+		}
+
+		args, err := ec.field_SelfMutation_loginBrowser_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.SelfMutation.LoginBrowser(childComplexity, args["username"].(string), args["password"].(string)), true
+	case "SelfMutation.logoutBrowser":
+		if e.ComplexityRoot.SelfMutation.LogoutBrowser == nil {
+			break
+		}
+
+		return e.ComplexityRoot.SelfMutation.LogoutBrowser(childComplexity), true
 	case "SelfMutation.register":
 		if e.ComplexityRoot.SelfMutation.Register == nil {
 			break
@@ -3386,6 +3405,8 @@ scalar Year
 type SelfMutation {
   register(input: RegisterInput!): RegisterResult!
   login(username: String!, password: String!): LoginResult!
+  loginBrowser(username: String!, password: String!): Void
+  logoutBrowser: Void
   createAPIKey(input: CreateAPIKeyInput!): CreateAPIKeyResult!
   deleteAPIKey(id: Int!): Void
 }
@@ -4168,6 +4189,10 @@ func (ec *executionContext) childFields_SelfMutation(ctx context.Context, field 
 		return ec.fieldContext_SelfMutation_register(ctx, field)
 	case "login":
 		return ec.fieldContext_SelfMutation_login(ctx, field)
+	case "loginBrowser":
+		return ec.fieldContext_SelfMutation_loginBrowser(ctx, field)
+	case "logoutBrowser":
+		return ec.fieldContext_SelfMutation_logoutBrowser(ctx, field)
 	case "createAPIKey":
 		return ec.fieldContext_SelfMutation_createAPIKey(ctx, field)
 	case "deleteAPIKey":
@@ -4963,6 +4988,28 @@ func (ec *executionContext) field_SelfMutation_deleteAPIKey_args(ctx context.Con
 		return nil, err
 	}
 	args["id"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_SelfMutation_loginBrowser_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "username",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNString2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["username"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "password",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNString2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["password"] = arg1
 	return args, nil
 }
 
@@ -10087,6 +10134,73 @@ func (ec *executionContext) fieldContext_SelfMutation_login(ctx context.Context,
 		return fc, err
 	}
 	return fc, nil
+}
+
+func (ec *executionContext) _SelfMutation_loginBrowser(ctx context.Context, field graphql.CollectedField, obj *gqlmodel.SelfMutation) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_SelfMutation_loginBrowser(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return obj.LoginBrowser(ctx, fc.Args["username"].(string), fc.Args["password"].(string))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOVoid2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_SelfMutation_loginBrowser(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SelfMutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Void does not have child fields")
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_SelfMutation_loginBrowser_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SelfMutation_logoutBrowser(ctx context.Context, field graphql.CollectedField, obj *gqlmodel.SelfMutation) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_SelfMutation_logoutBrowser(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.LogoutBrowser(ctx)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOVoid2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_SelfMutation_logoutBrowser(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("SelfMutation", field, true, false, errors.New("field of type Void does not have child fields"))
 }
 
 func (ec *executionContext) _SelfMutation_createAPIKey(ctx context.Context, field graphql.CollectedField, obj *gqlmodel.SelfMutation) (ret graphql.Marshaler) {
@@ -19188,6 +19302,82 @@ func (ec *executionContext) _SelfMutation(ctx context.Context, sel ast.Selection
 				}()
 				res = ec._SelfMutation_login(ctx, field, obj)
 				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "loginBrowser":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._SelfMutation_loginBrowser(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "logoutBrowser":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._SelfMutation_logoutBrowser(ctx, field, obj)
+				if res == graphql.RequiredNull {
 					atomic.AddUint32(&fs.Invalids, 1)
 				}
 				return res

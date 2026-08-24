@@ -7,6 +7,8 @@ type SelfQuery {
 type SelfMutation {
   register(input: RegisterInput!): RegisterResult!
   login(username: String!, password: String!): LoginResult!
+  loginBrowser(username: String!, password: String!): Void
+  logoutBrowser: Void
   createAPIKey(input: CreateAPIKeyInput!): CreateAPIKeyResult!
   deleteAPIKey(id: Int!): Void
 }

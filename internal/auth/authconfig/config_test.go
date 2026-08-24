@@ -89,6 +89,12 @@ func TestEmailVerificationDefaultsOff(t *testing.T) {
 	assert.False(t, authconfig.NewDefaultConfig().EmailVerification)
 }
 
+func TestBrowserCookieNameDefaultsToSecurePrefix(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "__Secure-bitmagnet", authconfig.NewDefaultConfig().BrowserCookieName)
+}
+
 // next declares these parameters with bounds; expressing them as a plain struct
 // dropped the bounds, leaving values that disable a control or crash the
 // process reachable from a config file.
@@ -127,6 +133,10 @@ func TestConfigRejectsValuesNextWouldReject(t *testing.T) {
 			// Issues tokens that have already expired.
 			"zero jwt duration",
 			func(c *authconfig.Config) { c.JWTDuration = 0 },
+		},
+		{
+			"browser cookie without secure prefix",
+			func(c *authconfig.Config) { c.BrowserCookieName = "bitmagnet" },
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
