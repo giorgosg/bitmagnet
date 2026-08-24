@@ -12,6 +12,7 @@ import Graphql.Http
 import Html exposing (Attribute, Html, a, button, div, form, h1, header, input, main_, p, span, text)
 import Html.Attributes exposing (attribute, class, classList, href, id, placeholder, spellcheck, type_, value)
 import Html.Events exposing (on, onClick, onInput, onSubmit, stopPropagationOn)
+import Identity
 import InfiniteList
 import Json.Decode as Decode exposing (Value)
 import Magnes.Api.Enum.ContentType as ContentType
@@ -53,6 +54,8 @@ type alias Model =
     , apiUrl : String
     , basePath : Route.BasePath
     , route : Route
+    , identity : Identity.Identity
+    , identityEpoch : Int
     , field : String
     , results : Results
     , infiniteList : InfiniteList.Model
@@ -197,13 +200,15 @@ init flags url key =
         route =
             Route.fromUrl basePath url
 
-        ( results, cmd ) =
-            load flags.apiUrl 0 route
+        results =
+            pendingResults route
     in
     ( { key = key
       , apiUrl = flags.apiUrl
       , basePath = basePath
       , route = route
+      , identity = Identity.Unknown
+      , identityEpoch = 0
       , field = fieldFor route
       , results = results
       , infiniteList = InfiniteList.init
@@ -214,7 +219,7 @@ init flags url key =
       , typing = 0
       }
     , Cmd.batch
-        [ cmd
+        [ Identity.fetch flags.apiUrl (GotIdentity 0)
         , Task.perform (\vp -> Resized (round vp.viewport.height)) Browser.Dom.getViewport
         , Task.perform GotZone Time.here
         ]
@@ -245,6 +250,7 @@ subscriptions : Model -> Sub Msg
 subscriptions _ =
     Sub.batch
         [ Browser.Events.onResize (\_ height -> Resized height)
+        , Browser.Events.onVisibilityChange VisibilityChanged
         , authenticationChanges (\_ -> AuthenticationChanged)
         ]
 
@@ -278,6 +284,8 @@ type Msg
     | ToggleFolder String String
     | GotFiles String (Result (Graphql.Http.Error Bitmagnet.FileList) Bitmagnet.FileList)
     | GotResults Int (Result (Graphql.Http.Error Page) Page)
+    | GotIdentity Int (Result (Graphql.Http.Error Identity.Identity) Identity.Identity)
+    | VisibilityChanged Browser.Events.Visibility
     | AuthenticationChangedHere
     | AuthenticationChanged
     | Ignored
@@ -290,26 +298,41 @@ update msg model =
             ( model, Cmd.none )
 
         AuthenticationChanged ->
-            let
-                epoch =
-                    model.epoch + 1
-
-                ( results, cmd ) =
-                    load model.apiUrl epoch model.route
-            in
-            ( { model
-                | results = results
-                , epoch = epoch
-                , infiniteList = InfiniteList.init
-              }
-            , Cmd.batch [ cmd, scrollListToTop ]
-            )
+            beginIdentityRefresh model
 
         AuthenticationChangedHere ->
             -- Login and logout will dispatch this after bitmagnet confirms the mutation.
             -- Keeping local state updates in those workflows avoids bouncing our own
             -- notification back through the channel.
-            ( model, authenticationChanged () )
+            let
+                ( refreshing, refresh ) =
+                    beginIdentityRefresh model
+            in
+            ( refreshing, Cmd.batch [ authenticationChanged (), refresh ] )
+
+        VisibilityChanged Browser.Events.Visible ->
+            ( model, Identity.fetch model.apiUrl (GotIdentity model.identityEpoch) )
+
+        VisibilityChanged Browser.Events.Hidden ->
+            ( model, Cmd.none )
+
+        GotIdentity identityEpoch result ->
+            if identityEpoch /= model.identityEpoch then
+                ( model, Cmd.none )
+
+            else
+                case result of
+                    Err error ->
+                        let
+                            message =
+                                Bitmagnet.errorToString error
+                        in
+                        ( { model | identity = Identity.Failed message, results = Failed message }
+                        , Cmd.none
+                        )
+
+                    Ok identity ->
+                        identityResolved identity model
 
         LinkClicked (Browser.Internal url) ->
             case ( Route.fromUrl model.basePath url, model.route ) of
@@ -352,7 +375,7 @@ update msg model =
                         model.epoch + 1
 
                     ( results, cmd ) =
-                        load model.apiUrl epoch route
+                        loadWhenReady model.identity model.apiUrl epoch route
                 in
                 ( { model
                     | route = route
@@ -481,9 +504,13 @@ update msg model =
             )
 
         GotFiles rowId (Err error) ->
-            ( mapItem rowId (\item -> { item | files = FilesFailed (Bitmagnet.errorToString error) }) model
-            , Cmd.none
-            )
+            if Identity.isUnauthorized error then
+                beginIdentityRefresh model
+
+            else
+                ( mapItem rowId (\item -> { item | files = FilesFailed (Bitmagnet.errorToString error) }) model
+                , Cmd.none
+                )
 
         Scrolled event ->
             let
@@ -518,7 +545,11 @@ update msg model =
                                 fillViewport appended
 
                     Err error ->
-                        ( { model | results = Failed (Bitmagnet.errorToString error) }, Cmd.none )
+                        if Identity.isUnauthorized error then
+                            beginIdentityRefresh model
+
+                        else
+                            ( { model | results = Failed (Bitmagnet.errorToString error) }, Cmd.none )
 
 
 {-| The URL is the source of truth for what was searched, but not for what is in the box:
@@ -622,6 +653,91 @@ mapItems change model =
 
 
 -- FETCHING
+
+
+pendingResults : Route -> Results
+pendingResults route =
+    case route of
+        Route.NotFound ->
+            Blank
+
+        _ ->
+            Loading
+
+
+loadWhenReady : Identity.Identity -> String -> Int -> Route -> ( Results, Cmd Msg )
+loadWhenReady identity apiUrl epoch route =
+    case identity of
+        Identity.Unknown ->
+            ( pendingResults route, Cmd.none )
+
+        Identity.Failed message ->
+            ( Failed message, Cmd.none )
+
+        _ ->
+            load apiUrl epoch route
+
+
+beginIdentityRefresh : Model -> ( Model, Cmd Msg )
+beginIdentityRefresh model =
+    let
+        epoch =
+            model.epoch + 1
+
+        identityEpoch =
+            model.identityEpoch + 1
+    in
+    ( { model
+        | identity = Identity.Unknown
+        , identityEpoch = identityEpoch
+        , results = pendingResults model.route
+        , epoch = epoch
+        , infiniteList = InfiniteList.init
+      }
+    , Cmd.batch
+        [ Identity.fetch model.apiUrl (GotIdentity identityEpoch)
+        , scrollListToTop
+        ]
+    )
+
+
+identityResolved : Identity.Identity -> Model -> ( Model, Cmd Msg )
+identityResolved identity model =
+    case model.identity of
+        Identity.Unknown ->
+            let
+                ( results, cmd ) =
+                    loadWhenReady identity model.apiUrl model.epoch model.route
+            in
+            ( { model | identity = identity, results = results }, cmd )
+
+        Identity.Failed _ ->
+            let
+                ( results, cmd ) =
+                    loadWhenReady identity model.apiUrl model.epoch model.route
+            in
+            ( { model | identity = identity, results = results }, cmd )
+
+        previous ->
+            if previous == identity then
+                ( { model | identity = identity }, Cmd.none )
+
+            else
+                let
+                    epoch =
+                        model.epoch + 1
+
+                    ( results, cmd ) =
+                        loadWhenReady identity model.apiUrl epoch model.route
+                in
+                ( { model
+                    | identity = identity
+                    , results = results
+                    , epoch = epoch
+                    , infiniteList = InfiniteList.init
+                  }
+                , Cmd.batch [ cmd, scrollListToTop ]
+                )
 
 
 {-| What a route needs fetched, and the state to show until it arrives.
