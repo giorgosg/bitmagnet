@@ -66,7 +66,9 @@ review in [porting.md](porting.md) and a test seen **red**.
 
 ## In flight
 
-Nothing currently in flight.
+| PR                                                   | Change                                        | Downstream source | Verification note                                                         |
+| ---------------------------------------------------- | --------------------------------------------- | ----------------- | ------------------------------------------------------------------------- |
+| [#55](https://github.com/giorgosg/bitmagnet/pull/55) | Add stable GraphQL authentication error codes | local             | Error-code/metadata/redaction regressions observed red; full suite passed |
 
 ## The static review findings
 
