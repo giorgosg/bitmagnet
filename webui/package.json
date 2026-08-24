@@ -6,14 +6,16 @@
     "build": "elm make src/Main.elm --output=public/main.js",
     "build:optimize": "elm make src/Main.elm --optimize --output=public/main.js",
     "dev": "npm run build && node dev.js",
-    "format": "elm-format --yes src/*.elm src/Magnes/Api/ScalarCodecs.elm",
+    "format": "elm-format --yes src/*.elm src/Magnes/Api/ScalarCodecs.elm tests/*.elm",
+    "test": "elm-test",
     "codegen": "elm-graphql ${BITMAGNET_URL:-http://localhost:3333}/graphql --base Magnes.Api --output src"
   },
   "license": "MIT",
   "devDependencies": {
     "@dillonkearns/elm-graphql": "^4.3.2",
     "elm": "^0.19.2-0",
-    "elm-format": "^0.8.8"
+    "elm-format": "^0.8.8",
+    "elm-test": "^0.19.2-1"
   },
   "private": true
 }

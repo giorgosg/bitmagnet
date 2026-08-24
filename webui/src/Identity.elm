@@ -1,4 +1,4 @@
-module Identity exposing (Identity(..), ObjectAction, User, fetch, isUnauthorized, permissions)
+module Identity exposing (Identity(..), ObjectAction, User, can, fetch, graphql, isUnauthorized, permissions)
 
 {-| The canonical browser Identity comes from `self.identity`; the browser credential is
 an implementation detail owned by bitmagnet and never appears in this module.
@@ -124,6 +124,36 @@ permissions identity =
 
         Failed _ ->
             []
+
+
+{-| Construct the Object action used by browser GraphQL call sites. Other namespaces are
+kept intact when they arrive from the server because API-key workflows may present them.
+-}
+graphql : String -> String -> ObjectAction
+graphql object action =
+    { namespace = "graphql", object = object, action = action }
+
+
+{-| Permission checks control presentation only; bitmagnet remains authoritative. The
+server currently emits either a literal or `**` for each component. This deliberately
+does not implement a larger glob language until the server emits one: equality alone
+would reject the `admin` Role's `**/**/**`, while speculative wildcard syntax could grant
+more than the server does.
+-}
+can : ObjectAction -> Identity -> Bool
+can requested identity =
+    permissions identity
+        |> List.any
+            (\granted ->
+                componentMatches granted.namespace requested.namespace
+                    && componentMatches granted.object requested.object
+                    && componentMatches granted.action requested.action
+            )
+
+
+componentMatches : String -> String -> Bool
+componentMatches granted requested =
+    granted == "**" || granted == requested
 
 
 {-| Temporary compatibility with bitmagnet's string-only errors. Issue 08 replaces this

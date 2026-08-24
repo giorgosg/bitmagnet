@@ -443,21 +443,25 @@ update msg model =
             )
 
         ToggleFiles rowId ->
-            case itemById rowId model of
-                Just item ->
-                    case item.files of
-                        Unopened ->
-                            ( mapItem rowId (\i -> { i | files = Fetching }) model
-                            , Bitmagnet.files item.row.infoHash
-                                |> Bitmagnet.queryRequest model.apiUrl
-                                |> Graphql.Http.send (GotFiles rowId)
-                            )
+            if not (Identity.can (Identity.graphql "torrent" "query") model.identity) then
+                ( model, Cmd.none )
 
-                        _ ->
-                            ( mapItem rowId (\i -> { i | files = Unopened }) model, Cmd.none )
+            else
+                case itemById rowId model of
+                    Just item ->
+                        case item.files of
+                            Unopened ->
+                                ( mapItem rowId (\i -> { i | files = Fetching }) model
+                                , Bitmagnet.files item.row.infoHash
+                                    |> Bitmagnet.queryRequest model.apiUrl
+                                    |> Graphql.Http.send (GotFiles rowId)
+                                )
 
-                Nothing ->
-                    ( model, Cmd.none )
+                            _ ->
+                                ( mapItem rowId (\i -> { i | files = Unopened }) model, Cmd.none )
+
+                    Nothing ->
+                        ( model, Cmd.none )
 
         GotFiles rowId (Ok fileList) ->
             ( mapItem rowId
@@ -675,7 +679,24 @@ loadWhenReady identity apiUrl epoch route =
             ( Failed message, Cmd.none )
 
         _ ->
-            load apiUrl epoch route
+            if routeNeedsSearch route && not (Identity.can (Identity.graphql "torrentContent" "query") identity) then
+                ( Failed "Your Identity does not permit searching torrent content.", Cmd.none )
+
+            else
+                load apiUrl epoch route
+
+
+routeNeedsSearch : Route -> Bool
+routeNeedsSearch route =
+    case route of
+        Route.Search _ ->
+            True
+
+        Route.Torrent _ ->
+            True
+
+        Route.NotFound ->
+            False
 
 
 beginIdentityRefresh : Model -> ( Model, Cmd Msg )
@@ -1156,7 +1177,7 @@ viewTorrent model =
         Feed feed ->
             case feed.items of
                 item :: _ ->
-                    div [ class "single" ] [ viewItem model.basePath item ]
+                    div [ class "single" ] [ viewItem model.basePath (canQueryFiles model) item ]
 
                 [] ->
                     p [ class "notice" ] [ text "No torrent with that hash is in the index." ]
@@ -1202,18 +1223,23 @@ viewResults model =
 listConfig : Model -> InfiniteList.Config Item Msg
 listConfig model =
     InfiniteList.config
-        { itemView = \_ _ item -> viewItem model.basePath item
-        , itemHeight = InfiniteList.withVariableHeight (\_ item -> itemHeight item)
+        { itemView = \_ _ item -> viewItem model.basePath (canQueryFiles model) item
+        , itemHeight = InfiniteList.withVariableHeight (\_ item -> itemHeight (canQueryFiles model) item)
         , containerHeight = listHeight model
         }
 
 
+canQueryFiles : Model -> Bool
+canQueryFiles model =
+    Identity.can (Identity.graphql "torrent" "query") model.identity
+
+
 {-| Told to the virtualizer, so it has to be what the browser actually lays out.
 -}
-itemHeight : Item -> Int
-itemHeight item =
+itemHeight : Bool -> Item -> Int
+itemHeight canQuery item =
     if item.expanded then
-        rowHeight + metaHeight item + filesHeight item
+        rowHeight + metaHeight item + filesHeight canQuery item
 
     else
         rowHeight
@@ -1221,31 +1247,35 @@ itemHeight item =
 
 {-| Counted off `viewFiles`'s own list, so the two cannot disagree.
 -}
-filesHeight : Item -> Int
-filesHeight item =
+filesHeight : Bool -> Item -> Int
+filesHeight canQuery item =
     case item.row.filesStatus of
         Over_threshold ->
             noticeHeight
 
         Multi ->
-            (fileHeight * List.length (fileEntries item))
-                + (case item.files of
-                    Fetching ->
-                        noticeHeight
+            if not canQuery then
+                0
 
-                    FilesFailed _ ->
-                        noticeHeight
-
-                    Open open ->
-                        if open.omission == "" then
-                            0
-
-                        else
+            else
+                (fileHeight * List.length (fileEntries item))
+                    + (case item.files of
+                        Fetching ->
                             noticeHeight
 
-                    Unopened ->
-                        0
-                  )
+                        FilesFailed _ ->
+                            noticeHeight
+
+                        Open open ->
+                            if open.omission == "" then
+                                0
+
+                            else
+                                noticeHeight
+
+                        Unopened ->
+                            0
+                      )
 
         _ ->
             0
@@ -1296,12 +1326,12 @@ plural n noun =
         noun ++ "s"
 
 
-viewItem : Route.BasePath -> Item -> Html Msg
-viewItem basePath item =
+viewItem : Route.BasePath -> Bool -> Item -> Html Msg
+viewItem basePath canQuery item =
     div [ class "item" ]
         (viewRow basePath item
             :: (if item.expanded then
-                    viewMeta item ++ viewFiles item
+                    viewMeta item ++ viewFiles canQuery item
 
                 else
                     []
@@ -1425,8 +1455,8 @@ drawn, which reads as a missing feature rather than as an answer — especially 
 that case says why instead. `no_info` has no count to explain away, and `single` is a
 torrent that _is_ its one file, so both stay silent.
 -}
-viewFiles : Item -> List (Html Msg)
-viewFiles item =
+viewFiles : Bool -> Item -> List (Html Msg)
+viewFiles canQuery item =
     case item.row.filesStatus of
         Over_threshold ->
             [ div [ class "files-notice" ]
@@ -1434,24 +1464,28 @@ viewFiles item =
             ]
 
         Multi ->
-            List.map (viewEntry item) (fileEntries item)
-                ++ (case item.files of
-                        Unopened ->
-                            []
+            if not canQuery then
+                []
 
-                        Fetching ->
-                            [ div [ class "files-notice" ] [ text "Loading files…" ] ]
-
-                        FilesFailed message ->
-                            [ div [ class "files-notice error" ] [ text message ] ]
-
-                        Open open ->
-                            if open.omission == "" then
+            else
+                List.map (viewEntry item) (fileEntries item)
+                    ++ (case item.files of
+                            Unopened ->
                                 []
 
-                            else
-                                [ div [ class "files-notice" ] [ text open.omission ] ]
-                   )
+                            Fetching ->
+                                [ div [ class "files-notice" ] [ text "Loading files…" ] ]
+
+                            FilesFailed message ->
+                                [ div [ class "files-notice error" ] [ text message ] ]
+
+                            Open open ->
+                                if open.omission == "" then
+                                    []
+
+                                else
+                                    [ div [ class "files-notice" ] [ text open.omission ] ]
+                       )
 
         _ ->
             []
