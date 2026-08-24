@@ -48,6 +48,10 @@ func NewDirective() Directive {
 		object string,
 		action string,
 	) (res any, err error) {
+		if err := AuthenticationErrorFromContext(ctx); err != nil {
+			return nil, err
+		}
+
 		allow := false
 
 		objAct := rbac.ObjectAction{

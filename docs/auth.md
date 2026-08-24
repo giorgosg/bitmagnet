@@ -55,6 +55,12 @@ The cookie name defaults to `__Secure-bitmagnet` and is configurable through
 requires HTTPS in development as well as production. Bearer login remains available through
 `self.login` for clients that manage their own credential.
 
+An explicit `Authorization` header always takes precedence over the browser cookie. A bad
+explicit bearer credential falls back to the Anonymous identity; it does not borrow the
+cookie's authority. An expired, malformed, disabled, or deleted-User cookie also falls back
+to Anonymous, and the response expires that cookie so the next request can recover cleanly.
+Database and authorization-service failures remain errors and do not clear the cookie.
+
 **Every bound in that table is enforced, and they are load-bearing.**
 `login_requests_per_minute: 0` reaches `rate.Every(time.Minute / 0)` and takes the process
 down from a config file alone; `password_min_entropy: 0` accepts any password at all; a

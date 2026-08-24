@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/authconfig"
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/browser_session"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/http_auth"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/identity"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/rbac"
@@ -57,7 +59,10 @@ func TestTorznabRejectsBrowserBearerTokenWithoutAPIKey(t *testing.T) {
 	})
 
 	engine := gin.New()
-	engine.Use(http_auth.NewMiddleware(authenticator).AttachAuth())
+	engine.Use(http_auth.NewMiddleware(
+		authenticator,
+		browser_session.NewCookie(authconfig.NewDefaultConfig()),
+	).AttachAuth())
 	require.NoError(t, httpserver.New(lazyClient, testCfg, authenticator).Apply(engine))
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/torznab/?t=caps", nil)

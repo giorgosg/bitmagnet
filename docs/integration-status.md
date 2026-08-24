@@ -59,12 +59,11 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#48](https://github.com/giorgosg/bitmagnet/pull/48) | Serve an alternative web UI from a configured directory                     | local                                                                | Tests written first; verified against a real external UI build |
 | [#49](https://github.com/giorgosg/bitmagnet/pull/49) | Disable browser caching for the alternative UI mount                        | local                                                                | Asset and SPA fallback regressions observed red                |
 | [#50](https://github.com/giorgosg/bitmagnet/pull/50) | Remove redundant tests and reduce CI runner usage                           | local                                                                | Full suite and revised workflows passed                        |
+| [#51](https://github.com/giorgosg/bitmagnet/pull/51) | Add the browser session cookie contract                                     | local                                                                | Real Gin/gqlgen/PostgreSQL regression observed red             |
 
 ## In flight
 
-| PR                                                   | Change                                  | Downstream source | Verification note                                  |
-| ---------------------------------------------------- | --------------------------------------- | ----------------- | -------------------------------------------------- |
-| [#51](https://github.com/giorgosg/bitmagnet/pull/51) | Add the browser session cookie contract | local             | Real Gin/gqlgen/PostgreSQL regression observed red |
+Nothing.
 
 ## The static review findings
 

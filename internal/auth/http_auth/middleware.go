@@ -3,6 +3,7 @@ package http_auth
 import (
 	"strings"
 
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/browser_session"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/identity"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/user"
 	"github.com/gin-gonic/gin"
@@ -11,8 +12,23 @@ import (
 const (
 	AuthorizationHeader = "Authorization"
 	BearerPrefix        = "Bearer "
-	IdentityKey         = "identity"
+	resolutionKey       = "auth_resolution"
 )
+
+type CredentialSource string
+
+const (
+	CredentialSourceNone   CredentialSource = ""
+	CredentialSourceBearer CredentialSource = "bearer"
+	CredentialSourceCookie CredentialSource = "cookie"
+)
+
+type Resolution struct {
+	Identity identity.Identity
+	Source   CredentialSource
+	Rejected bool
+	Err      error
+}
 
 type Middleware interface {
 	AttachAuth() gin.HandlerFunc
@@ -20,11 +36,13 @@ type Middleware interface {
 
 type authMiddleware struct {
 	authenticator identity.Authenticator
+	browserCookie browser_session.Cookie
 }
 
-func NewMiddleware(authenticator identity.Authenticator) Middleware {
+func NewMiddleware(authenticator identity.Authenticator, browserCookie browser_session.Cookie) Middleware {
 	return &authMiddleware{
 		authenticator: authenticator,
+		browserCookie: browserCookie,
 	}
 }
 
@@ -38,14 +56,52 @@ func (a *authMiddleware) AttachAuth() gin.HandlerFunc {
 			user.ContextWithLoginSource(c.Request.Context(), c.ClientIP()),
 		)
 
-		identity, matched, err := a.authenticator.Authenticate(c, extractToken(c))
+		credential, source := a.credential(c)
+		resolved, matched, err := a.authenticator.Authenticate(c, credential)
+		resolution := Resolution{
+			Source: source,
+			Err:    err,
+		}
 
 		if err == nil && matched {
-			c.Set(IdentityKey, identity)
+			resolution.Identity = resolved
+			resolution.Rejected = source != CredentialSourceNone && isAnonymous(resolved)
 		}
+
+		if resolution.Source == CredentialSourceCookie && resolution.Rejected {
+			if expireErr := a.browserCookie.Expire(c.Request.Context()); expireErr != nil {
+				resolution.Err = expireErr
+				resolution.Identity = nil
+			}
+		}
+
+		c.Set(resolutionKey, resolution)
 
 		c.Next()
 	}
+}
+
+func (a *authMiddleware) credential(c *gin.Context) (string, CredentialSource) {
+	if c.GetHeader(AuthorizationHeader) != "" {
+		return extractToken(c), CredentialSourceBearer
+	}
+
+	credential, ok := a.browserCookie.Credential(c.Request)
+	if ok {
+		return credential, CredentialSourceCookie
+	}
+
+	return "", CredentialSourceNone
+}
+
+func isAnonymous(resolved identity.Identity) bool {
+	if resolved == nil {
+		return false
+	}
+
+	self := resolved.Self()
+
+	return self.User == nil && self.APIKey == nil
 }
 
 func extractToken(c *gin.Context) string {
@@ -63,15 +119,21 @@ func extractToken(c *gin.Context) string {
 
 // GetIdentity retrieves the current authenticated identity from the Gin context
 func GetIdentity(c *gin.Context) (identity.Identity, bool) {
-	raw, exists := c.Get(IdentityKey)
+	resolution, ok := GetResolution(c)
+	if !ok || resolution.Identity == nil {
+		return nil, false
+	}
+
+	return resolution.Identity, true
+}
+
+func GetResolution(c *gin.Context) (Resolution, bool) {
+	raw, exists := c.Get(resolutionKey)
 	if !exists {
-		return nil, false
+		return Resolution{}, false
 	}
 
-	identity, ok := raw.(identity.Identity)
-	if !ok {
-		return nil, false
-	}
+	resolution, ok := raw.(Resolution)
 
-	return identity, true
+	return resolution, ok
 }

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/authconfig"
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/browser_session"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/http_auth"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/identity"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/user"
@@ -45,7 +46,10 @@ func loginThroughMiddleware(
 	engine, err := httpserver.NewEngine(httpserver.NewDefaultConfig())
 	require.NoError(t, err)
 
-	engine.Use(http_auth.NewMiddleware(unmatchedAuthenticator{}).AttachAuth())
+	engine.Use(http_auth.NewMiddleware(
+		unmatchedAuthenticator{},
+		browser_session.NewCookie(authconfig.NewDefaultConfig()),
+	).AttachAuth())
 	engine.POST("/login", func(c *gin.Context) {
 		_, loginErr = service.Login(c.Request.Context(), username, password)
 	})
