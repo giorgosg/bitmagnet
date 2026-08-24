@@ -61,6 +61,13 @@ cookie's authority. An expired, malformed, disabled, or deleted-User cookie also
 to Anonymous, and the response expires that cookie so the next request can recover cleanly.
 Database and authorization-service failures remain errors and do not clear the cookie.
 
+Cookie-backed GraphQL mutations require an `Origin` of `https://<request-host>` before any
+resolver runs. Cookie-backed queries remain available without `Origin`; they cannot change
+server state. Explicit bearer requests do not depend on `Origin`, and anonymous requests —
+including `loginBrowser` before a browser credential exists — remain governed by CORS. The
+GraphQL endpoint accepts JSON POST only; multipart uploads and WebSocket upgrades are not
+supported.
+
 **Every bound in that table is enforced, and they are load-bearing.**
 `login_requests_per_minute: 0` reaches `rate.Every(time.Minute / 0)` and takes the process
 down from a config file alone; `password_min_entropy: 0` accepts any password at all; a

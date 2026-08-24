@@ -60,12 +60,13 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#49](https://github.com/giorgosg/bitmagnet/pull/49) | Disable browser caching for the alternative UI mount                        | local                                                                | Asset and SPA fallback regressions observed red                |
 | [#50](https://github.com/giorgosg/bitmagnet/pull/50) | Remove redundant tests and reduce CI runner usage                           | local                                                                | Full suite and revised workflows passed                        |
 | [#51](https://github.com/giorgosg/bitmagnet/pull/51) | Add the browser session cookie contract                                     | local                                                                | Real Gin/gqlgen/PostgreSQL regression observed red             |
+| [#52](https://github.com/giorgosg/bitmagnet/pull/52) | Resolve browser cookie credentials safely                                   | local                                                                | Gin/gqlgen/PostgreSQL regressions observed red                 |
 
 ## In flight
 
-| PR                                                   | Change                                    | Downstream source | Verification note                              |
-| ---------------------------------------------------- | ----------------------------------------- | ----------------- | ---------------------------------------------- |
-| [#52](https://github.com/giorgosg/bitmagnet/pull/52) | Resolve browser cookie credentials safely | local             | Gin/gqlgen/PostgreSQL regressions observed red |
+| PR                                                   | Change                                                   | Source |
+| ---------------------------------------------------- | -------------------------------------------------------- | ------ |
+| [#53](https://github.com/giorgosg/bitmagnet/pull/53) | Protect cookie-authenticated GraphQL mutations from CSRF | local  |
 
 ## The static review findings
 
@@ -73,7 +74,7 @@ A full static review of the Go tree (2026-08-22) produced eleven findings, kept 
 untracked notes under `docs/issues/`. PRs #38-#45 above close six of them, plus four of
 the small defects collected in 0008. What remains open there, hardest last:
 `files_count`/`size` consistency for rows already written, the breaking half of the CORS
-decision (same-origin default and GraphQL-over-GET), the crawler and importer shutdown
+decision (same-origin default), the crawler and importer shutdown
 paths, the queue job that runs inside its claiming transaction, the search SQL
 re-execution, and the two serialisation points in the auth path.
 

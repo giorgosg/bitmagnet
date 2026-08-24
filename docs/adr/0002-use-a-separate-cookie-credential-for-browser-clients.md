@@ -1,0 +1,3 @@
+# Use a separate cookie credential for browser clients
+
+Browser clients authenticate to GraphQL through dedicated login and logout mutations that issue and clear a configurable `__Secure-` cookie scoped to `/graphql` and marked `HttpOnly`, `Secure`, and `SameSite=Strict`; they never receive the credential in a GraphQL result. Existing bearer authentication remains the contract for non-browser and cross-origin clients and takes precedence when explicitly supplied. This reduces credential theft through browser JavaScript while requiring same-origin browser deployment, exact-origin checks for cookie-authenticated mutations, and HTTPS in development as well as production.
