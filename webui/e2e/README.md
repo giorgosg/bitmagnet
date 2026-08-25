@@ -40,12 +40,17 @@ management, registration, and the administration workflows. Those need a User to
 and pointing them at a shared instance would mean either a real password in CI or tests
 that mutate someone's live data.
 
-The way through is a disposable bitmagnet per run, which is more than a config flag:
-bitmagnet's own auth tests build the server in-process and take a real PostgreSQL through
-`TEST_POSTGRES_DSN` (`internal/database/dbtest`), creating and dropping a database per
-test. The equivalent here is a small fixture-server binary in the bitmagnet repo that
-stands up that same engine on a port with a known bootstrap invitation, so this harness
-can register its own throwaway admin and start from a known state.
+The way through is a bitmagnet with a known state per run, which is more than a config
+flag. It has three parts, in two other places:
+
+- `../btm-testdb` — a local PostgreSQL holding ~100k torrents sampled from a real crawl,
+  a seed database that clones in about a second, and a reset.
+- `../bitmagnet` — a fixture-server command standing up the real Gin, auth middleware, and
+  gqlgen stack against a cloned database, printing a bootstrap invitation this harness can
+  register a throwaway admin through. It has to live there: those packages are under
+  `internal/`, which Go will not let another module import.
+- Here — a second Playwright project that consumes both, leaving this credential-free
+  suite runnable with no services present.
 
 Tracked as `.scratch/identity-and-permissions/issues/16-build-credentialed-e2e-harness.md`.
 
