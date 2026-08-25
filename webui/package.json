@@ -9,11 +9,13 @@
     "format": "elm-format --yes src/*.elm src/Magnes/Api/ScalarCodecs.elm tests/*.elm",
     "test": "elm-test",
     "review": "elm-review",
+    "test:e2e": "playwright test",
     "codegen": "elm-graphql ${BITMAGNET_URL:-http://localhost:3333}/graphql --base Magnes.Api --output src"
   },
   "license": "MIT",
   "devDependencies": {
     "@dillonkearns/elm-graphql": "^4.3.2",
+    "@playwright/test": "^1.62.1",
     "elm": "^0.19.2-0",
     "elm-format": "^0.8.8",
     "elm-review": "^2.13.5",
