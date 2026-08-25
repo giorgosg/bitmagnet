@@ -10,8 +10,8 @@ import Facet
 import FileTree
 import Format
 import Graphql.Http
-import Html exposing (Attribute, Html, a, button, div, form, h1, header, input, label, main_, p, span, text)
-import Html.Attributes exposing (attribute, class, classList, for, href, id, placeholder, spellcheck, type_, value)
+import Html exposing (Attribute, Html, a, button, div, form, h1, header, input, main_, p, span, text)
+import Html.Attributes exposing (attribute, class, classList, href, id, placeholder, spellcheck, type_, value)
 import Html.Events exposing (on, onClick, onInput, onSubmit, stopPropagationOn)
 import Identity
 import InfiniteList
@@ -427,15 +427,19 @@ update msg model =
 
                     ( results, cmd ) =
                         guardedLoad model model.identity epoch route
+
+                    navigated =
+                        { model
+                            | route = route
+                            , field = syncField model route
+                            , results = results
+                            , epoch = epoch
+                            , infiniteList = InfiniteList.init
+                        }
                 in
-                ( { model
-                    | route = route
-                    , field = syncField model route
-                    , results = results
-                    , epoch = epoch
-                    , infiniteList = InfiniteList.init
-                  }
-                , Cmd.batch [ cmd, scrollListToTop, focusOnArrival route ]
+                ( navigated
+                , Cmd.batch
+                    [ cmd, scrollListToTop, focusIfLoginAppeared model navigated ]
                 )
 
         FieldChanged field ->
@@ -615,18 +619,33 @@ loginMessages =
     }
 
 
-{-| A form arrived at through a client-side navigation is a virtual-DOM patch, not a new
-document, so `autofocus` never fires. Focus is moved explicitly instead. A missing element
-is not a failure worth reporting — the route may have been guarded away before this ran.
+{-| `autofocus` never fires here: `Browser.application` renders the form as a virtual-DOM
+patch rather than a new document. Focus is moved explicitly instead.
+
+What matters is when the form _appears_, which is not the same as when the login route is
+entered. Arriving cold on `/login` renders "Resolving Identity…" first, because the guard
+cannot decide anything until `self.identity` answers — so focusing on arrival targets an
+element that does not exist yet, and silently does nothing. The form appears on whichever
+comes second, the navigation or the Identity, so both ask this.
+
 -}
-focusOnArrival : Route -> Cmd Msg
-focusOnArrival route =
-    case route of
-        Route.Login _ ->
-            Task.attempt (\_ -> Ignored) (Browser.Dom.focus Login.usernameFieldId)
+focusIfLoginAppeared : Model -> Model -> Cmd Msg
+focusIfLoginAppeared before after =
+    if showsLoginForm after && not (showsLoginForm before) then
+        Task.attempt (\_ -> Ignored) (Browser.Dom.focus Login.usernameFieldId)
+
+    else
+        Cmd.none
+
+
+showsLoginForm : Model -> Bool
+showsLoginForm model =
+    case ( model.route, Route.guard model.basePath model.identity model.route ) of
+        ( Route.Login _, Route.Allowed ) ->
+            True
 
         _ ->
-            Cmd.none
+            False
 
 
 {-| Every failed request asks the same question first: does this say the Identity Magnes
@@ -858,6 +877,15 @@ beginIdentityRefresh model =
 
 identityResolved : Identity.Identity -> Model -> ( Model, Cmd Msg )
 identityResolved identity model =
+    let
+        ( resolved, cmd ) =
+            identityApplied identity model
+    in
+    ( resolved, Cmd.batch [ cmd, focusIfLoginAppeared model resolved ] )
+
+
+identityApplied : Identity.Identity -> Model -> ( Model, Cmd Msg )
+identityApplied identity model =
     case model.identity of
         Identity.Unknown ->
             let

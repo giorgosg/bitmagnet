@@ -3,9 +3,11 @@
   "configurations": [
     {
       "name": "magnes",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
-      "port": 8000
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["PORT=8443", "npm", "run", "dev"],
+      "port": 8443,
+      "url": "https://localhost:8443",
+      "autoPort": false
     }
   ]
 }

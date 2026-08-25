@@ -24,7 +24,23 @@ npx elm make src/Main.elm --optimize --output=dist/main.js
 npx elm repl
 npx elm-format src/ --yes                          # canonical formatting, no debate
 npx elm-test
+npx elm-review                                     # static review; see below
 ```
+
+**Add a package with `elm install`, not `elm-json`.** This project is on Elm **0.19.2**,
+and `elm-json` does not know that version exists — every install fails with "Because Elm
+0.19.2 is unavailable … no valid set of package versions could be found", which reads like
+the package is unavailable rather than the tool being out of date. Elm's own installer
+resolves it correctly and writes the indirect dependencies for you:
+
+```bash
+npx elm install author/package                     # in the project root
+cd review && npx elm install author/package        # for elm-review rule packages
+```
+
+It prompts before editing `elm.json`; pipe `printf 'y\n'` to it when running unattended.
+Hand-editing `elm.json` is a last resort — Elm needs every indirect dependency pinned
+exactly, so the resolver is doing real work.
 
 Regenerate the API client from a live bitmagnet instance:
 
@@ -44,7 +60,22 @@ declares six: `Hash20`, `Date`, `DateTime`, `Duration`, `Void`, `Year`.
 read it before writing a query. bitmagnet publishes no API reference, so that file is
 transcribed from the schema files in its repo.
 Generated code is committed (so builds don't need a live server) and excluded from
-`elm-review` via `Review.Rule.ignoreErrorsForDirectories [ "src/Magnes/Api" ]`.
+`elm-review` via `Review.Rule.ignoreErrorsForDirectories [ "src/Magnes/Api" ]` — otherwise
+the report drowns in unused-export findings for schema fields Magnes never calls.
+
+## elm-review
+
+Configured in `review/src/ReviewConfig.elm`: the `NoUnused.*` family, `Simplify`,
+`NoExposingEverything`, `NoImportingEverything`, and `NoMissingTypeAnnotation`. Run
+`npm run review`; `npx elm-review --fix-all` applies the mechanical fixes.
+
+`NoMissingTypeAnnotationInLetIn` is deliberately **off**: this codebase does not annotate
+`let` bindings, and it reported 45 pre-existing sites without finding anything.
+
+`review/suppressed/` holds findings that are correct but premature — payloads a later
+ticket consumes. Prefer suppressing those over deleting code you are about to re-add; the
+counts can only shrink, because `elm-review` fails if a suppressed count grows. Read
+`review/suppressed/README.md` before clearing one.
 
 ## Check for a package before building it
 

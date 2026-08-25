@@ -9,9 +9,16 @@ const https = require("https");
 const path = require("path");
 
 const root = path.join(__dirname, "public");
+const certificateDirectory = path.join(__dirname, ".dev");
+
+// Which bitmagnet to proxy to is a property of your machine, not of this repository, so
+// it is read from the gitignored .dev/env rather than committed here. One KEY=value per
+// line; the real environment still wins, so a one-off `BITMAGNET_URL=… npm run dev`
+// overrides the file.
+loadLocalEnv(path.join(certificateDirectory, "env"));
+
 const port = Number(process.env.PORT || 8000);
 const upstream = new URL(process.env.BITMAGNET_URL || "http://localhost:3333");
-const certificateDirectory = path.join(__dirname, ".dev");
 const certificatePath = process.env.MAGNES_DEV_CERT || path.join(certificateDirectory, "localhost.pem");
 const keyPath = process.env.MAGNES_DEV_KEY || path.join(certificateDirectory, "localhost-key.pem");
 
@@ -21,6 +28,23 @@ const types = {
   ".css": "text/css; charset=utf-8",
   ".svg": "image/svg+xml",
 };
+
+function loadLocalEnv(file) {
+  if (!fs.existsSync(file)) return;
+
+  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    const separator = trimmed.indexOf("=");
+    if (separator < 1) continue;
+
+    const key = trimmed.slice(0, separator).trim();
+    if (key in process.env) continue;
+
+    process.env[key] = trimmed.slice(separator + 1).trim();
+  }
+}
 
 function ensureCertificate() {
   if (fs.existsSync(certificatePath) && fs.existsSync(keyPath)) return;

@@ -37,13 +37,34 @@ cross-origin request cannot satisfy that contract.
 
 The server creates a 30-day self-signed localhost certificate under the gitignored `.dev/`
 directory on first use. Accept it once in the development browser. To use a locally trusted
-certificate instead, set both `MAGNES_DEV_CERT` and `MAGNES_DEV_KEY` to existing PEM files.
+certificate instead, set both `MAGNES_DEV_CERT` and `MAGNES_DEV_KEY` to existing PEM files,
+or drop a trusted pair at the default paths:
+
+```bash
+mkcert -install                                    # once; adds a local CA to your trust store
+mkcert -cert-file .dev/localhost.pem -key-file .dev/localhost-key.pem localhost 127.0.0.1 ::1
+```
+
+A trusted certificate is worth the two commands: an automated browser will not click
+through a certificate warning, so a self-signed one blocks any scripted checking of the UI.
 `PORT` defaults to `8000`.
 
 The default upstream is `http://localhost:3333`; always set `BITMAGNET_URL` explicitly when
-developing against another instance. The value is consumed by Node, not exposed to the
-browser. `public/config.js` should normally be absent during development so the bundle uses
-the same-origin `/graphql` default.
+developing against another instance. Rather than typing it every time, put it in the
+gitignored `.dev/env`, which `dev.js` reads before falling back to the default:
+
+```
+BITMAGNET_URL=http://your-bitmagnet:3333
+```
+
+One `KEY=value` per line, `#` comments allowed. The real environment still wins, so a
+one-off `BITMAGNET_URL=… npm run dev` overrides the file. Nobody else's host belongs in the
+repository, which is why this file is ignored rather than committed.
+
+The value is consumed by Node, not exposed to the browser. `public/config.js` should
+normally be absent during development so the bundle uses the same-origin `/graphql`
+default — an absolute cross-origin address there defeats the whole arrangement, and from an
+HTTPS page a plain-HTTP one is blocked outright as mixed content.
 
 The proxy preserves the browser-facing `Host` and `Origin` headers. This lets bitmagnet
 verify the request as same-origin even though the proxy-to-bitmagnet hop may use plain HTTP.

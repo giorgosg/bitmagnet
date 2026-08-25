@@ -18,7 +18,6 @@ Permission change is not something to render optimistically.
 
 -}
 
-import Dict
 import Graphql.Http
 import Graphql.Http.GraphqlError as GraphqlError
 import Json.Decode as Decode
