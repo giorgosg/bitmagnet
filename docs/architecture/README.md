@@ -84,7 +84,7 @@ run as a set of registered workers.
 | `internal/worker/`      | The registry every long-running thing registers with               |
 | `internal/concurrency/` | Batching channels, buffered concurrent channels, keyed limiters    |
 | `internal/lazy/`        | `lazy.Lazy[T]`, how fx factories defer expensive construction      |
-| `pkg/json_schema/`      | JSON schema emitter for the classifier config                      |
+| `pkg/json_schema/`      | JSON schema types, used by `internal/config/param`                 |
 | `migrations/`           | Goose SQL migrations, `00001`–`00022`                              |
 | `graphql/`              | Schema and operations — the _source_ for `internal/gql`            |
 | `webui/`                | Angular app; `webui/dist` is committed and embedded                |
