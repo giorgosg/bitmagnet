@@ -48,6 +48,14 @@ Nothing is lost by the exclusion: the auth surface is new, so no previously open
 installation had it, and the first administrator registers through `self.register`, which
 the baseline grants.
 
+**Role names are validated on the way in, so that wildcard cannot be stored at all.** The
+matcher is `globMatch(r.sub, p.sub)`, and the _stored policy_ is the pattern rather than
+the request — a role literally named `*` matches every subject, `anon` included.
+`Role.Validate` restricts a name to the username character class, which contains no glob
+metacharacter, and `rbac.Service.PutRole` refuses before the repository is reached. The
+exclusion above is what keeps an unauthenticated caller away from `putRole` at all; this
+is the second lock, for a caller who already holds `auth:mutate`.
+
 ## Resolving an identity
 
 `http_auth.AttachAuth` runs early (option key `"auth"`, and http server options are
