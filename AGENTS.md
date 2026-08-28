@@ -31,13 +31,14 @@ code.
 | [docs/upstream-status.md](docs/upstream-status.md)       | Sending a change upstream, or weighing whether the `next` rewrite makes it moot       |
 | [docs/integration-status.md](docs/integration-status.md) | Checking whether a candidate is already merged, queued, or rejected                   |
 | [docs/auth.md](docs/auth.md)                             | Configuring or deploying authentication, or running behind a reverse proxy            |
-| [docs/agents/](docs/agents/issue-tracker.md)             | Filing an issue, applying a triage label, or looking for domain docs                  |
 | [docs/adr/](docs/adr/)                                   | A decision constrains future changes and the reason will not be obvious from the code |
+| `docs/agents/`                                           | Filing an issue, applying a triage label, or looking for domain docs — **local only** |
 | `docs/issues/`                                           | Review findings: what is confirmed, fixed, or rejected, and why — **local only**      |
 | `docs/ideas/`                                            | Weighing what to work on next rather than how to do it — **local only**               |
 
-The last two rows are **local only**: they exist because a `*.local.md` file is present in
-this checkout, and are absent from a fresh clone. Never link to them from a tracked page.
+The last three rows are **local only** and absent from a fresh clone: `/docs/agents/` is
+gitignored outright, and the other two exist because a `*.local.md` file is present in
+this checkout. Never link to them from a tracked page.
 
 Several of those pages are dated **snapshots** — the fork survey, the upstream survey,
 every divergence count. Re-measure with the commands in [docs/porting.md](docs/porting.md)
