@@ -48,6 +48,14 @@ Nothing is lost by the exclusion: the auth surface is new, so no previously open
 installation had it, and the first administrator registers through `self.register`, which
 the baseline grants.
 
+**Role names are validated on the way in, so that wildcard cannot be stored at all.** The
+matcher is `globMatch(r.sub, p.sub)`, and the _stored policy_ is the pattern rather than
+the request — a role literally named `*` matches every subject, `anon` included.
+`Role.Validate` restricts a name to the username character class, which contains no glob
+metacharacter, and `rbac.Service.PutRole` refuses before the repository is reached. The
+exclusion above is what keeps an unauthenticated caller away from `putRole` at all; this
+is the second lock, for a caller who already holds `auth:mutate`.
+
 ## Resolving an identity
 
 `http_auth.AttachAuth` runs early (option key `"auth"`, and http server options are
@@ -172,7 +180,9 @@ error text.
 ## First administrator
 
 An `auth_initial_invitation` startup worker creates an admin invitation when no enabled
-admin user exists, and logs its code. It is idempotent, and **the check and the insert are
+admin user exists, and logs its code — once, on creation. The unclaimed branch runs on
+every boot until somebody claims it, so it logs a four-character suffix instead of the
+credential. It is idempotent, and **the check and the insert are
 serialized by a Postgres advisory lock** held for the transaction. bitmagnet is routinely
 run as more than one process against one database; without the lock every replica reads
 the same empty state and inserts its own code — a synchronized 16-replica start produced

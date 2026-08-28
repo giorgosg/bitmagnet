@@ -22,6 +22,17 @@ exists and logs its code; that is how the first administrator registers, through
 UI's registration form. It is idempotent — a restart finds the unclaimed invitation rather
 than issuing another — and safe to run as multiple replicas.
 
+**The code is logged once, when it is created.** Later boots report only its last four
+characters, enough to tell that an invitation is still outstanding and which one, without
+every log file, aggregator and support bundle holding a live path to the first
+administrator account. If you lose the code before claiming it, delete the unclaimed
+invitation and restart — the next boot mints and logs a new one:
+
+```sql
+DELETE FROM invitations
+WHERE role_name = 'admin' AND created_by IS NULL AND claimed_by IS NULL;
+```
+
 ## Configuration
 
 | Key                              | Default              |                                                                   |
@@ -99,6 +110,8 @@ message or its wrapping. Application errors retain their GraphQL `path` and `loc
 | `INVITATION_INVALID`                    | The Invitation code does not exist                             |
 | `INVITATION_EXPIRED`                    | The Invitation has expired                                     |
 | `INVITATION_CLAIMED`                    | The Invitation has already been claimed                        |
+| `EMAIL_REQUIRED`                        | `auth.email_required` is on and no email was supplied          |
+| `EMAIL_INVALID`                         | The email does not match the server's address pattern          |
 | `PASSWORD_INSUFFICIENT_ENTROPY`         | The password is below `auth.password_min_entropy`              |
 | `UNAUTHORIZED`                          | The Identity lacks the refused GraphQL Object action           |
 | `AUTHENTICATION_INFRASTRUCTURE_FAILURE` | A credential could not be resolved because a dependency failed |
