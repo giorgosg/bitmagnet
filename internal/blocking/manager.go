@@ -23,7 +23,12 @@ type Manager interface {
 }
 
 type manager struct {
-	mutex         sync.Mutex
+	// mutex guards buffer, filter and lastFlushedAt. The read path never holds it
+	// across the database; flush still does, because persisting is a write.
+	mutex sync.Mutex
+	// reloadMutex admits one reloader at a time. A caller that finds it taken
+	// already has a usable filter, and serves that rather than queueing.
+	reloadMutex   sync.Mutex
 	pool          *pgxpool.Pool
 	buffer        map[protocol.ID]struct{}
 	filter        *bloom.StableBloomFilter
@@ -33,14 +38,12 @@ type manager struct {
 }
 
 func (m *manager) Filter(ctx context.Context, hashes []protocol.ID) ([]protocol.ID, error) {
+	if err := m.refreshForRead(ctx); err != nil {
+		return nil, err
+	}
+
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-
-	if m.filter == nil || m.shouldFlush() {
-		if refreshErr := m.refresh(ctx); refreshErr != nil {
-			return nil, refreshErr
-		}
-	}
 
 	filtered := make([]protocol.ID, 0, len(hashes))
 
@@ -91,28 +94,99 @@ const blockedTorrentsBloomFilterKey = "blocked_torrents"
 
 // refresh brings the in-memory filter up to date. It does two jobs that look like
 // one: persisting buffered hashes, and picking up blocks made by another process.
-// Only the first needs to write, and Filter - a read on the crawler's triage path -
-// reaches here with an empty buffer every maxFlushWait. Rewriting a multi-megabyte
-// large object to persist nothing costs a read-modify-write and the WAL for it,
-// under the process-global mutex.
+// Only the first needs to write. Callers hold the mutex, so it assigns the reloaded
+// filter directly; the read path goes through refreshForRead instead.
 func (m *manager) refresh(ctx context.Context) error {
-	if len(m.buffer) == 0 {
-		return m.reload(ctx)
+	if len(m.buffer) > 0 {
+		return m.flush(ctx)
 	}
 
-	return m.flush(ctx)
+	bf, err := m.readFilter(ctx)
+	if err != nil {
+		return err
+	}
+
+	m.filter = bf
+	m.lastFlushedAt = time.Now()
+
+	return nil
 }
 
-// reload replaces the in-memory filter with the stored one, without writing.
-// A missing or null OID means nothing has been blocked yet, which is not an error:
-// the empty filter it starts with is the right answer, and flush creates the large
-// object when there is finally something to store.
-func (m *manager) reload(ctx context.Context) error {
+// refreshForRead brings the filter up to date for a read without holding the mutex
+// across the transfer. readFilter allocates and reads a 25 MB filter, and Filter runs
+// on the crawler's triage path at thousands of hashes per second, so doing that under
+// the mutex stalls the whole pipeline every maxFlushWait.
+//
+// A caller with no filter at all has nothing to answer from and waits for one. A
+// caller whose filter is merely overdue serves the filter it has: maxFlushWait is
+// already the statement of how stale that may be, and queueing behind the read is
+// the cost this exists to avoid.
+func (m *manager) refreshForRead(ctx context.Context) error {
+	m.mutex.Lock()
+	cold := m.filter == nil
+	due := cold || m.shouldFlush()
+	buffered := len(m.buffer) > 0
+	m.mutex.Unlock()
+
+	if !due {
+		return nil
+	}
+
+	// Buffered hashes make this a write, which stays serialised with the rest of
+	// the manager.
+	if buffered {
+		m.mutex.Lock()
+		defer m.mutex.Unlock()
+
+		if len(m.buffer) == 0 {
+			return nil
+		}
+
+		return m.flush(ctx)
+	}
+
+	if cold {
+		m.reloadMutex.Lock()
+	} else if !m.reloadMutex.TryLock() {
+		return nil
+	}
+
+	defer m.reloadMutex.Unlock()
+
+	// Whoever held reloadMutex before us may have just done this work.
+	m.mutex.Lock()
+	done := m.filter != nil && !m.shouldFlush()
+	m.mutex.Unlock()
+
+	if done {
+		return nil
+	}
+
+	bf, err := m.readFilter(ctx)
+	if err != nil {
+		return err
+	}
+
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	m.filter = bf
+	m.lastFlushedAt = time.Now()
+
+	return nil
+}
+
+// readFilter returns the stored filter without writing and without touching manager
+// state, so it is safe to call with no lock held. A missing or null OID means nothing
+// has been blocked yet, which is not an error: the empty filter it starts with is the
+// right answer, and flush creates the large object when there is finally something to
+// store.
+func (m *manager) readFilter(ctx context.Context) (*bloom.StableBloomFilter, error) {
 	tx, err := m.pool.BeginTx(ctx, pgx.TxOptions{
 		AccessMode: pgx.ReadOnly,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
 
 	defer func() {
@@ -126,7 +200,7 @@ func (m *manager) reload(ctx context.Context) error {
 	err = tx.QueryRow(ctx, "SELECT oid FROM bloom_filters WHERE key = $1", blockedTorrentsBloomFilterKey).
 		Scan(&nullOid)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("failed to get bloom filter object ID: %w", err)
+		return nil, fmt.Errorf("failed to get bloom filter object ID: %w", err)
 	}
 
 	if err == nil && nullOid.Valid {
@@ -134,25 +208,22 @@ func (m *manager) reload(ctx context.Context) error {
 
 		obj, openErr := lobs.Open(ctx, uint32(nullOid.Int32), pgx.LargeObjectModeRead)
 		if openErr != nil {
-			return fmt.Errorf("failed to open large object for reading: %w", openErr)
+			return nil, fmt.Errorf("failed to open large object for reading: %w", openErr)
 		}
 
 		_, readErr := bf.ReadFrom(obj)
 		obj.Close()
 
 		if readErr != nil {
-			return fmt.Errorf("failed to read current bloom filter: %w", readErr)
+			return nil, fmt.Errorf("failed to read current bloom filter: %w", readErr)
 		}
 	}
 
 	if commitErr := tx.Commit(ctx); commitErr != nil {
-		return fmt.Errorf("failed to commit transaction: %w", commitErr)
+		return nil, fmt.Errorf("failed to commit transaction: %w", commitErr)
 	}
 
-	m.filter = bf
-	m.lastFlushedAt = time.Now()
-
-	return nil
+	return bf, nil
 }
 
 func (m *manager) flush(ctx context.Context) error {
