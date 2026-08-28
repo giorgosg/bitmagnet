@@ -154,6 +154,13 @@ cost of an instance a Torznab client is polling. A role written by this process
 invalidates the snapshot immediately, so an administrator sees their own change; a change
 made by another process becomes visible on the TTL, as permissions already did.
 
+Because that semaphore is process-global and the `@auth` directive fires **per field**, a
+decision that asks more than one question is worth combining. `EnforceEvery` takes a list
+of subject groups — every group must allow, and a group is satisfied by any subject in it
+— and answers them in one `BatchEnforce` under one acquisition. `identity.APIKey` is the
+caller that needs it: its role gate and its scope gate are two questions for one decision,
+and asked separately they serialised an N-field query 2N times.
+
 ## Resisting anonymous abuse
 
 `self.login` and `self.register` are reachable without credentials by construction — they
