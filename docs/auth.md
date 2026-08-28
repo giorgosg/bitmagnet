@@ -22,6 +22,17 @@ exists and logs its code; that is how the first administrator registers, through
 UI's registration form. It is idempotent — a restart finds the unclaimed invitation rather
 than issuing another — and safe to run as multiple replicas.
 
+**The code is logged once, when it is created.** Later boots report only its last four
+characters, enough to tell that an invitation is still outstanding and which one, without
+every log file, aggregator and support bundle holding a live path to the first
+administrator account. If you lose the code before claiming it, delete the unclaimed
+invitation and restart — the next boot mints and logs a new one:
+
+```sql
+DELETE FROM invitations
+WHERE role_name = 'admin' AND created_by IS NULL AND claimed_by IS NULL;
+```
+
 ## Configuration
 
 | Key                              | Default              |                                                                   |

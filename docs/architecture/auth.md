@@ -172,7 +172,9 @@ error text.
 ## First administrator
 
 An `auth_initial_invitation` startup worker creates an admin invitation when no enabled
-admin user exists, and logs its code. It is idempotent, and **the check and the insert are
+admin user exists, and logs its code — once, on creation. The unclaimed branch runs on
+every boot until somebody claims it, so it logs a four-character suffix instead of the
+credential. It is idempotent, and **the check and the insert are
 serialized by a Postgres advisory lock** held for the transaction. bitmagnet is routinely
 run as more than one process against one database; without the lock every replica reads
 the same empty state and inserts its own code — a synchronized 16-replica start produced
