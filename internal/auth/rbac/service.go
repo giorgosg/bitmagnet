@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/slice"
@@ -48,6 +49,11 @@ type service struct {
 	repository           Repository
 	permissionProvider   PermissionProvider
 	objectActionProvider ObjectActionProvider
+	// roleMutex guards roleCache and roleCachedAt. It is separate from sem so a
+	// role lookup does not queue behind a casbin decision, and vice versa.
+	roleMutex    sync.RWMutex
+	roleCache    []RoleInfo
+	roleCachedAt time.Time
 	*casbinDeps
 }
 
@@ -114,17 +120,79 @@ func (s *service) GetRoles(ctx context.Context, roles []Role) ([]RoleInfo, error
 }
 
 func (s *service) getRoles(ctx context.Context, roles []Role) ([]RoleInfo, error) {
-	var (
-		roleInfos []RoleInfo
-		err       error
-	)
-
-	if roles == nil {
-		roleInfos, err = s.repository.GetAllRoles(ctx)
-	} else {
-		roleInfos, err = s.repository.GetRoles(ctx, roles)
+	all, err := s.cachedRoles(ctx)
+	if err != nil {
+		return nil, err
 	}
 
+	if roles == nil {
+		return slices.Clone(all), nil
+	}
+
+	wanted := make(map[Role]struct{}, len(roles))
+	for _, role := range roles {
+		wanted[role] = struct{}{}
+	}
+
+	roleInfos := make([]RoleInfo, 0, len(roles))
+	seenRoles := make(map[Role]struct{}, len(roles))
+
+	for _, info := range all {
+		if _, ok := wanted[info.Role]; !ok {
+			continue
+		}
+
+		roleInfos = append(roleInfos, info)
+		seenRoles[info.Role] = struct{}{}
+	}
+
+	missingRoles := slice.FlatMap(roles, func(role Role) []string {
+		if _, ok := seenRoles[role]; !ok {
+			return []string{string(role)}
+		}
+
+		return nil
+	})
+
+	if len(missingRoles) > 0 {
+		return nil, fmt.Errorf("roles not found: %s", strings.Join(missingRoles, ", "))
+	}
+
+	return roleInfos, nil
+}
+
+// cachedRoles returns every role, core roles synthesised and permissions merged,
+// refreshing from the repository at most once per RBACCacheTTL.
+//
+// Every authentication resolves a role - anonymous, JWT and API key alike - and the
+// repository preloads permissions, so each lookup was two statements straight to
+// the database. \*arr clients poll continuously, which made this the steady-state
+// cost of an idle instance. The compiled casbin policy was already cached on this
+// TTL; the roles behind it were not.
+//
+// The refresh itself runs under the write lock. It is one query once per TTL, and
+// serialising the refresh is what keeps a stampede of authentications from each
+// issuing their own.
+func (s *service) cachedRoles(ctx context.Context) ([]RoleInfo, error) {
+	s.roleMutex.RLock()
+
+	if s.roleCache != nil && time.Since(s.roleCachedAt) <= s.ttl {
+		defer s.roleMutex.RUnlock()
+
+		return s.roleCache, nil
+	}
+
+	s.roleMutex.RUnlock()
+
+	s.roleMutex.Lock()
+	defer s.roleMutex.Unlock()
+
+	// Another goroutine may have refreshed while this one waited for the lock.
+	if s.roleCache != nil && time.Since(s.roleCachedAt) <= s.ttl {
+		return s.roleCache, nil
+	}
+
+	roleInfos, err := s.repository.GetAllRoles(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -135,10 +203,6 @@ func (s *service) getRoles(ctx context.Context, roles []Role) ([]RoleInfo, error
 	}
 
 	for _, coreRole := range CoreRoles() {
-		if roles != nil && !slices.Contains(roles, coreRole) {
-			continue
-		}
-
 		if _, ok := seenRoles[coreRole]; !ok {
 			roleInfos = append(roleInfos, RoleInfo{
 				Role: coreRole,
@@ -149,29 +213,25 @@ func (s *service) getRoles(ctx context.Context, roles []Role) ([]RoleInfo, error
 		}
 	}
 
-	if roles != nil {
-		missingRoles := slice.FlatMap(roles, func(role Role) []string {
-			_, ok := seenRoles[role]
-
-			if !ok {
-				return []string{string(role)}
-			}
-
-			return nil
-		})
-
-		if len(missingRoles) > 0 {
-			return nil, fmt.Errorf("roles not found: %s", strings.Join(missingRoles, ", "))
-		}
-	}
-
 	roleInfos = slice.Map(roleInfos, s.mergeCoreRolePermissions)
 
 	slices.SortFunc(roleInfos, func(a, b RoleInfo) int {
 		return cmp.Compare(a.Role, b.Role)
 	})
 
+	s.roleCache = roleInfos
+	s.roleCachedAt = time.Now()
+
 	return roleInfos, nil
+}
+
+// invalidateRoleCache drops the snapshot after this process writes a role, so an
+// administrator sees their own change rather than waiting out the TTL.
+func (s *service) invalidateRoleCache() {
+	s.roleMutex.Lock()
+	defer s.roleMutex.Unlock()
+
+	s.roleCache = nil
 }
 
 func (s *service) GetPermissions(ctx context.Context) ([]Permission, error) {
@@ -211,6 +271,8 @@ func (s *service) PutRole(ctx context.Context, role Role, objectActions []Object
 		return RoleInfo{}, err
 	}
 
+	s.invalidateRoleCache()
+
 	if !s.lastUpdate.IsZero() {
 		err = s.updatePermissions(ctx)
 		if err != nil {
@@ -237,6 +299,8 @@ func (s *service) DeleteRole(ctx context.Context, role Role) error {
 	if err := s.repository.DeleteRole(ctx, role); err != nil {
 		return err
 	}
+
+	s.invalidateRoleCache()
 
 	if !s.lastUpdate.IsZero() {
 		return s.updatePermissions(ctx)

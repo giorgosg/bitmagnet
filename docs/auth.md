@@ -41,7 +41,7 @@ WHERE role_name = 'admin' AND created_by IS NULL AND claimed_by IS NULL;
 | `auth.jwt_secret`                | _(none)_             | random per process when unset, so tokens do not survive a restart |
 | `auth.jwt_duration`              | `24h`                |                                                                   |
 | `auth.browser_cookie_name`       | `__Secure-bitmagnet` | must retain the `__Secure-` prefix                                |
-| `auth.rbac_cache_ttl`            | `1m`                 | how long a revoked permission stays in force                      |
+| `auth.rbac_cache_ttl`            | `1m`                 | how long a revoked permission or role change stays in force       |
 | `auth.invitation_required`       | `true`               |                                                                   |
 | `auth.email_required`            | `false`              |                                                                   |
 | `auth.email_verification`        | `false`              | inert — see Known gaps                                            |
