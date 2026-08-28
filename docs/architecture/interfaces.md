@@ -18,7 +18,7 @@ that reads an identity back out.
 | Key          | Package                         | Route(s)                                                              |
 | ------------ | ------------------------------- | --------------------------------------------------------------------- |
 | `auth`       | `internal/auth/http_auth`       | middleware only, no route                                             |
-| `graphql`    | `internal/gql/httpserver`       | `POST /graphql`, `GET /graphql` (playground)                          |
+| `graphql`    | `internal/gql/httpserver`       | `POST /graphql`; `GET /graphql` (playground) only when enabled        |
 | `import`     | `internal/importer/httpserver`  | `POST /import`                                                        |
 | `prometheus` | `internal/telemetry/httpserver` | `/metrics`                                                            |
 | `pprof`      | `internal/telemetry/httpserver` | `/debug/pprof/*`                                                      |
@@ -45,9 +45,11 @@ line verbatim including a Torznab `apikey`).
   namespace field being gated. The set of directives in the schema _is_ the registered set
   of GraphQL object actions — `gqlfx` extracts them from the schema AST rather than
   restating them.
-- The handler accepts JSON POST, introspection, and automatic persisted queries, and serves
-  the playground at `GET /graphql`. Multipart and WebSocket transports are disabled because
-  the schema has neither uploads nor subscriptions. A valid browser-cookie mutation must
+- The handler accepts JSON POST and automatic persisted queries. Introspection and the
+  playground at `GET /graphql` are each gated on a `graphql.*` config key and **default to
+  off**; with the playground off that route is not registered, so the path 404s. Multipart
+  and WebSocket transports are disabled because the schema has neither uploads nor
+  subscriptions. A valid browser-cookie mutation must
   pass the same-origin check described in [auth.md](auth.md) before any resolver runs.
 
 Adding a field means: edit the schema, `task gen-gql`, implement in `resolvers/`, then

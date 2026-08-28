@@ -49,9 +49,17 @@ WHERE role_name = 'admin' AND created_by IS NULL AND claimed_by IS NULL;
 | `auth.password_hashing_cost`     | bcrypt default       | applies to registration _and_ password changes                    |
 | `auth.login_requests_per_minute` | `30`                 | per bucket, not per process                                       |
 | `auth.login_request_burst`       | `5`                  | per bucket, not per process                                       |
+| `graphql.introspection`          | `false`              | `__schema` and `__type` queries; off unless asked for             |
+| `graphql.playground`             | `false`              | GraphiQL on `GET /graphql`; off means the route 404s              |
 
 **Set `auth.jwt_secret` if you do not want every restart to log everyone out.** Unset, it
 is generated per process.
+
+**The two `graphql.*` keys gate developer surface, not access.** Schema introspection and
+the GraphiQL page carry no authorization of their own, so on an instance reachable
+anonymously they hand out a full map of the API. Nothing shipped needs either at runtime —
+the web UI's client is generated from the schema files at build time — so both default to
+off, and a developer turns them on deliberately.
 
 ## Browser login
 

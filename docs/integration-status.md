@@ -77,6 +77,7 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#61](https://github.com/giorgosg/bitmagnet/pull/61) | Give registration email failures stable GraphQL error codes                 | local                                                                | Two error-code regressions observed red                        |
 | [#62](https://github.com/giorgosg/bitmagnet/pull/62) | Stop re-logging the bootstrap admin invitation on every boot                | local                                                                | Credential-in-log regression observed red                      |
 | [#63](https://github.com/giorgosg/bitmagnet/pull/63) | Validate role names so `putRole` cannot store a glob pattern                | local                                                                | Glob-name escalation observed red                              |
+| [#64](https://github.com/giorgosg/bitmagnet/pull/64) | Gate GraphQL introspection and the playground behind config                 | local                                                                | Unauthenticated-surface regressions observed red               |
 | [#66](https://github.com/giorgosg/bitmagnet/pull/66) | Cache role lookups under the existing RBAC cache TTL                        | local                                                                | Uncached-lookup regressions observed red                       |
 
 ## In flight

@@ -33,7 +33,7 @@ This means that **bitmagnet** is not reliant on any external trackers or torrent
 - [x] A highly customizable <a href="/guides/classifier.html">content classifier</a> that can currently identify many types of content, along with key related attributes such as language, resolution, source (BluRay, webrip etc.) and enriches this with data from sources including [The Movie Database](https://www.themoviedb.org/)
 - [x] [An import facility for ingesting torrents from any source, for example the RARBG backup](/guides/import.html)
 - [x] A torrent search engine
-- [x] A GraphQL API: currently this provides a single search query; there is also an embedded GraphQL playground at `/graphql`
+- [x] A GraphQL API: currently this provides a single search query; an embedded GraphQL playground is available at `/graphql` once `graphql.playground` is enabled
 - [x] A responsive, multilingual web user interface implemented in Angular
 - [x] [A Torznab-compatible endpoint for integration with the Serverr stack](/guides/servarr-integration.html)
 - [x] A WebUI dashboard for monitoring and administration
