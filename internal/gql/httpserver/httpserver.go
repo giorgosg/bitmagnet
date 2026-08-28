@@ -25,6 +25,7 @@ type Params struct {
 	Schema        lazy.Lazy[graphql.ExecutableSchema]
 	Logger        *zap.SugaredLogger
 	BrowserCookie browser_session.Cookie
+	Config        Config
 }
 
 type Result struct {
@@ -37,6 +38,7 @@ func New(p Params) Result {
 		Option: &builder{
 			schema:        p.Schema,
 			browserCookie: p.BrowserCookie,
+			config:        p.Config,
 		},
 	}
 }
@@ -44,6 +46,7 @@ func New(p Params) Result {
 type builder struct {
 	schema        lazy.Lazy[graphql.ExecutableSchema]
 	browserCookie browser_session.Cookie
+	config        Config
 }
 
 func (builder) Key() string {
@@ -56,27 +59,36 @@ func (b builder) Apply(e *gin.Engine) error {
 		return err
 	}
 
-	gql := newServer(schema, b.browserCookie)
+	gql := newServer(schema, b.browserCookie, b.config)
 
 	e.POST("/graphql", func(c *gin.Context) {
 		gql.ServeHTTP(c.Writer, c.Request)
 	})
 
-	pg := playground.Handler("GraphQL playground", "/graphql")
+	// The playground is a separate route from the API, sharing only the path, and
+	// it carries no auth guard. When it is off the route is not registered at all,
+	// so GET /graphql 404s rather than serving an unauthenticated page.
+	if b.config.Playground {
+		pg := playground.Handler("GraphQL playground", "/graphql")
 
-	e.GET("/graphql", func(c *gin.Context) {
-		if c.GetHeader("Upgrade") != "" {
-			c.AbortWithStatus(http.StatusBadRequest)
-			return
-		}
+		e.GET("/graphql", func(c *gin.Context) {
+			if c.GetHeader("Upgrade") != "" {
+				c.AbortWithStatus(http.StatusBadRequest)
+				return
+			}
 
-		pg.ServeHTTP(c.Writer, c.Request)
-	})
+			pg.ServeHTTP(c.Writer, c.Request)
+		})
+	}
 
 	return nil
 }
 
-func newServer(es graphql.ExecutableSchema, browserCookie browser_session.Cookie) *handler.Server {
+func newServer(
+	es graphql.ExecutableSchema,
+	browserCookie browser_session.Cookie,
+	cfg Config,
+) *handler.Server {
 	srv := handler.New(es)
 	srv.SetErrorPresenter(errorPresenter)
 
@@ -84,7 +96,13 @@ func newServer(es graphql.ExecutableSchema, browserCookie browser_session.Cookie
 
 	srv.SetQueryCache(lru.New[*ast.QueryDocument](1000))
 
-	srv.Use(extension.Introspection{})
+	// Off unless an operator asks for it: the schema is reconnaissance for anyone
+	// who can reach the POST endpoint, and nothing shipped reads it at runtime -
+	// the web UI's client is generated from the schema files at build time.
+	if cfg.Introspection {
+		srv.Use(extension.Introspection{})
+	}
+
 	srv.Use(extension.AutomaticPersistedQuery{
 		Cache: lru.New[string](100),
 	})

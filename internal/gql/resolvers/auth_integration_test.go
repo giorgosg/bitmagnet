@@ -718,7 +718,11 @@ func TestGraphQLRejectsMultipartAndWebSocketTransports(t *testing.T) {
 
 	defer func() { require.NoError(t, webSocketResponse.Body.Close()) }()
 
-	assert.Equal(t, http.StatusBadRequest, webSocketResponse.StatusCode)
+	// The playground is the only GET /graphql handler and it is off by default,
+	// so an upgrade reaches no handler at all. The explicit rejection that route
+	// performs when `graphql.playground` is enabled is covered by
+	// TestPlaygroundRejectsWebSocketUpgradeWhenEnabled in internal/gql/httpserver.
+	assert.Equal(t, http.StatusNotFound, webSocketResponse.StatusCode)
 }
 
 func browserCookieAndSecondUserBearer(
