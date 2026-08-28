@@ -67,6 +67,7 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#56](https://github.com/giorgosg/bitmagnet/pull/56) | Return the current `lastLoginAt` from login                                 | local                                                                | Login/identity timestamp mismatch observed red                 |
 | [#57](https://github.com/giorgosg/bitmagnet/pull/57) | Sign off the browser authentication contract                                | local                                                                | Full matrix passed; regressions covered by #51–#56             |
 | [#58](https://github.com/giorgosg/bitmagnet/pull/58) | Close the browser authentication integration ledger                         | local                                                                | Documentation only                                             |
+| [#61](https://github.com/giorgosg/bitmagnet/pull/61) | Give registration email failures stable GraphQL error codes                 | local                                                                | Two error-code regressions observed red                        |
 
 ## In flight
 
