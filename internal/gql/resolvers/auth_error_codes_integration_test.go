@@ -161,6 +161,34 @@ func TestGraphQLRegistrationErrorCodes(t *testing.T) {
 		requireGraphQLErrorCode(t, response, "INVITATION_CLAIMED")
 	})
 
+	t.Run("missing email", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := authconfig.NewDefaultConfig()
+		cfg.InvitationRequired = false
+		cfg.EmailRequired = true
+		server, _ := newAuthTestServerWithConfig(t, cfg)
+		response := query(t, server, "", `mutation { self { register(input: {
+			username: "noemail", password: "`+strongTestPassword+`"
+		}) { user { id } } } }`)
+
+		requireGraphQLErrorCode(t, response, "EMAIL_REQUIRED")
+	})
+
+	t.Run("invalid email", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := authconfig.NewDefaultConfig()
+		cfg.InvitationRequired = false
+		server, _ := newAuthTestServerWithConfig(t, cfg)
+		response := query(t, server, "", `mutation { self { register(input: {
+			username: "bademail", email: "not-an-email",
+			password: "`+strongTestPassword+`"
+		}) { user { id } } } }`)
+
+		requireGraphQLErrorCode(t, response, "EMAIL_INVALID")
+	})
+
 	t.Run("insufficient password entropy", func(t *testing.T) {
 		t.Parallel()
 
