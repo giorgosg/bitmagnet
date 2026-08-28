@@ -105,10 +105,10 @@ Three enforcement points, deliberately not one:
   [interfaces.md](interfaces.md). Reading the ambient identity made a browser session a
   third credential type here: an operator with the web UI open had their JWT attached by
   the middleware, so Torznab answered `200` to a request carrying no `apikey` at all.
-- **Everything else** — `http_auth.Guard`, used by `/import` and `/debug/pprof`. Both fail
-  closed, and both resolve the anonymous identity themselves when nothing is on the
-  context, so authorization follows the permission model rather than how the server
-  happened to be assembled.
+- **Everything else** — `http_auth.Guard`, used by `/import`, `/metrics`, and
+  `/debug/pprof`. All three fail closed, and all three resolve the anonymous identity
+  themselves when nothing is on the context, so authorization follows the permission
+  model rather than how the server happened to be assembled.
 
 A baseline is granted to `anon` and `user` regardless of the anonymous-access setting —
 `health::query` and `version::query`. Recovery calls under `self` need no baseline Permission:
