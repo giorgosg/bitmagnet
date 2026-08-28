@@ -74,6 +74,7 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#58](https://github.com/giorgosg/bitmagnet/pull/58) | Close the browser authentication integration ledger                         | local                                                                | Documentation only                                             |
 | [#59](https://github.com/giorgosg/bitmagnet/pull/59) | Correct four stale doc pages found by the fork review                       | local                                                                | Documentation only                                             |
 | [#60](https://github.com/giorgosg/bitmagnet/pull/60) | Reload the blocklist bloom filter off the manager mutex                     | local — completes #42                                                | Concurrency regression observed red                            |
+| [#64](https://github.com/giorgosg/bitmagnet/pull/64) | Gate GraphQL introspection and the playground behind config                 | local                                                                | Unauthenticated-surface regressions observed red               |
 
 ## In flight
 
