@@ -7,6 +7,7 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/rbac"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/user"
 	"github.com/bitmagnet-io/bitmagnet/internal/blocking"
+	"github.com/bitmagnet-io/bitmagnet/internal/config/configfx"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/search"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql"
@@ -28,6 +29,7 @@ import (
 func New() fx.Option {
 	return fx.Module(
 		"graphql",
+		configfx.NewConfigModule[httpserver.Config]("graphql", httpserver.NewDefaultConfig()),
 		fx.Provide(
 			config.New,
 			httpserver.New,
