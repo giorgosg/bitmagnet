@@ -20,6 +20,8 @@ const (
 	ErrorCodeInvitationInvalid                   = "INVITATION_INVALID"
 	ErrorCodeInvitationExpired                   = "INVITATION_EXPIRED"
 	ErrorCodeInvitationClaimed                   = "INVITATION_CLAIMED"
+	ErrorCodeEmailRequired                       = "EMAIL_REQUIRED"
+	ErrorCodeEmailInvalid                        = "EMAIL_INVALID"
 	ErrorCodePasswordInsufficientEntropy         = "PASSWORD_INSUFFICIENT_ENTROPY"
 	ErrorCodeUnauthorized                        = "UNAUTHORIZED"
 	ErrorCodeAuthenticationInfrastructureFailure = "AUTHENTICATION_INFRASTRUCTURE_FAILURE"
@@ -101,6 +103,20 @@ var userErrorPresentations = []errorClassification{
 		presentation: errorPresentation{
 			code:    ErrorCodeInvitationClaimed,
 			message: "invitation already claimed",
+		},
+	},
+	{
+		target: user.ErrEmailMissing,
+		presentation: errorPresentation{
+			code:    ErrorCodeEmailRequired,
+			message: "email is required",
+		},
+	},
+	{
+		target: user.ErrEmailInvalid,
+		presentation: errorPresentation{
+			code:    ErrorCodeEmailInvalid,
+			message: "invalid email",
 		},
 	},
 	{

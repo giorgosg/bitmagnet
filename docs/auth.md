@@ -102,6 +102,8 @@ message or its wrapping. Application errors retain their GraphQL `path` and `loc
 | `INVITATION_INVALID`                    | The Invitation code does not exist                             |
 | `INVITATION_EXPIRED`                    | The Invitation has expired                                     |
 | `INVITATION_CLAIMED`                    | The Invitation has already been claimed                        |
+| `EMAIL_REQUIRED`                        | `auth.email_required` is on and no email was supplied          |
+| `EMAIL_INVALID`                         | The email does not match the server's address pattern          |
 | `PASSWORD_INSUFFICIENT_ENTROPY`         | The password is below `auth.password_min_entropy`              |
 | `UNAUTHORIZED`                          | The Identity lacks the refused GraphQL Object action           |
 | `AUTHENTICATION_INFRASTRUCTURE_FAILURE` | A credential could not be resolved because a dependency failed |

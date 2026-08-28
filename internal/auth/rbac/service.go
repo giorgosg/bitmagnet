@@ -254,6 +254,12 @@ func (s *service) GetPermissions(ctx context.Context) ([]Permission, error) {
 }
 
 func (s *service) PutRole(ctx context.Context, role Role, objectActions []ObjectAction) (RoleInfo, error) {
+	// Before the semaphore and before the repository: the name becomes a casbin
+	// policy subject, and the matcher globs the stored value against the request.
+	if err := role.Validate(); err != nil {
+		return RoleInfo{}, err
+	}
+
 	select {
 	case <-ctx.Done():
 		return RoleInfo{}, ctx.Err()
