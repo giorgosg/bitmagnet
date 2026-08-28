@@ -50,7 +50,10 @@ most "why was this torrent not indexed" questions:
    database, but note that it is _stable_: entries evict over time, which is the only
    reason a hash dropped here is ever reconsidered.
 2. **`blockingManager.Filter`** — the persisted blocklist, `internal/blocking`. Backed by
-   a bloom filter stored as a Postgres large object.
+   a bloom filter stored as a Postgres large object, reloaded every five minutes to pick
+   up blocks made by another process. That reload allocates and transfers 25 MB, so it
+   happens off the manager's mutex: a caller that finds one already in flight is answered
+   from the filter it has. Five minutes is already the staleness this filter permits.
 3. **Triage** ([`infohash_triage.go`](../../internal/dhtcrawler/infohash_triage.go)) — one
    query joining `torrents` to `torrents_torrent_sources`. Four outcomes, documented in
    the function's doc comment: fetch metainfo, rescrape, or discard.
