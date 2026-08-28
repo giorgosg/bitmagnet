@@ -147,6 +147,13 @@ every call through a one-slot semaphore and caches the compiled policy for
 authorization check in the process is serialised. Both properties are written up in the
 issue notes below.
 
+**Roles are cached on the same TTL**, behind their own `RWMutex` rather than the semaphore.
+Every authentication resolves a role, and the repository preloads its permissions, so the
+lookup was two statements straight to the database on every request — the steady-state
+cost of an instance a Torznab client is polling. A role written by this process
+invalidates the snapshot immediately, so an administrator sees their own change; a change
+made by another process becomes visible on the TTL, as permissions already did.
+
 Because that semaphore is process-global and the `@auth` directive fires **per field**, a
 decision that asks more than one question is worth combining. `EnforceEvery` takes a list
 of subject groups — every group must allow, and a group is satisfied by any subject in it
