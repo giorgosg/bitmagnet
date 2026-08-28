@@ -2,6 +2,7 @@ package rbac_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -194,4 +195,75 @@ func TestService_DeleteRole_propagates_repository_error(t *testing.T) {
 		test.service.DeleteRole(t.Context(), rbac.Role("unknown")),
 		errDelete,
 	)
+}
+
+// The casbin matcher is globMatch(r.sub, p.sub), and the *stored* policy is the
+// pattern rather than the request. A role named "*" would therefore match every
+// subject, anon included, so its permissions would be granted to everyone. Names
+// are rejected before they reach the repository, which is what the mock asserts:
+// an unexpected PutRole call fails the test on its own.
+func TestService_put_role_rejects_glob_patterns(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"*", "**", "adm*", "?dmin", "a[dm]in", "{admin,user}", "a\\*b"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			test := newTestHarness(t)
+
+			_, err := test.service.PutRole(t.Context(), rbac.Role(name),
+				[]rbac.ObjectAction{rbac.NewObjectAction("torrent", "", "delete")})
+
+			require.ErrorIs(t, err, rbac.ErrRoleNameInvalid)
+		})
+	}
+}
+
+func TestService_put_role_rejects_names_outside_the_character_class(t *testing.T) {
+	t.Parallel()
+
+	for name, why := range map[string]string{
+		"":                      "empty",
+		".leading":              "leading punctuation",
+		"trailing-":             "trailing punctuation",
+		"has space":             "whitespace",
+		"emoji😀":                "outside the class",
+		strings.Repeat("a", 33): "too long",
+	} {
+		t.Run(why, func(t *testing.T) {
+			t.Parallel()
+
+			test := newTestHarness(t)
+
+			_, err := test.service.PutRole(t.Context(), rbac.Role(name),
+				[]rbac.ObjectAction{rbac.NewObjectAction("torrent", "", "delete")})
+
+			require.ErrorIs(t, err, rbac.ErrRoleNameInvalid)
+		})
+	}
+}
+
+// Names that were always legitimate must still reach the repository - including
+// the core roles, whose permissions an administrator may edit, and short names
+// that a username's minimum length would have rejected.
+func TestService_put_role_accepts_ordinary_names(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"admin", "editor", "user", "anon", "ops", "a", "read-only", "team.one", "a_b"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			test := newTestHarness(t)
+			role := rbac.Role(name)
+			actions := []rbac.ObjectAction{rbac.NewObjectAction("torrent", "", "delete")}
+
+			test.repository.EXPECT().
+				PutRole(t.Context(), role, actions).
+				Return(rbac.RoleInfo{Role: role}, nil).
+				Once()
+
+			_, err := test.service.PutRole(t.Context(), role, actions)
+			require.NoError(t, err)
+		})
+	}
 }
