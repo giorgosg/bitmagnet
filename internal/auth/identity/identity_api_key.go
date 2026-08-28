@@ -30,26 +30,29 @@ func (a APIKey) Self() Self {
 	}
 }
 
+// Enforce gates on two things: the User's role must allow the action, and the key's
+// own permissions or the anonymous role must allow it too. A key can therefore
+// never exceed its User.
+//
+// Both gates go in one EnforceEvery call. Asked separately they cost two
+// acquisitions of the rbac service's process-global semaphore for one decision,
+// and the @auth directive fires per field - so an N-field query serialised 2N
+// times where N would do.
 func (a APIKey) Enforce(ctx context.Context, objectAction rbac.ObjectAction) (bool, error) {
-	if allow, err := a.enforcer.Enforce(
+	return a.enforcer.EnforceEvery(
 		ctx,
-		rbac.SubjectRole{Role: rbac.Role(a.User.RoleName)},
-		objectAction,
-	); err != nil || !allow {
-		return false, err
-	}
-
-	return a.enforcer.EnforceAny(
-		ctx,
-		append(slice.Map(a.Permissions, func(perm model.APIKeyPermission) rbac.Subject {
-			return rbac.SubjectPermission{
-				ObjectAction: rbac.ObjectAction{
-					Namespace: perm.Namespace,
-					Object:    perm.Object,
-					Action:    perm.Action,
-				},
-			}
-		}), rbac.SubjectRole{Role: a.anon.Role}),
+		[][]rbac.Subject{
+			{rbac.SubjectRole{Role: rbac.Role(a.User.RoleName)}},
+			append(slice.Map(a.Permissions, func(perm model.APIKeyPermission) rbac.Subject {
+				return rbac.SubjectPermission{
+					ObjectAction: rbac.ObjectAction{
+						Namespace: perm.Namespace,
+						Object:    perm.Object,
+						Action:    perm.Action,
+					},
+				}
+			}), rbac.SubjectRole{Role: a.anon.Role}),
+		},
 		objectAction,
 	)
 }

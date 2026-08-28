@@ -16,6 +16,14 @@ import (
 type Enforcer interface {
 	Enforce(ctx context.Context, subject Subject, objectAction ObjectAction) (bool, error)
 	EnforceAny(ctx context.Context, subjects []Subject, objectAction ObjectAction) (bool, error)
+	// EnforceEvery reports whether every group allows the object action, where a
+	// group is satisfied when any one of its subjects allows it.
+	//
+	// It exists so that a decision needing more than one question costs one
+	// acquisition of the service's semaphore rather than one per question. The
+	// semaphore is process-global and the @auth directive fires per field, so the
+	// difference is per field of every query.
+	EnforceEvery(ctx context.Context, groups [][]Subject, objectAction ObjectAction) (bool, error)
 }
 
 type Service interface {
@@ -90,6 +98,60 @@ func (s *service) EnforceAny(ctx context.Context, subjects []Subject, objectActi
 	result, err := casbin.BatchEnforce(batchRequests(subjects, objectAction))
 
 	return slices.Contains(result, true), err
+}
+
+func (s *service) EnforceEvery(
+	ctx context.Context,
+	groups [][]Subject,
+	objectAction ObjectAction,
+) (bool, error) {
+	if len(groups) == 0 {
+		return false, nil
+	}
+
+	select {
+	case <-ctx.Done():
+		return false, ctx.Err()
+	case s.sem <- struct{}{}:
+	}
+
+	defer func() { <-s.sem }()
+
+	casbin, err := s.acquireCasbin(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	// One batch for every group, then split the answers back out by group. casbin
+	// evaluation is pure, so asking all of them is the same decision as asking
+	// each in turn - it just costs one acquisition instead of one per group.
+	var requests [][]any
+
+	for _, subjects := range groups {
+		if len(subjects) == 0 {
+			// A group nothing can satisfy denies the whole decision.
+			return false, nil
+		}
+
+		requests = append(requests, batchRequests(subjects, objectAction)...)
+	}
+
+	results, err := casbin.BatchEnforce(requests)
+	if err != nil {
+		return false, err
+	}
+
+	offset := 0
+
+	for _, subjects := range groups {
+		if !slices.Contains(results[offset:offset+len(subjects)], true) {
+			return false, nil
+		}
+
+		offset += len(subjects)
+	}
+
+	return true, nil
 }
 
 func (s *service) GetAllRoles(ctx context.Context) ([]RoleInfo, error) {
