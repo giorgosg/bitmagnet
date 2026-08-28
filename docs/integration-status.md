@@ -73,6 +73,7 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#57](https://github.com/giorgosg/bitmagnet/pull/57) | Sign off the browser authentication contract                                | local                                                                | Full matrix passed; regressions covered by #51–#56             |
 | [#58](https://github.com/giorgosg/bitmagnet/pull/58) | Close the browser authentication integration ledger                         | local                                                                | Documentation only                                             |
 | [#59](https://github.com/giorgosg/bitmagnet/pull/59) | Correct four stale doc pages found by the fork review                       | local                                                                | Documentation only                                             |
+| [#60](https://github.com/giorgosg/bitmagnet/pull/60) | Reload the blocklist bloom filter off the manager mutex                     | local — completes #42                                                | Concurrency regression observed red                            |
 | [#61](https://github.com/giorgosg/bitmagnet/pull/61) | Give registration email failures stable GraphQL error codes                 | local                                                                | Two error-code regressions observed red                        |
 
 ## In flight

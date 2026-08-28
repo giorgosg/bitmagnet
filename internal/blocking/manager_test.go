@@ -2,7 +2,9 @@ package blocking
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dbtest"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol"
@@ -134,4 +136,102 @@ func TestBlock_PersistsAndKeepsFiltering(t *testing.T) {
 	filtered, err := m.Filter(ctx, []protocol.ID{blocked, hashOf(t, 0x08)})
 	require.NoError(t, err)
 	assert.Equal(t, []protocol.ID{hashOf(t, 0x08)}, filtered)
+}
+
+// lockBloomFilters takes an ACCESS EXCLUSIVE lock on bloom_filters and returns a
+// release function. Every refresh reads that table as its first statement, so the
+// lock stalls a reload at a point the test controls - standing in for the 25 MB
+// transfer that makes the reload expensive in production.
+func lockBloomFilters(ctx context.Context, t *testing.T, pool *pgxpool.Pool) func() {
+	t.Helper()
+
+	conn, err := pool.Acquire(ctx)
+	require.NoError(t, err)
+
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		conn.Release()
+		require.NoError(t, err)
+	}
+
+	if _, err = tx.Exec(ctx, "LOCK TABLE bloom_filters IN ACCESS EXCLUSIVE MODE"); err != nil {
+		conn.Release()
+		require.NoError(t, err)
+	}
+
+	var once sync.Once
+
+	return func() {
+		once.Do(func() {
+			_ = tx.Rollback(ctx)
+
+			conn.Release()
+		})
+	}
+}
+
+// awaitStalledRead blocks until a backend on this test's database is waiting for a
+// lock, which is how the test knows the reload has started and not yet finished.
+func awaitStalledRead(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+
+	require.Eventually(t, func() bool {
+		var waiting int
+
+		if err := pool.QueryRow(ctx, `
+			SELECT count(*) FROM pg_locks
+			WHERE NOT granted
+			  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`).
+			Scan(&waiting); err != nil {
+			return false
+		}
+
+		return waiting > 0
+	}, time.Minute, 10*time.Millisecond, "the reload never reached the stalled read")
+}
+
+func TestFilter_DoesNotBlockConcurrentCallersDuringAReload(t *testing.T) {
+	t.Parallel()
+
+	db := dbtest.New(t)
+	ctx := t.Context()
+
+	m := newTestManager(db.Pool)
+
+	// Persist a hash, so a stored filter exists and m.filter is primed.
+	require.NoError(t, m.Block(ctx, []protocol.ID{hashOf(t, 0x09)}, true))
+
+	release := lockBloomFilters(ctx, t, db.Pool)
+	defer release()
+
+	// One caller reaches the refresh and stalls inside it.
+	stalled := make(chan struct{})
+
+	go func() {
+		defer close(stalled)
+
+		_, _ = m.Filter(ctx, []protocol.ID{hashOf(t, 0x0a)})
+	}()
+
+	awaitStalledRead(ctx, t, db.Pool)
+
+	// A second caller has a usable filter already and must not queue behind the
+	// stalled read: the five minute refresh window is what makes it stale, not
+	// this call.
+	concurrent := make(chan error, 1)
+
+	go func() {
+		_, err := m.Filter(ctx, []protocol.ID{hashOf(t, 0x0b)})
+		concurrent <- err
+	}()
+
+	select {
+	case err := <-concurrent:
+		require.NoError(t, err)
+	case <-time.After(30 * time.Second):
+		t.Fatal("Filter serialised behind an in-flight reload")
+	}
+
+	release()
+	<-stalled
 }
