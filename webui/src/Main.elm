@@ -32,6 +32,7 @@ import Task
 import Time
 import Url exposing (Url)
 import UserOverview
+import Users
 
 
 main : Program Flags Model Msg
@@ -95,6 +96,18 @@ type alias Model =
     -- The Invitation administration screen: what was fetched, what is being created, and
     -- which withdrawal has been asked about but not yet confirmed.
     , invitations : Invitations.State
+
+    -- The User administration screen: what was fetched, what is being searched for, and
+    -- which act has been asked about but not yet confirmed.
+    , users : Users.State
+
+    -- Separate counter for the User listing's fetches. A page belongs to the search, the
+    -- visit and the Identity it was asked under; an answer that fails this check is
+    -- dropped rather than rendered.
+    , usersEpoch : Int
+
+    -- Separate counter for the search debounce, because a keystroke is not yet a search.
+    , userTyping : Int
 
     -- Whether the header's Identity menu is showing. Presentational, so it is not in the
     -- URL: it is closed by navigating, and reopening it is one click.
@@ -278,6 +291,9 @@ init flags url key =
       , signOut = UserOverview.Ready
       , register = Register.prefilled (invitationCodeFor route)
       , invitations = Invitations.empty
+      , users = Users.empty
+      , usersEpoch = 0
+      , userTyping = 0
       , menuOpen = False
       , identityRefresh = Resolving
       , epoch = 0
@@ -434,6 +450,19 @@ type Msg
     | GotInvitationWithdrawn (Result (Graphql.Http.Error ()) ())
     | InvitationsPageRequested Int
     | GotInvitations Int (Result (Graphql.Http.Error Invitations.Page) Invitations.Page)
+    | UserSearchChanged String
+    | UserSearchDebounceElapsed Int
+    | UsersPageRequested Int
+    | UserRoleChosen Int String
+    | UserDisableRequested Int
+    | UserEnableRequested Int
+    | UserDeleteRequested Int
+    | UserActConfirmed
+    | UserActCancelled
+    | GotUsers Int (Result (Graphql.Http.Error Users.Page) Users.Page)
+    | GotUserRole (Result (Graphql.Http.Error Identity.User) Identity.User)
+    | GotUserEnabled (Result (Graphql.Http.Error Identity.User) Identity.User)
+    | GotUserDeleted (Result (Graphql.Http.Error ()) ())
     | SignOutRequested
     | GotSignOut (Result (Graphql.Http.Error ()) ())
     | AuthenticationChangedHere Refresh
@@ -729,6 +758,160 @@ update msg model =
                         )
                     )
 
+        UserSearchChanged query ->
+            let
+                userTyping =
+                    model.userTyping + 1
+            in
+            ( { model | users = Users.withQuery query model.users, userTyping = userTyping }
+            , Process.sleep debounceMs |> Task.perform (\_ -> UserSearchDebounceElapsed userTyping)
+            )
+
+        UserSearchDebounceElapsed userTyping ->
+            if userTyping /= model.userTyping then
+                -- Another keystroke landed; that one owns the search.
+                ( model, Cmd.none )
+
+            else
+                fetchUsers model
+
+        UsersPageRequested offset ->
+            fetchUsers
+                { model
+                    | users =
+                        model.users
+                            |> Users.withOffset offset
+                            |> Users.withListing Users.Loading
+                }
+
+        UserRoleChosen userId role ->
+            case model.identity of
+                Identity.UserAuthenticated me _ ->
+                    if me.id == userId then
+                        -- Changing your own Role can sign this very screen away, so it
+                        -- asks first. Everyone else's Role is not self-affecting: an
+                        -- administrator applying it can just as easily reverse it.
+                        ( { model
+                            | users =
+                                Users.withConfirming
+                                    (Just (Users.ChangeOwnRole { userId = userId, role = role }))
+                                    model.users
+                          }
+                        , Cmd.none
+                        )
+
+                    else
+                        ( { model | users = Users.withAction Users.Working model.users }
+                        , Users.setRole model.apiUrl userId role GotUserRole
+                        )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        UserDisableRequested userId ->
+            -- Disabling always asks: it takes the User's sign-ins and their API keys
+            -- away until someone with the authority undoes it.
+            ( { model | users = Users.withConfirming (Just (Users.Disable userId)) model.users }
+            , Cmd.none
+            )
+
+        UserEnableRequested userId ->
+            -- Enabling is the one act that grants rather than takes, and the ticket
+            -- still asks that it be deliberate; its ask says what it grants rather
+            -- than what it costs.
+            ( { model | users = Users.withConfirming (Just (Users.Enable userId)) model.users }
+            , Cmd.none
+            )
+
+        UserDeleteRequested userId ->
+            ( { model | users = Users.withConfirming (Just (Users.Delete userId)) model.users }
+            , Cmd.none
+            )
+
+        UserActConfirmed ->
+            -- Which act the confirmation belongs to is what was armed; the ask in the
+            -- state is the one place the User is named, so the message carries nothing.
+            case model.users.confirming of
+                Just (Users.Delete id) ->
+                    actConfirmed model (Users.delete model.apiUrl id GotUserDeleted)
+
+                Just (Users.Disable id) ->
+                    actConfirmed model (Users.setEnabled model.apiUrl id False GotUserEnabled)
+
+                Just (Users.Enable id) ->
+                    actConfirmed model (Users.setEnabled model.apiUrl id True GotUserEnabled)
+
+                Just (Users.ChangeOwnRole { userId, role }) ->
+                    actConfirmed model (Users.setRole model.apiUrl userId role GotUserRole)
+
+                Nothing ->
+                    ( model, Cmd.none )
+
+        UserActCancelled ->
+            ( { model | users = Users.withConfirming Nothing model.users }, Cmd.none )
+
+        GotUsers usersEpoch (Ok fetched) ->
+            if usersEpoch /= model.usersEpoch then
+                ( model, Cmd.none )
+
+            else
+                case ( fetched.users, Users.previousOffset model.users.offset ) of
+                    -- Removing the last row of the last page leaves the offset past the
+                    -- end, and an empty page there reads as "there are none" on an
+                    -- instance that has fifty. Step back rather than say that.
+                    ( [], Just back ) ->
+                        fetchUsers
+                            { model
+                                | users =
+                                    model.users
+                                        |> Users.withOffset back
+                                        |> Users.withListing Users.Loading
+                            }
+
+                    _ ->
+                        ( { model | users = Users.withListing (Users.Loaded fetched) model.users }
+                        , Cmd.none
+                        )
+
+        GotUsers usersEpoch (Err error) ->
+            if usersEpoch /= model.usersEpoch then
+                ( model, Cmd.none )
+
+            else
+                onRequestFailure error
+                    model
+                    (\_ current ->
+                        ( { current
+                            | users =
+                                Users.withListing
+                                    (Users.Failed (ApiError.fromError error))
+                                    current.users
+                          }
+                        , Cmd.none
+                        )
+                    )
+
+        GotUserRole (Err error) ->
+            gotActFailure error model
+
+        GotUserRole (Ok _) ->
+            actAccepted model
+
+        GotUserEnabled (Err error) ->
+            gotActFailure error model
+
+        GotUserEnabled (Ok _) ->
+            actAccepted model
+
+        GotUserDeleted (Err error) ->
+            gotActFailure error model
+
+        GotUserDeleted (Ok ()) ->
+            -- A deleted self shows up here on its own: the listing refetch is the first
+            -- request the dead credential makes, it comes back refused, and the
+            -- Identity is refetched into whatever the server now says it is.
+            actAccepted model
+
         SignOutRequested ->
             if model.signOut == UserOverview.SigningOut then
                 ( model, Cmd.none )
@@ -834,14 +1017,26 @@ update msg model =
 
             else
                 let
+                    -- Leaving a screen ends what was on it: an armed ask, a refusal, the
+                    -- page being read — and the epoch moves with it, so an answer still
+                    -- in flight from the screen just left belongs to no future screen.
+                    -- The search debounce is spent with them: a timer still pending has
+                    -- no search left to run.
+                    leaving =
+                        { model
+                            | users = Users.empty
+                            , usersEpoch = model.usersEpoch + 1
+                            , userTyping = model.userTyping + 1
+                        }
+
                     epoch =
                         model.epoch + 1
 
                     ( results, cmd ) =
-                        guardedLoad model model.identity epoch route
+                        guardedLoad leaving model.identity epoch route
 
                     navigated =
-                        { model
+                        { leaving
                             | route = route
                             , menuOpen = False
                             , field = syncField model route
@@ -1055,6 +1250,19 @@ invitationsMessages =
     }
 
 
+usersMessages : Users.Messages Msg
+usersMessages =
+    { queryChanged = UserSearchChanged
+    , pageRequested = UsersPageRequested
+    , roleChosen = UserRoleChosen
+    , disableRequested = UserDisableRequested
+    , enableRequested = UserEnableRequested
+    , deleteRequested = UserDeleteRequested
+    , confirmed = UserActConfirmed
+    , cancelled = UserActCancelled
+    }
+
+
 registerMessages : Register.Messages Msg
 registerMessages =
     { usernameChanged = RegisterUsernameChanged
@@ -1163,6 +1371,61 @@ onRequestFailure error model toFailed =
 
     else
         toFailed (ApiError.toMessage failure) model
+
+
+{-| Refetch the User listing under a fresh epoch, so only the answer to this very
+question is applied. Every trigger goes through here: the search, a page turn, and the
+refetch an act performs once the server has accepted it.
+-}
+fetchUsers : Model -> ( Model, Cmd Msg )
+fetchUsers model =
+    let
+        usersEpoch =
+            model.usersEpoch + 1
+    in
+    ( { model | usersEpoch = usersEpoch }
+    , Users.fetch model.apiUrl model.users.query model.users.offset (GotUsers usersEpoch)
+    )
+
+
+{-| An act whose ask was confirmed: the ask is spent, the act is the only one running,
+and its refusal, if it comes, is announced above the list.
+-}
+actConfirmed : Model -> Cmd Msg -> ( Model, Cmd Msg )
+actConfirmed model cmd =
+    ( { model
+        | users =
+            model.users
+                |> Users.withConfirming Nothing
+                |> Users.withAction Users.Working
+      }
+    , cmd
+    )
+
+
+{-| The server accepted the act. The act itself is over the moment the server says so
+— leaving `Working` set here would hold every control on the screen disabled until a
+navigation — and the listing is refetched to show what the server now says, since the
+mutation's own answer is not spliced in.
+-}
+actAccepted : Model -> ( Model, Cmd Msg )
+actAccepted model =
+    fetchUsers { model | users = Users.withAction Users.None model.users }
+
+
+{-| A refused act keeps its refusal for the screen to announce, unless the refusal says
+the Identity in hand has gone stale — in which case the answer is always to refetch it,
+and whatever the act wanted to say never happens.
+-}
+gotActFailure : Graphql.Http.Error a -> Model -> ( Model, Cmd Msg )
+gotActFailure error model =
+    onRequestFailure error
+        model
+        (\_ current ->
+            ( { current | users = Users.withAction (Users.Refused (ApiError.fromError error)) current.users }
+            , Cmd.none
+            )
+        )
 
 
 {-| The URL is the source of truth for what was searched, but not for what is in the box:
@@ -1295,13 +1558,15 @@ loadWhenReady identity apiUrl epochs route =
                 load apiUrl epochs route
 
 
-{-| The two counters a load has to carry. They are separate because they answer different
-questions: whether a page belongs to the search that is on screen, and whether it belongs
-to the Identity that is in hand. A response that fails either is dropped.
+{-| The three counters a load has to carry. They are separate because they answer
+different questions: whether a page belongs to the search that is on screen, to the
+Identity that is in hand, and to the visit of the User screen that asked for it. A
+response that fails any check is dropped.
 -}
 type alias Epochs =
     { query : Int
     , identity : Int
+    , users : Int
     }
 
 
@@ -1322,7 +1587,7 @@ guardedLoad model identity epoch route =
         Route.Allowed ->
             loadWhenReady identity
                 model.apiUrl
-                { query = epoch, identity = model.identityEpoch }
+                { query = epoch, identity = model.identityEpoch, users = model.usersEpoch }
                 route
 
 
@@ -1391,9 +1656,15 @@ beginIdentityRefresh reason model =
         -- flight or already refused was about.
         , signOut = UserOverview.Ready
 
-        -- Nor the one the administration listing was fetched under. The epoch keeps an
+        -- Nor the one the administration listings were fetched under. The epoch keeps an
         -- older answer from landing; this keeps the older data from being held.
         , invitations = Invitations.empty
+        , users = Users.empty
+        , usersEpoch = model.usersEpoch + 1
+
+        -- And a pending search-debounce is spent: the timer it would fire belongs to a
+        -- screen that no longer holds the search it was typed into.
+        , userTyping = model.userTyping + 1
         , results = pendingResults model.route
         , epoch = epoch
         , infiniteList = InfiniteList.init
@@ -1480,7 +1751,7 @@ load apiUrl epochs route =
             ( Blank, Cmd.none )
 
         Route.AdminUsers ->
-            ( Blank, Cmd.none )
+            ( Blank, Users.fetch apiUrl "" 0 (GotUsers epochs.users) )
 
         Route.AdminRoles ->
             ( Blank, Cmd.none )
@@ -1950,7 +2221,7 @@ viewAllowedRoute model =
             p [ class "notice" ] [ text "API keys." ]
 
         Route.AdminUsers ->
-            p [ class "notice" ] [ text "User administration." ]
+            Users.view model.zone usersMessages model.identity model.users
 
         Route.AdminRoles ->
             p [ class "notice" ] [ text "Role administration." ]

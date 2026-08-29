@@ -770,6 +770,104 @@ main {
   font-variant-numeric: tabular-nums;
 }
 
+/* Users -------------------------------------------------------------------- */
+
+/* The User rows sit on the same skeleton as the Invitations: one row per thing, its name
+   leading, the quiet facts underneath, and the acts that take access away last. */
+.users {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.user {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--faint);
+}
+
+.user-name {
+  font-weight: 600;
+}
+
+.user-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+.user-role {
+  color: var(--fg);
+}
+
+.user-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+/* A plain select like the sort menu: a real form control, sized to sit on the row. */
+.user-role-select {
+  padding: 0.25rem 0.375rem;
+  border: 1px solid var(--faint);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.8125rem;
+}
+
+.user-role-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.user-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+  font-size: 0.8125rem;
+}
+
+.user-search {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin: 0 0 1.25rem;
+}
+
+.user-search label {
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+.user-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--faint);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.user-search input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 /* Forms ------------------------------------------------------------------- */
 
 /* A form sits on the same column as everything else: centred in the window with the
