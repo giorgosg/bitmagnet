@@ -117,18 +117,95 @@ main {
   color: var(--accent);
 }
 
-/* Who you are, at the end of the bar. It is deliberately quiet: the list is the page, and
-   the Identity is only worth looking at when you go looking for it. */
+/* Who you are, at the end of the bar. Deliberately quiet: the list is the page, and the
+   Identity is only worth looking at when you go looking for it. */
 .identity {
+  position: relative;
   flex: none;
+}
+
+/* The Anonymous form: a plain link, no menu behind it. */
+.identity-link {
   color: var(--dim);
   text-decoration: none;
   font-size: 0.875rem;
   white-space: nowrap;
 }
 
-.identity:hover {
+.identity-link:hover {
   color: var(--fg);
+}
+
+/* Above the backdrop, deliberately. Everything else is covered while the menu is open,
+   but the button that opened it has to stay clickable or the icon cannot close what it
+   opened -- the one gesture every menu owes you. */
+.identity-button {
+  position: relative;
+  z-index: 12;
+  padding: 0.125rem 0.25rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 1.125rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.identity-button:hover {
+  background: var(--faint);
+}
+
+/* Catches a press anywhere else. Transparent and behind the menu, above everything else --
+   it exists to be clicked, not seen. */
+.identity-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+}
+
+.identity-menu {
+  position: absolute;
+  right: 0;
+  z-index: 11;
+  min-width: 11rem;
+  margin: 0.375rem 0 0;
+  padding: 0.25rem;
+  list-style: none;
+  border: 1px solid var(--faint);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
+}
+
+.identity-menu li {
+  display: flex;
+}
+
+.identity-menu a,
+.identity-menu button {
+  flex: 1;
+  padding: 0.375rem 0.625rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.875rem;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.identity-menu a:hover,
+.identity-menu button:hover {
+  background: var(--faint);
+}
+
+/* Signing out is not a page, so it is set apart from the ones that are. */
+.identity-signout {
+  margin-top: 0.25rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--faint);
 }
 
 .search {

@@ -14,6 +14,7 @@ import Html exposing (Attribute, Html, a, button, div, form, h1, header, input, 
 import Html.Attributes exposing (attribute, class, classList, href, id, placeholder, spellcheck, type_, value)
 import Html.Events exposing (on, onClick, onInput, onSubmit, stopPropagationOn)
 import Identity
+import IdentityMenu
 import InfiniteList
 import Invitations
 import Json.Decode as Decode exposing (Value)
@@ -94,6 +95,10 @@ type alias Model =
     -- The Invitation administration screen: what was fetched, what is being created, and
     -- which withdrawal has been asked about but not yet confirmed.
     , invitations : Invitations.State
+
+    -- Whether the header's Identity menu is showing. Presentational, so it is not in the
+    -- URL: it is closed by navigating, and reopening it is one click.
+    , menuOpen : Bool
 
     -- Why the Identity in flight is being fetched. It is read only to word a failure —
     -- "could not resolve who you are" is the wrong sentence immediately after someone
@@ -273,6 +278,7 @@ init flags url key =
       , signOut = UserOverview.Ready
       , register = Register.prefilled (invitationCodeFor route)
       , invitations = Invitations.empty
+      , menuOpen = False
       , identityRefresh = Resolving
       , epoch = 0
       , scoring = 0
@@ -321,12 +327,36 @@ fieldFor route =
 
 
 subscriptions : Model -> Sub Msg
-subscriptions _ =
+subscriptions model =
     Sub.batch
         [ Browser.Events.onResize (\_ height -> Resized height)
         , Browser.Events.onVisibilityChange VisibilityChanged
         , authenticationChanges (\_ -> AuthenticationChanged)
+        , menuDismissal model
         ]
+
+
+{-| Escape closes the open menu. Pressing elsewhere closes it too, but that is the menu's
+own backdrop rather than a listener here — see `IdentityMenu`. Nothing is listened for
+while the menu is closed.
+-}
+menuDismissal : Model -> Sub Msg
+menuDismissal model =
+    if model.menuOpen then
+        Browser.Events.onKeyDown
+            (Decode.field "key" Decode.string
+                |> Decode.andThen
+                    (\key ->
+                        if key == "Escape" then
+                            Decode.succeed MenuClosed
+
+                        else
+                            Decode.fail "not a dismissal"
+                    )
+            )
+
+    else
+        Sub.none
 
 
 {-| Notify the other Magnes tabs after browser login or logout. The value carries no
@@ -392,6 +422,8 @@ type Msg
     | ScoringDebounceElapsed Int
     | GotPasswordEntropy Int (Result (Graphql.Http.Error Register.Strength) Register.Strength)
     | GotRegistration (Result (Graphql.Http.Error String) String)
+    | MenuToggled
+    | MenuClosed
     | InvitationRoleChosen String
     | InvitationExpiryChosen String
     | InvitationCreateSubmitted
@@ -560,6 +592,12 @@ update msg model =
                     (Route.toHref model.basePath (Route.Login { returnUrl = Nothing }))
                 ]
             )
+
+        MenuToggled ->
+            ( { model | menuOpen = not model.menuOpen }, Cmd.none )
+
+        MenuClosed ->
+            ( { model | menuOpen = False }, Cmd.none )
 
         InvitationRoleChosen role ->
             ( { model | invitations = Invitations.withRole role model.invitations }, Cmd.none )
@@ -778,7 +816,9 @@ update msg model =
                     )
 
                 _ ->
-                    ( model, Nav.pushUrl model.key (Url.toString url) )
+                    ( { model | menuOpen = False }
+                    , Nav.pushUrl model.key (Url.toString url)
+                    )
 
         LinkClicked (Browser.External url) ->
             ( model, Nav.load url )
@@ -803,6 +843,7 @@ update msg model =
                     navigated =
                         { model
                             | route = route
+                            , menuOpen = False
                             , field = syncField model route
 
                             -- A refusal described one attempt on one visit. Leaving the
@@ -1596,7 +1637,11 @@ view model =
                 [ a [ class "wordmark", href (Route.toHref model.basePath (Route.Search Route.emptySearch)) ]
                     [ h1 [] [ text "magnes" ] ]
                 , searchBox model
-                , identityLink model
+                , IdentityMenu.view model.basePath
+                    identityMenuMessages
+                    model.identity
+                    model.route
+                    model.menuOpen
                 ]
             , viewFilters model
             ]
@@ -1649,68 +1694,12 @@ documentTitle model =
             "not found — magnes"
 
 
-{-| The way to the User overview, and the only thing in the chrome that changes with the
-Identity. An Anonymous Identity is offered the way in instead, remembering where it was so
-signing in returns here rather than to the front page.
-
-An API-key Identity reports an owning User but may not manage it, and the guard refuses it
-the overview, so it is offered the same way in as an Anonymous one. Nothing is drawn while
-the Identity is unknown or failed: there is no answer to give yet, and guessing would make
-the header flicker between two states on every load.
-
--}
-identityLink : Model -> Html Msg
-identityLink model =
-    case model.identity of
-        Identity.UserAuthenticated user _ ->
-            a
-                [ class "identity"
-                , href (Route.toHref model.basePath Route.UserOverview)
-                ]
-                [ text user.username ]
-
-        Identity.Anonymous _ ->
-            signInLink model
-
-        Identity.APIKeyAuthenticated _ _ _ ->
-            signInLink model
-
-        Identity.Unknown ->
-            text ""
-
-        Identity.Failed _ ->
-            text ""
-
-
-signInLink : Model -> Html Msg
-signInLink model =
-    a
-        [ class "identity"
-        , href
-            (Route.toHref model.basePath
-                (Route.Login { returnUrl = returnHere model })
-            )
-        ]
-        [ text "Sign in" ]
-
-
-{-| Where signing in should come back to. A login form that returns to itself is no
-return at all, and neither is one that returns to a page that was not found.
--}
-returnHere : Model -> Maybe String
-returnHere model =
-    case model.route of
-        Route.Login _ ->
-            Nothing
-
-        Route.Register _ ->
-            Nothing
-
-        Route.NotFound ->
-            Nothing
-
-        route ->
-            Just (Route.toHref model.basePath route)
+identityMenuMessages : IdentityMenu.Messages Msg
+identityMenuMessages =
+    { toggled = MenuToggled
+    , dismissed = MenuClosed
+    , signOutRequested = SignOutRequested
+    }
 
 
 searchBox : Model -> Html Msg
