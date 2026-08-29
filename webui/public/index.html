@@ -25,6 +25,35 @@
         },
       });
 
+      // Let the password manager save what was just chosen.
+      //
+      // Elm cannot let the browser see a form submission: `Html.Events.onSubmit` is
+      // `preventDefaultOn` and always prevents the default, and that submission is the
+      // main cue a password manager takes to offer saving. So Magnes asks explicitly,
+      // at the moment registration or sign-in succeeds.
+      //
+      // This is the person's own password, not bitmagnet's credential — that stays an
+      // HttpOnly cookie no script can read. It matters because bitmagnet has neither a
+      // password change nor a reset: a generated password nobody saved is a User that
+      // has to be deleted in SQL.
+      //
+      // `PasswordCredential` is Chromium-only, and the constructor needs a secure
+      // context. Where any of it is missing, or the browser declines, nothing happens
+      // and nothing is reported — the sign-in flow does not depend on this working.
+      app.ports.storeCredential.subscribe(({ id, password }) => {
+        if (!window.PasswordCredential || !navigator.credentials?.store) {
+          return;
+        }
+
+        try {
+          navigator.credentials
+            .store(new window.PasswordCredential({ id, password }))
+            .catch(() => {});
+        } catch (_) {
+          // A malformed credential or a non-secure context throws synchronously.
+        }
+      });
+
       // Authentication changes carry no credential. The HttpOnly cookie is owned by
       // bitmagnet; tabs merely tell one another to refresh their canonical Identity.
       if ("BroadcastChannel" in window) {

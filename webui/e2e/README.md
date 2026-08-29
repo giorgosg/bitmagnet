@@ -40,6 +40,10 @@ management, and the administration workflows. Those need a User to exist, and po
 them at a shared instance would mean either a real password in CI or tests that mutate
 someone's live data.
 
+The offer to the browser's credential store (ticket 17) is covered only on its refusal
+paths, where nothing should be offered. The call itself happens on success, so it needs
+the same harness.
+
 Registration is a case of its own. Every refusal is covered here, as is the live
 `self.passwordEntropy` round trip — bitmagnet answers it anonymously — but a *successful*
 registration would consume a real Invitation and leave a User behind, which is exactly

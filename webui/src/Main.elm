@@ -335,6 +335,27 @@ be discarded and reloaded under the credential the browser now supplies.
 port authenticationChanges : (() -> msg) -> Sub msg
 
 
+{-| Offer a username and the password just chosen to the browser's credential store, so
+the person's password manager can save it.
+
+This is the User's own password on its way past, not bitmagnet's credential: the cookie
+remains HttpOnly and unreadable, and nothing here reads or persists it. Magnes already
+holds this password to submit it, and hands it to the browser at the same moment it stops
+needing it.
+
+It exists because Elm cannot let the browser see a form submission. `Html.Events.onSubmit`
+is `preventDefaultOn`, which always prevents the default, and a submission is the main
+signal a password manager uses to offer saving. Without this, a generated password is lost
+the moment the form clears — and bitmagnet has no password change and no reset, so losing
+one means deleting the User in SQL.
+
+Nothing waits on the outcome. Whether a manager saved anything is not knowable here, and
+the browsers that implement none of this must behave exactly as they do today.
+
+-}
+port storeCredential : { id : String, password : String } -> Cmd msg
+
+
 type Msg
     = LinkClicked Browser.UrlRequest
     | UrlChanged Url
@@ -400,6 +421,9 @@ update msg model =
 
         GotLogin (Ok ()) ->
             let
+                offered =
+                    Login.credentials model.login
+
                 destination =
                     Route.returnDestination model.basePath model.route
 
@@ -412,7 +436,8 @@ update msg model =
             in
             ( refreshed
             , Cmd.batch
-                [ Nav.replaceUrl model.key (Route.toHref model.basePath destination)
+                [ storeCredential { id = offered.username, password = offered.password }
+                , Nav.replaceUrl model.key (Route.toHref model.basePath destination)
                 , refresh
                 ]
             )
@@ -499,14 +524,25 @@ update msg model =
             -- the form takes the password with it, and the username is carried across so
             -- the login form opens on the name that was actually created.
             --
+            -- The password is offered to the browser's credential store on the way out.
+            -- This is the moment it is about to stop existing anywhere, and the one
+            -- moment a manager would have been prompted by a form submission the browser
+            -- never sees.
+            --
             -- `replaceUrl`, so going back does not return to a form whose Invitation has
             -- now been claimed.
             ( { model
                 | register = Register.empty
                 , login = Login.withUsername username Login.empty
               }
-            , Nav.replaceUrl model.key
-                (Route.toHref model.basePath (Route.Login { returnUrl = Nothing }))
+            , Cmd.batch
+                [ storeCredential
+                    { id = username
+                    , password = Register.passwordOf model.register
+                    }
+                , Nav.replaceUrl model.key
+                    (Route.toHref model.basePath (Route.Login { returnUrl = Nothing }))
+                ]
             )
 
         SignOutRequested ->

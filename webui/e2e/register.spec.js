@@ -92,6 +92,77 @@ test.describe("the password-entropy meter", () => {
   });
 });
 
+test.describe("the password manager", () => {
+  // Elm's onSubmit prevents the default, so the browser never sees a submission and no
+  // manager offers to save. Magnes asks the credential store explicitly instead. The
+  // real API is Chromium-only and prompts, so the test installs its own recorder before
+  // the app loads rather than asserting against the browser's own store.
+  async function recordCredentialStores(page) {
+    await page.addInitScript(() => {
+      window.__stored = [];
+      window.PasswordCredential = class {
+        constructor({ id, password }) {
+          this.id = id;
+          this.password = password;
+        }
+      };
+      Object.defineProperty(navigator, "credentials", {
+        configurable: true,
+        value: {
+          store: (credential) => {
+            window.__stored.push({ id: credential.id, password: credential.password });
+            return Promise.resolve(credential);
+          },
+        },
+      });
+    });
+  }
+
+  test("is offered nothing by a registration that was refused", async ({ page }) => {
+    // Only a User that exists is worth saving a password for. The success path needs a
+    // real Invitation and belongs to the credentialed harness — see e2e/README.md.
+    await recordCredentialStores(page);
+    await page.goto(`/register?code=${NOT_AN_INVITATION}`);
+
+    await page.getByLabel("Username").fill(NO_SUCH_USER);
+    await page.getByLabel("Password", { exact: true }).fill(STRONG);
+    await page.getByRole("button", { name: "Register" }).click();
+    await expect(page.getByRole("alert")).toBeVisible();
+
+    expect(await page.evaluate(() => window.__stored)).toEqual([]);
+  });
+
+  test("is offered nothing by a refused sign-in", async ({ page }) => {
+    await recordCredentialStores(page);
+    await page.goto("/login");
+
+    await page.getByLabel("Username").fill(NO_SUCH_USER);
+    await page.getByLabel("Password").fill("not-a-real-password");
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await expect(page.getByRole("alert")).toBeVisible();
+
+    expect(await page.evaluate(() => window.__stored)).toEqual([]);
+  });
+
+  test("survives a browser that implements none of it", async ({ page }) => {
+    // Firefox and Safari have no PasswordCredential. The flow must be unaffected, and
+    // nothing may throw into the console.
+    await page.addInitScript(() => {
+      delete window.PasswordCredential;
+    });
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(String(error)));
+
+    await page.goto(`/register?code=${NOT_AN_INVITATION}`);
+    await page.getByLabel("Username").fill(NO_SUCH_USER);
+    await page.getByLabel("Password", { exact: true }).fill(STRONG);
+    await page.getByRole("button", { name: "Register" }).click();
+
+    await expect(page.getByRole("alert")).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+});
+
 test.describe("a refused registration", () => {
   test("says why, and marks the fields", async ({ page }) => {
     await page.goto(`/register?code=${NOT_AN_INVITATION}`);
