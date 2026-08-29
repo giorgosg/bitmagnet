@@ -18,6 +18,10 @@
      there is one place to adjust and no dependency on color-mix support. */
   --accent-soft: rgba(168, 68, 42, 0.13);
 
+  /* A line that reads as an edge rather than as a division: darker than --faint, which
+     is a fill and disappears against the background when asked to be a border. */
+  --edge: #d9d9d3;
+
   --row-height: 34px;
 }
 
@@ -29,6 +33,7 @@
     --faint: #232327;
     --accent: #e0785a;
     --accent-soft: rgba(224, 120, 90, 0.18);
+    --edge: #3a3a41;
   }
 }
 
@@ -119,9 +124,13 @@ main {
 
 /* Who you are, at the end of the bar. Deliberately quiet: the list is the page, and the
    Identity is only worth looking at when you go looking for it. */
+/* Centred rather than baseline-aligned, unlike its neighbours in the bar. A button whose
+   only content is an SVG has no text baseline, so the browser synthesises one from its
+   bottom edge and the icon sits about 3px above the line everything else is on. */
 .identity {
   position: relative;
   flex: none;
+  align-self: center;
 }
 
 /* The Anonymous form: a plain link, no menu behind it. */
@@ -176,10 +185,14 @@ main {
   margin: 0.375rem 0 0;
   padding: 0.25rem;
   list-style: none;
-  border: 1px solid var(--faint);
+
+  /* The menu floats over the page in the page's own background colour, so it needs an
+     edge of its own or it reads as part of what is behind it. --faint is a fill and
+     vanishes here; the shadow alone is not enough in the light scheme. */
+  border: 1px solid var(--edge);
   border-radius: 8px;
   background: var(--bg);
-  box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
 }
 
 .identity-menu li {
