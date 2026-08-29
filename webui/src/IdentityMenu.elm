@@ -17,6 +17,8 @@ import Html.Attributes exposing (attribute, class, href, type_)
 import Html.Events exposing (onClick)
 import Identity
 import Route exposing (Route)
+import Svg
+import Svg.Attributes as SvgAttr
 
 
 type alias Destination =
@@ -83,7 +85,7 @@ view mount messages identity current open =
 and the keyboard already handle. `role="menu"` would promise arrow-key navigation that
 would then have to be implemented, and implemented correctly, to keep the promise.
 
-The icon is `aria-hidden`, and the button is named for the User instead — an emoji's own
+The icon is `aria-hidden`, and the button is named for the User instead — a picture's own
 accessible name is whatever the platform calls that picture, which is not the answer to
 "whose menu is this".
 
@@ -105,7 +107,7 @@ menu mount messages identity username open =
                 )
             , onClick messages.toggled
             ]
-            [ Html.span [ attribute "aria-hidden" "true" ] [ text "👤" ] ]
+            [ personIcon ]
             :: dropdown mount messages identity open
         )
 
@@ -139,6 +141,26 @@ dropdown mount messages identity open =
                         ]
                    ]
             )
+        ]
+
+
+{-| Drawn rather than typed. An emoji is painted by the platform's own colour font — 👤
+arrives blue whatever the page is — and `currentColor` gives this one the same treatment
+as the magnet in the results list: it takes the colour of the text around it, in both
+schemes, and dims and brightens with the button it sits in.
+-}
+personIcon : Html msg
+personIcon =
+    Svg.svg
+        [ SvgAttr.viewBox "0 0 24 24"
+        , SvgAttr.width "18"
+        , SvgAttr.height "18"
+        , SvgAttr.fill "currentColor"
+        , attribute "aria-hidden" "true"
+        ]
+        [ Svg.path
+            [ SvgAttr.d "M12 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8Zm0 10c4.4 0 8 2.7 8 6v1H4v-1c0-3.3 3.6-6 8-6Z" ]
+            []
         ]
 
 

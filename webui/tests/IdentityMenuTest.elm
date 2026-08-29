@@ -105,6 +105,17 @@ suite =
                             [ Selector.attribute (Html.Attributes.attribute "aria-label" "grace")
                             , Selector.attribute (Html.Attributes.attribute "aria-expanded" "false")
                             ]
+            , test "is drawn, not typed" <|
+                \_ ->
+                    -- An emoji is painted by the platform's colour font and ignores the
+                    -- page's palette; an SVG with fill: currentColor does not.
+                    rendered False ordinary
+                        |> Query.find [ Selector.class "identity-button" ]
+                        |> Query.has
+                            [ Selector.tag "svg"
+                            , Selector.attribute (Html.Attributes.attribute "fill" "currentColor")
+                            , Selector.attribute (Html.Attributes.attribute "aria-hidden" "true")
+                            ]
             , test "offers no destinations until it is opened" <|
                 \_ ->
                     rendered False administrator

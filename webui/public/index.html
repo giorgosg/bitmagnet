@@ -9,6 +9,10 @@
     <!-- Set this to the static mount (for example /magnes/) in a deployed copy. -->
     <base href="/" />
     <title>magnes</title>
+    <!-- The same magnet the results list draws; see public/favicon.svg. Relative, so it
+         resolves against <base href> and works under a static mount as well as at the
+         origin root. -->
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
