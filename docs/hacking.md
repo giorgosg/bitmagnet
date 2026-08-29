@@ -85,6 +85,26 @@ data-only dump for seeding a smaller one.
 Be careful with instances you do not own. bitmagnet is frequently self-hosted on slow
 hardware, where a single `count(*)` on `torrents` is genuinely disruptive.
 
+### Integration tests with content in them
+
+`internal/database/dbtest` has two provisioning paths. `dbtest.New(t)` hands each test an
+empty, fully migrated database — which is what the auth tests want — and needs only
+`TEST_POSTGRES_DSN`, which CI sets. `dbtest.NewSeeded(t)` instead clones a seed template
+built by the local **btm-testdb** project, and the clone arrives with the fixture corpus —
+roughly 100k torrent contents — in about a second, at file-copy cost regardless of corpus
+size.
+
+The seeded path is local-only by design and skips unless `TEST_POSTGRES_TEMPLATE_DSN`
+names the btm-testdb instance (its `bin/testdb url` prints the value), so CI and bare
+checkouts never touch it. The template's name carries the migration version it was built
+at: a template stale against the migrations in the tree is refused rather than used, and
+an instance with no template on it skips rather than fails. Treat the clone's content as
+read-only — one immutable template is what keeps the clone cost flat.
+
+Postgres refuses to clone a template while anything is connected to it. btm-testdb seals
+its templates against connections once built, so when `dbtest` reports that error it
+usually means a `bin/testdb seed` rebuild is running right now; wait for it and retry.
+
 ## Where the interesting problems are
 
 The fork survey in [forks/](forks/README.md) is a map of what the community found worth

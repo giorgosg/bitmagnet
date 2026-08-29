@@ -12,6 +12,15 @@
 //
 // When it is unset, [New] skips the test rather than failing, so the default
 // `go test ./...` stays fast and needs no services. CI sets it.
+//
+// # Seeded databases
+//
+// Tests that need an index with content in it call [NewSeeded] instead, which
+// provisions by cloning a template built by the local btm-testdb project rather
+// than migrating an empty database: the clone arrives with the fixture corpus —
+// roughly 100k torrent contents — in about a second. It is controlled by its own
+// environment variable, TEST_POSTGRES_TEMPLATE_DSN, and skips when the fixtures
+// are absent, the same way [New] skips without TEST_POSTGRES_DSN.
 package dbtest
 
 import (
@@ -68,7 +77,7 @@ func New(t *testing.T) *DB {
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 
-	name := fmt.Sprintf("bitmagnet_test_%d_%d", time.Now().UnixNano(), rand.IntN(1_000_000))
+	name := newTestDBName()
 
 	admin, err := sql.Open("pgx", adminDSN)
 	if err != nil {
@@ -96,6 +105,20 @@ func New(t *testing.T) *DB {
 
 	migrate(ctx, t, sqlDB)
 
+	db, err := assemble(ctx, name, dsn, sqlDB)
+	if err != nil {
+		t.Fatalf("wiring up %s: %v", name, err)
+	}
+
+	t.Cleanup(func() { db.drop(adminDSN, sqlDB) })
+
+	return db
+}
+
+// assemble wires a provisioned database up with the three clients the codebase
+// reaches Postgres through: gorm, the generated DAO on top of it, and a pgx
+// pool. Shared by the migrated and seeded paths.
+func assemble(ctx context.Context, name, dsn string, sqlDB *sql.DB) (*DB, error) {
 	gormDB, err := gorm.Open(
 		postgres.New(postgres.Config{Conn: sqlDB}),
 		&gorm.Config{
@@ -104,29 +127,32 @@ func New(t *testing.T) *DB {
 		},
 	)
 	if err != nil {
-		t.Fatalf("opening gorm on %s: %v", name, err)
+		return nil, fmt.Errorf("opening gorm on %s: %w", name, err)
 	}
 
 	if err = gormDB.Use(exclause.New()); err != nil {
-		t.Fatalf("registering the exclause plugin: %v", err)
+		return nil, fmt.Errorf("registering the exclause plugin: %w", err)
 	}
 
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
-		t.Fatalf("creating a pgx pool on %s: %v", name, err)
+		return nil, fmt.Errorf("creating a pgx pool on %s: %w", name, err)
 	}
 
-	db := &DB{
+	return &DB{
 		Gorm:  gormDB,
 		Query: dao.Use(gormDB),
 		Pool:  pool,
 		DSN:   dsn,
 		Name:  name,
-	}
+	}, nil
+}
 
-	t.Cleanup(func() { db.drop(adminDSN, sqlDB) })
-
-	return db
+// newTestDBName generates a unique database name. Database names cannot be
+// parameterised in SQL, hence the format string; the components are generated
+// here, never caller-supplied.
+func newTestDBName() string {
+	return fmt.Sprintf("bitmagnet_test_%d_%d", time.Now().UnixNano(), rand.IntN(1_000_000))
 }
 
 // drop closes everything and removes the database. Postgres refuses to drop a
