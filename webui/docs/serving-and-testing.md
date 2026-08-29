@@ -92,6 +92,25 @@ trailing slash, so assets load from it even on a deep link.
 This is the deployment the account work should be signed off against, because it is the
 one where the browser sends credentials the way a same-origin page does.
 
+#### It has to be HTTPS, and the failure is silent
+
+bitmagnet cannot serve TLS: `internal/httpserver/config.go` has no certificate option and
+the package never calls `ListenAndServeTLS`. Serve this mount over plain HTTP anyway and
+registration works while login quietly does not — the mutation succeeds, bitmagnet sets
+its `__Secure-` cookie marked `Secure`, and the browser discards it because the origin is
+insecure. Nothing is reported; the person simply stays Anonymous. **[verified 2026-08-29
+on a plain-HTTP mount, which is what prompted this section.]**
+
+So way 2 needs a TLS-terminating proxy in front of it, exactly as way 1 does. One header is
+load-bearing there: the proxy must pass the browser's `Host` through *with its port*
+(nginx's `$http_host`, not `$host`), because bitmagnet compares the `Origin` header's host
+against the request's `Host` for every cookie-authenticated mutation, and a stripped port
+makes them differ.
+
+Note also that a proxy makes every request appear to come from it, and bitmagnet's login
+throttle is keyed on the client address — set `http_server.trusted_proxies` or the whole
+network is throttled as one caller.
+
 Notes from `../bitmagnet/internal/httpserver/static/static.go`:
 
 - A configured directory that does not exist is a **startup error**, not a silent 404. So
