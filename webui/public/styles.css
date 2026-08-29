@@ -66,7 +66,8 @@ body {
 header,
 .tally,
 .notice,
-.item {
+.item,
+.panel {
   width: 100%;
   max-width: 62rem;
   margin-left: auto;
@@ -526,16 +527,26 @@ main {
 
 /* Forms ------------------------------------------------------------------- */
 
-/* A single column at reading width, left where the list's text is rather than centred in
-   the window: the header and the tally already establish that column, and a form floating
-   in the middle of the page would be the only thing on it that ignores them. */
+/* A form sits on the same column as everything else: centred in the window with the
+   header and the list, its fields starting where their text starts.
+
+   The centring comes from the shared rule at the top. Without it the panel was laid out
+   at the window's left edge while everything around it was centred in 62rem, so on a wide
+   window a form drifted a long way left of the page it belongs to.
+
+   What is narrow is the fields, not the column. A text input stretched to 62rem is
+   unreadable, and implies the answer wants to be long. */
 .panel {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 0.375rem;
+  padding-bottom: 2rem;
+}
+
+.panel > * {
+  width: 100%;
   max-width: 22rem;
-  margin: 0;
-  padding: 0 1.5rem 2rem;
 }
 
 .panel h1 {
