@@ -28,6 +28,7 @@ import Svg.Attributes as SvgAttr
 import Task
 import Time
 import Url exposing (Url)
+import UserOverview
 
 
 main : Program Flags Model Msg
@@ -78,11 +79,34 @@ type alias Model =
     -- existing in the model the moment it stops being needed.
     , login : Login.Form
 
+    -- How the sign-out request on the User overview is going. It is a request, not a
+    -- local erasure: bitmagnet owns the cookie, so until it answers the User is still
+    -- signed in and the page has to be able to say a refusal out loud.
+    , signOut : UserOverview.SignOut
+
+    -- Why the Identity in flight is being fetched. It is read only to word a failure —
+    -- "could not resolve who you are" is the wrong sentence immediately after someone
+    -- deliberately signed out.
+    , identityRefresh : Refresh
+
     -- Separate counter for the debounce, because a keystroke is not yet a new query.
     -- Bumping the epoch here would strand an in-flight page — the reply would be dropped
     -- while `fetching` stayed true, and infinite scroll would quietly stop.
     , typing : Int
     }
+
+
+{-| What prompted the Identity currently being fetched.
+
+Only the failure sentence depends on it. After a successful sign-out bitmagnet has already
+cleared the cookie, so a refresh that then fails has not left the User signed in and must
+not read as though resolving them failed: what is unknown is only what this instance
+allows without a User.
+
+-}
+type Refresh
+    = Resolving
+    | AfterSignOut
 
 
 {-| Hand-rolled rather than `RemoteData`: these are the states Magnes actually has, and
@@ -223,6 +247,8 @@ init flags url key =
       , zone = Time.utc
       , filtersOpen = not (Facet.isEmpty (filtersFor route))
       , login = Login.empty
+      , signOut = UserOverview.Ready
+      , identityRefresh = Resolving
       , epoch = 0
       , typing = 0
       }
@@ -298,7 +324,9 @@ type Msg
     | LoginPasswordChanged String
     | LoginSubmitted
     | GotLogin (Result (Graphql.Http.Error ()) ())
-    | AuthenticationChangedHere
+    | SignOutRequested
+    | GotSignOut (Result (Graphql.Http.Error ()) ())
+    | AuthenticationChangedHere Refresh
     | AuthenticationChanged
     | Ignored
 
@@ -339,7 +367,7 @@ update msg model =
                 -- server say what the new Identity may do — so it goes through the same
                 -- branch rather than a second copy of it that could drift.
                 ( refreshed, refresh ) =
-                    update AuthenticationChangedHere { model | login = Login.empty }
+                    update (AuthenticationChangedHere Resolving) { model | login = Login.empty }
             in
             ( refreshed
             , Cmd.batch
@@ -348,16 +376,44 @@ update msg model =
                 ]
             )
 
-        AuthenticationChanged ->
-            beginIdentityRefresh model
+        SignOutRequested ->
+            if model.signOut == UserOverview.SigningOut then
+                ( model, Cmd.none )
 
-        AuthenticationChangedHere ->
+            else
+                ( { model | signOut = UserOverview.SigningOut }
+                , UserOverview.signOut model.apiUrl GotSignOut
+                )
+
+        GotSignOut (Ok ()) ->
+            signedOut model
+
+        GotSignOut (Err error) ->
+            let
+                failure =
+                    ApiError.fromError error
+            in
+            if ApiError.isUnauthorized failure then
+                -- Refusing to sign out a caller it does not consider signed in is the
+                -- outcome that was asked for: whatever the browser is still sending,
+                -- bitmagnet no longer accepts it as a User.
+                signedOut model
+
+            else
+                -- Anything else leaves the cookie where it was, so nothing has changed
+                -- and the page says so and offers the action again.
+                ( { model | signOut = UserOverview.Refused failure }, Cmd.none )
+
+        AuthenticationChanged ->
+            beginIdentityRefresh Resolving model
+
+        AuthenticationChangedHere reason ->
             -- Login and logout will dispatch this after bitmagnet confirms the mutation.
             -- Keeping local state updates in those workflows avoids bouncing our own
             -- notification back through the channel.
             let
                 ( refreshing, refresh ) =
-                    beginIdentityRefresh model
+                    beginIdentityRefresh reason model
             in
             ( refreshing, Cmd.batch [ authenticationChanged (), refresh ] )
 
@@ -376,7 +432,8 @@ update msg model =
                     Err error ->
                         let
                             message =
-                                ApiError.toMessage (ApiError.fromError error)
+                                refreshFailure model.identityRefresh
+                                    (ApiError.toMessage (ApiError.fromError error))
                         in
                         ( { model | identity = Identity.Failed message, results = Failed message }
                         , Cmd.none
@@ -432,6 +489,11 @@ update msg model =
                         { model
                             | route = route
                             , field = syncField model route
+
+                            -- A refusal described one attempt on one visit. Leaving the
+                            -- page ends it, so coming back does not reopen it as though
+                            -- something had just failed.
+                            , signOut = UserOverview.Ready
                             , results = results
                             , epoch = epoch
                             , infiniteList = InfiniteList.init
@@ -611,6 +673,35 @@ update msg model =
                             )
 
 
+userOverviewMessages : UserOverview.Messages Msg
+userOverviewMessages =
+    { signOutRequested = SignOutRequested }
+
+
+{-| bitmagnet has cleared the cookie, so this is an authentication change like any other:
+the other tabs are told and the server is asked what the Identity has become.
+
+The destination is said rather than inferred. The User overview is no longer somewhere
+this Identity may be, and the guard answers that by sending it to a login form asking it
+to come back — which is the one place someone who just signed out is not going.
+
+-}
+signedOut : Model -> ( Model, Cmd Msg )
+signedOut model =
+    let
+        ( refreshed, refresh ) =
+            update (AuthenticationChangedHere AfterSignOut)
+                { model | signOut = UserOverview.Ready }
+    in
+    ( refreshed
+    , Cmd.batch
+        [ Nav.replaceUrl model.key
+            (Route.toHref model.basePath (Route.Search Route.emptySearch))
+        , refresh
+        ]
+    )
+
+
 loginMessages : Login.Messages Msg
 loginMessages =
     { usernameChanged = LoginUsernameChanged
@@ -664,7 +755,7 @@ onRequestFailure error model toFailed =
             ApiError.fromError error
     in
     if ApiError.isUnauthorized failure then
-        beginIdentityRefresh model
+        beginIdentityRefresh Resolving model
 
     else
         toFailed (ApiError.toMessage failure) model
@@ -852,8 +943,21 @@ routeNeedsSearch route =
             False
 
 
-beginIdentityRefresh : Model -> ( Model, Cmd Msg )
-beginIdentityRefresh model =
+{-| The sentence for an Identity that could not be fetched, given what asked for it.
+-}
+refreshFailure : Refresh -> String -> String
+refreshFailure reason message =
+    case reason of
+        Resolving ->
+            message
+
+        AfterSignOut ->
+            "You are signed out. Magnes could not load what this instance allows without a User: "
+                ++ message
+
+
+beginIdentityRefresh : Refresh -> Model -> ( Model, Cmd Msg )
+beginIdentityRefresh reason model =
     let
         epoch =
             model.epoch + 1
@@ -864,6 +968,11 @@ beginIdentityRefresh model =
     ( { model
         | identity = Identity.Unknown
         , identityEpoch = identityEpoch
+        , identityRefresh = reason
+
+        -- Whatever the Identity turns out to be, it is no longer the one any sign-out in
+        -- flight or already refused was about.
+        , signOut = UserOverview.Ready
         , results = pendingResults model.route
         , epoch = epoch
         , infiniteList = InfiniteList.init
@@ -881,7 +990,10 @@ identityResolved identity model =
         ( resolved, cmd ) =
             identityApplied identity model
     in
-    ( resolved, Cmd.batch [ cmd, focusIfLoginAppeared model resolved ] )
+    -- The reason is spent once an Identity arrives; a later failure is its own event.
+    ( { resolved | identityRefresh = Resolving }
+    , Cmd.batch [ cmd, focusIfLoginAppeared model resolved ]
+    )
 
 
 identityApplied : Identity.Identity -> Model -> ( Model, Cmd Msg )
@@ -1104,6 +1216,7 @@ view model =
                 [ a [ class "wordmark", href (Route.toHref model.basePath (Route.Search Route.emptySearch)) ]
                     [ h1 [] [ text "magnes" ] ]
                 , searchBox model
+                , identityLink model
                 ]
             , viewFilters model
             ]
@@ -1154,6 +1267,70 @@ documentTitle model =
 
         Route.NotFound ->
             "not found — magnes"
+
+
+{-| The way to the User overview, and the only thing in the chrome that changes with the
+Identity. An Anonymous Identity is offered the way in instead, remembering where it was so
+signing in returns here rather than to the front page.
+
+An API-key Identity reports an owning User but may not manage it, and the guard refuses it
+the overview, so it is offered the same way in as an Anonymous one. Nothing is drawn while
+the Identity is unknown or failed: there is no answer to give yet, and guessing would make
+the header flicker between two states on every load.
+
+-}
+identityLink : Model -> Html Msg
+identityLink model =
+    case model.identity of
+        Identity.UserAuthenticated user _ ->
+            a
+                [ class "identity"
+                , href (Route.toHref model.basePath Route.UserOverview)
+                ]
+                [ text user.username ]
+
+        Identity.Anonymous _ ->
+            signInLink model
+
+        Identity.APIKeyAuthenticated _ _ _ ->
+            signInLink model
+
+        Identity.Unknown ->
+            text ""
+
+        Identity.Failed _ ->
+            text ""
+
+
+signInLink : Model -> Html Msg
+signInLink model =
+    a
+        [ class "identity"
+        , href
+            (Route.toHref model.basePath
+                (Route.Login { returnUrl = returnHere model })
+            )
+        ]
+        [ text "Sign in" ]
+
+
+{-| Where signing in should come back to. A login form that returns to itself is no
+return at all, and neither is one that returns to a page that was not found.
+-}
+returnHere : Model -> Maybe String
+returnHere model =
+    case model.route of
+        Route.Login _ ->
+            Nothing
+
+        Route.Register _ ->
+            Nothing
+
+        Route.NotFound ->
+            Nothing
+
+        route ->
+            Just (Route.toHref model.basePath route)
 
 
 searchBox : Model -> Html Msg
@@ -1391,7 +1568,14 @@ viewAllowedRoute model =
             p [ class "notice" ] [ text "Register User." ]
 
         Route.UserOverview ->
-            p [ class "notice" ] [ text "User overview." ]
+            case model.identity of
+                Identity.UserAuthenticated user _ ->
+                    UserOverview.view model.zone userOverviewMessages model.signOut user
+
+                -- Unreachable: the guard admits no other Identity to this route, and has
+                -- already answered them with a redirect.
+                _ ->
+                    p [ class "notice" ] [ text "Resolving Identity…" ]
 
         Route.APIKeys ->
             p [ class "notice" ] [ text "API keys." ]

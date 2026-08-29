@@ -101,6 +101,34 @@ test.describe("a refused sign-in", () => {
   });
 });
 
+test.describe("the way in", () => {
+  // The header is the only route to /account, and an Anonymous Identity is offered the
+  // login form instead. Both are drawn from self.identity, so this needs the response to
+  // have actually arrived — invisible to elm-test.
+  test("the header offers sign-in to an Anonymous Identity", async ({ page }) => {
+    await page.goto("/search?q=linux");
+
+    const signIn = page.getByRole("link", { name: "Sign in" });
+    await expect(signIn).toBeVisible();
+
+    await signIn.click();
+
+    const url = new URL(page.url());
+    expect(url.pathname).toBe("/login");
+    // Signing in returns to the search rather than to the front page.
+    expect(url.searchParams.get("returnUrl")).toBe("/search?q=linux");
+  });
+
+  test("the login form does not offer a way back to itself", async ({ page }) => {
+    await page.goto("/login");
+
+    await expect(page.getByRole("link", { name: "Sign in" })).toHaveAttribute(
+      "href",
+      "/login",
+    );
+  });
+});
+
 test.describe("routes that require a User", () => {
   // The Identity here is Anonymous, so these exercise the guards from ticket 07 without
   // anyone signing in.

@@ -1,6 +1,7 @@
-module Format exposing (bytes, count, date)
+module Format exposing (bytes, count, date, dateTime)
 
-{-| Human-readable numbers and dates for the row.
+{-| Human-readable numbers and dates: sizes and counts for the row, dates and times
+wherever a moment is shown to a person.
 -}
 
 import Time
@@ -16,6 +17,20 @@ date zone posix =
         ++ pad (monthNumber (Time.toMonth zone posix))
         ++ "-"
         ++ pad (Time.toDay zone posix)
+
+
+{-| The same date with the clock time after it, for the one place a moment matters to the
+minute rather than to the day: when a User last signed in. Seconds are left off — they say
+nothing a person reads this for — and the zone is the browser's, since this is being
+compared against "was that me?".
+-}
+dateTime : Time.Zone -> Time.Posix -> String
+dateTime zone posix =
+    date zone posix
+        ++ " "
+        ++ pad (Time.toHour zone posix)
+        ++ ":"
+        ++ pad (Time.toMinute zone posix)
 
 
 pad : Int -> String

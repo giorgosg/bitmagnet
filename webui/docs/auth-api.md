@@ -102,7 +102,9 @@ uses it. Debounce it. **[verified]** it answers anonymously, and reports `minEnt
 mutation {
   self {
     register(input: RegisterInput!): RegisterResult!    # { user }
-    login(username: String!, password: String!): LoginResult!
+    login(username: String!, password: String!): LoginResult!   # non-browser: returns the token
+    loginBrowser(username: String!, password: String!): Void   # sets the HttpOnly cookie
+    logoutBrowser: Void                                        # clears it
     createAPIKey(input: CreateAPIKeyInput!): CreateAPIKeyResult!
     deleteAPIKey(id: Int!): Void
   }

@@ -175,8 +175,11 @@ In dependency order, each usable before the next exists:
    permission set**: load the role's current permissions first, or an edit revokes
    everything the form did not list.
 
-Sign-out is a client-side act: clear the token, refetch identity. There is no logout
-mutation and the JWT stays valid until it expires.
+Sign-out is a request, not a client-side act. That changed with
+[ADR 0005](adr/0005-use-an-http-only-cookie-for-browser-authentication.md): the browser
+credential is an HttpOnly cookie Magnes cannot read or clear, so `self.logoutBrowser`
+clears it server-side. There is nothing to erase locally beyond telling the other tabs,
+and until the mutation answers the User is still signed in.
 
 ### 9. Errors, which are codes
 
