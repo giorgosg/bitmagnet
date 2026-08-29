@@ -80,6 +80,7 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#64](https://github.com/giorgosg/bitmagnet/pull/64) | Gate GraphQL introspection and the playground behind config                 | local                                                                | Unauthenticated-surface regressions observed red               |
 | [#65](https://github.com/giorgosg/bitmagnet/pull/65) | Ask the rbac semaphore once per authorization decision                      | local — narrows #0010                                                | Double-acquisition regression observed red                     |
 | [#66](https://github.com/giorgosg/bitmagnet/pull/66) | Cache role lookups under the existing RBAC cache TTL                        | local                                                                | Uncached-lookup regressions observed red                       |
+| [#67](https://github.com/giorgosg/bitmagnet/pull/67) | Clone seeded test databases from a btm-testdb template                      | local                                                                | Fingerprint and skip tests observed red; clone measured ~0.9s  |
 
 ## In flight
 
