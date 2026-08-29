@@ -67,7 +67,8 @@ header,
 .tally,
 .notice,
 .item,
-.panel {
+.panel,
+.page {
   width: 100%;
   max-width: 62rem;
   margin-left: auto;
@@ -522,6 +523,155 @@ main {
   width: 5.5rem;
   text-align: right;
   color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Administration ---------------------------------------------------------- */
+
+/* A screen that is a list rather than a form: it takes the full content column, and the
+   form inside it keeps the narrow fields every other form has. */
+.page {
+  padding-bottom: 2rem;
+  overflow-y: auto;
+}
+
+.page h1 {
+  margin: 0 0 1rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.page h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+/* Anything inside an administration page is already on the column, so it must not take
+   the shared centring padding a second time -- a notice indented 3rem while the heading
+   above it sits at 1.5rem reads as a mistake, because it is one. */
+.page .panel,
+.page .notice {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.page .panel {
+  margin-bottom: 2rem;
+}
+
+.invitations {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.invitation {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--faint);
+}
+
+/* The link is the point of the row -- it is what gets sent to someone -- so it leads, in
+   the monospace that makes a code checkable character by character. */
+.invitation-link a {
+  color: var(--accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.875rem;
+  word-break: break-all;
+}
+
+.invitation-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+.invitation-role {
+  color: var(--fg);
+}
+
+.invitation-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+  font-size: 0.8125rem;
+}
+
+/* Buttons on an administration row: quiet by default, because the row is the content. */
+.page button {
+  padding: 0.25rem 0.625rem;
+  border: 1px solid var(--faint);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.page button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.page button:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+/* Taking access away is the one thing worth colouring. */
+.page button.danger {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.page button.danger:hover {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+/* The code just minted. It is the only thing on the screen that cannot be recovered by
+   looking again, so it is drawn as an answer rather than as another row. */
+.created {
+  margin: 0.75rem 0 0;
+  padding: 0.75rem;
+  border-radius: 6px;
+  background: var(--accent-soft);
+}
+
+.created p {
+  margin: 0 0 0.25rem;
+  font-size: 0.8125rem;
+}
+
+.created a {
+  color: var(--accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.875rem;
+  word-break: break-all;
+}
+
+.paging {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.paging-count {
+  color: var(--dim);
+  font-size: 0.8125rem;
   font-variant-numeric: tabular-nums;
 }
 

@@ -15,6 +15,7 @@ import Html.Attributes exposing (attribute, class, classList, href, id, placehol
 import Html.Events exposing (on, onClick, onInput, onSubmit, stopPropagationOn)
 import Identity
 import InfiniteList
+import Invitations
 import Json.Decode as Decode exposing (Value)
 import Login
 import Magnes.Api.Enum.ContentType as ContentType
@@ -89,6 +90,10 @@ type alias Model =
     -- must not lose what is typed, and it is dropped on success so the password stops
     -- existing in the model the moment it stops being needed.
     , register : Register.Form
+
+    -- The Invitation administration screen: what was fetched, what is being created, and
+    -- which withdrawal has been asked about but not yet confirmed.
+    , invitations : Invitations.State
 
     -- Why the Identity in flight is being fetched. It is read only to word a failure —
     -- "could not resolve who you are" is the wrong sentence immediately after someone
@@ -267,6 +272,7 @@ init flags url key =
       , login = Login.empty
       , signOut = UserOverview.Ready
       , register = Register.prefilled (invitationCodeFor route)
+      , invitations = Invitations.empty
       , identityRefresh = Resolving
       , epoch = 0
       , scoring = 0
@@ -386,6 +392,16 @@ type Msg
     | ScoringDebounceElapsed Int
     | GotPasswordEntropy Int (Result (Graphql.Http.Error Register.Strength) Register.Strength)
     | GotRegistration (Result (Graphql.Http.Error String) String)
+    | InvitationRoleChosen String
+    | InvitationExpiryChosen String
+    | InvitationCreateSubmitted
+    | GotInvitationCreated (Result (Graphql.Http.Error Invitations.Invitation) Invitations.Invitation)
+    | InvitationWithdrawRequested String
+    | InvitationWithdrawConfirmed String
+    | InvitationWithdrawCancelled
+    | GotInvitationWithdrawn (Result (Graphql.Http.Error ()) ())
+    | InvitationsPageRequested Int
+    | GotInvitations Int (Result (Graphql.Http.Error Invitations.Page) Invitations.Page)
     | SignOutRequested
     | GotSignOut (Result (Graphql.Http.Error ()) ())
     | AuthenticationChangedHere Refresh
@@ -545,6 +561,136 @@ update msg model =
                 ]
             )
 
+        InvitationRoleChosen role ->
+            ( { model | invitations = Invitations.withRole role model.invitations }, Cmd.none )
+
+        InvitationExpiryChosen chosen ->
+            ( { model | invitations = Invitations.withExpiry chosen model.invitations }, Cmd.none )
+
+        InvitationCreateSubmitted ->
+            if model.invitations.creation == Invitations.Submitting then
+                ( model, Cmd.none )
+
+            else
+                ( { model | invitations = Invitations.withSubmission Invitations.Submitting model.invitations }
+                , Invitations.create model.apiUrl
+                    { role = model.invitations.role, expiry = model.invitations.expiry }
+                    GotInvitationCreated
+                )
+
+        GotInvitationCreated (Err error) ->
+            onRequestFailure error
+                model
+                (\_ current ->
+                    ( { current
+                        | invitations =
+                            Invitations.withSubmission
+                                (Invitations.Rejected (ApiError.fromError error))
+                                current.invitations
+                      }
+                    , Cmd.none
+                    )
+                )
+
+        GotInvitationCreated (Ok created) ->
+            -- The new Invitation is kept, because its code is the entire product of the
+            -- mutation and the list will not distinguish it from any other row. The list
+            -- itself is refetched rather than having the row spliced in: the server's
+            -- copy is what this screen is for.
+            --
+            -- Refetched at the first page, not the current one. bitmagnet orders these
+            -- newest first, so a creation made while reading page three would otherwise
+            -- refetch a page the new Invitation is not on.
+            ( { model
+                | invitations =
+                    model.invitations
+                        |> Invitations.withSubmission (Invitations.Created created)
+                        |> Invitations.withOffset 0
+                        |> Invitations.withListing Invitations.Loading
+              }
+            , Invitations.fetch model.apiUrl 0 (GotInvitations model.identityEpoch)
+            )
+
+        InvitationWithdrawRequested code ->
+            ( { model | invitations = Invitations.withConfirming (Just code) model.invitations }
+            , Cmd.none
+            )
+
+        InvitationWithdrawCancelled ->
+            ( { model | invitations = Invitations.withConfirming Nothing model.invitations }
+            , Cmd.none
+            )
+
+        InvitationWithdrawConfirmed code ->
+            ( { model | invitations = Invitations.withConfirming Nothing model.invitations }
+            , Invitations.withdraw model.apiUrl code GotInvitationWithdrawn
+            )
+
+        GotInvitationWithdrawn (Err error) ->
+            onRequestFailure error
+                model
+                (\_ current ->
+                    ( { current
+                        | invitations =
+                            Invitations.withWithdrawal (Just (ApiError.fromError error))
+                                current.invitations
+                      }
+                    , Cmd.none
+                    )
+                )
+
+        GotInvitationWithdrawn (Ok ()) ->
+            ( model
+            , Invitations.fetch model.apiUrl model.invitations.offset (GotInvitations model.identityEpoch)
+            )
+
+        InvitationsPageRequested offset ->
+            ( { model
+                | invitations =
+                    model.invitations
+                        |> Invitations.withOffset offset
+                        |> Invitations.withListing Invitations.Loading
+              }
+            , Invitations.fetch model.apiUrl offset (GotInvitations model.identityEpoch)
+            )
+
+        GotInvitations identityEpoch (Ok fetched) ->
+            if identityEpoch /= model.identityEpoch then
+                ( model, Cmd.none )
+
+            else
+                case ( fetched.invitations, Invitations.previousOffset model.invitations.offset ) of
+                    -- Withdrawing the last row of the last page leaves the offset past
+                    -- the end, and an empty page there reads as "there are none" on an
+                    -- instance that has fifty. Step back rather than say that.
+                    ( [], Just back ) ->
+                        ( { model | invitations = Invitations.withOffset back model.invitations }
+                        , Invitations.fetch model.apiUrl back (GotInvitations model.identityEpoch)
+                        )
+
+                    _ ->
+                        ( { model | invitations = Invitations.withListing (Invitations.Loaded fetched) model.invitations }
+                        , Cmd.none
+                        )
+
+        GotInvitations identityEpoch (Err error) ->
+            if identityEpoch /= model.identityEpoch then
+                ( model, Cmd.none )
+
+            else
+                onRequestFailure error
+                    model
+                    (\_ current ->
+                        ( { current
+                            | invitations =
+                                Invitations.withListing
+                                    (Invitations.Failed (ApiError.fromError error))
+                                    current.invitations
+                          }
+                        , Cmd.none
+                        )
+                    )
+
         SignOutRequested ->
             if model.signOut == UserOverview.SigningOut then
                 ( model, Cmd.none )
@@ -668,6 +814,10 @@ update msg model =
                             -- link; arriving anywhere else drops a password that is no
                             -- longer being typed into anything.
                             , register = Register.prefilled (invitationCodeFor route)
+
+                            -- Leaving the screen ends what was on it: an armed
+                            -- withdrawal, a refusal, and the page that was being read.
+                            , invitations = Invitations.empty
 
                             -- And abandons any measurement of that password. Without
                             -- this, one still in flight when the page was left comes
@@ -850,6 +1000,18 @@ update msg model =
                             (\message current ->
                                 ( { current | results = Failed message }, Cmd.none )
                             )
+
+
+invitationsMessages : Invitations.Messages Msg
+invitationsMessages =
+    { roleChosen = InvitationRoleChosen
+    , expiryChosen = InvitationExpiryChosen
+    , submitted = InvitationCreateSubmitted
+    , withdrawRequested = InvitationWithdrawRequested
+    , withdrawConfirmed = InvitationWithdrawConfirmed
+    , withdrawCancelled = InvitationWithdrawCancelled
+    , pageRequested = InvitationsPageRequested
+    }
 
 
 registerMessages : Register.Messages Msg
@@ -1075,8 +1237,8 @@ pendingResults route =
             Loading
 
 
-loadWhenReady : Identity.Identity -> String -> Int -> Route -> ( Results, Cmd Msg )
-loadWhenReady identity apiUrl epoch route =
+loadWhenReady : Identity.Identity -> String -> Epochs -> Route -> ( Results, Cmd Msg )
+loadWhenReady identity apiUrl epochs route =
     case identity of
         Identity.Unknown ->
             ( pendingResults route, Cmd.none )
@@ -1089,7 +1251,17 @@ loadWhenReady identity apiUrl epoch route =
                 ( Failed "Your Identity does not permit searching torrent content.", Cmd.none )
 
             else
-                load apiUrl epoch route
+                load apiUrl epochs route
+
+
+{-| The two counters a load has to carry. They are separate because they answer different
+questions: whether a page belongs to the search that is on screen, and whether it belongs
+to the Identity that is in hand. A response that fails either is dropped.
+-}
+type alias Epochs =
+    { query : Int
+    , identity : Int
+    }
 
 
 guardedLoad : Model -> Identity.Identity -> Int -> Route -> ( Results, Cmd Msg )
@@ -1107,7 +1279,10 @@ guardedLoad model identity epoch route =
             )
 
         Route.Allowed ->
-            loadWhenReady identity model.apiUrl epoch route
+            loadWhenReady identity
+                model.apiUrl
+                { query = epoch, identity = model.identityEpoch }
+                route
 
 
 routeNeedsSearch : Route -> Bool
@@ -1174,6 +1349,10 @@ beginIdentityRefresh reason model =
         -- Whatever the Identity turns out to be, it is no longer the one any sign-out in
         -- flight or already refused was about.
         , signOut = UserOverview.Ready
+
+        -- Nor the one the administration listing was fetched under. The epoch keeps an
+        -- older answer from landing; this keeps the older data from being held.
+        , invitations = Invitations.empty
         , results = pendingResults model.route
         , epoch = epoch
         , infiniteList = InfiniteList.init
@@ -1238,14 +1417,14 @@ identityApplied identity model =
 
 {-| What a route needs fetched, and the state to show until it arrives.
 -}
-load : String -> Int -> Route -> ( Results, Cmd Msg )
-load apiUrl epoch route =
+load : String -> Epochs -> Route -> ( Results, Cmd Msg )
+load apiUrl epochs route =
     case route of
         Route.Search params ->
-            ( Loading, fetch apiUrl epoch (searchArgs params 0) )
+            ( Loading, fetch apiUrl epochs.query (searchArgs params 0) )
 
         Route.Torrent infoHash ->
-            ( Loading, fetch apiUrl epoch (Bitmagnet.byInfoHash infoHash) )
+            ( Loading, fetch apiUrl epochs.query (Bitmagnet.byInfoHash infoHash) )
 
         Route.Login _ ->
             ( Blank, Cmd.none )
@@ -1266,7 +1445,7 @@ load apiUrl epoch route =
             ( Blank, Cmd.none )
 
         Route.AdminInvitations ->
-            ( Blank, Cmd.none )
+            ( Blank, Invitations.fetch apiUrl 0 (GotInvitations epochs.identity) )
 
         Route.NotFound ->
             ( Blank, Cmd.none )
@@ -1788,7 +1967,7 @@ viewAllowedRoute model =
             p [ class "notice" ] [ text "Role administration." ]
 
         Route.AdminInvitations ->
-            p [ class "notice" ] [ text "Invitation administration." ]
+            Invitations.view model.basePath model.zone invitationsMessages model.identity model.invitations
 
         Route.NotFound ->
             p [ class "notice" ] [ text "No such page." ]

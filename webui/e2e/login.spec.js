@@ -132,7 +132,7 @@ test.describe("the way in", () => {
 test.describe("routes that require a User", () => {
   // The Identity here is Anonymous, so these exercise the guards from ticket 07 without
   // anyone signing in.
-  for (const path of ["/account", "/account/api-keys"]) {
+  for (const path of ["/account", "/account/api-keys", "/admin/invitations"]) {
     test(`${path} sends an Anonymous Identity to login, remembering where it was going`, async ({
       page,
     }) => {
