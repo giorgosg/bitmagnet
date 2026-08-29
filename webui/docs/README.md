@@ -35,8 +35,9 @@ Write one if it is missing. What it needs to answer:
 [serving-and-testing.md](serving-and-testing.md) covers the general shape of all of that —
 the three ways to serve, what each requires, and the failure modes worth recognising.
 
-`src/Magnes/Api/` has no auth types. Regenerating it against the target fork is the first
-step of identity or permission work.
+`src/Magnes/Api/` was regenerated against the fork on 2026-08-24 and carries the auth
+types; it is committed, so a checkout builds without a live schema. Regenerate it again
+only when the fork's schema changes.
 
 ## Where the truth lives
 
@@ -57,10 +58,17 @@ listed there as words to avoid, and Magnes should not reintroduce them.
 
 ## Snapshots expire
 
-Everything here was checked on **2026-08-24** against bitmagnet `trunk` at `77fdb9de7`.
-Statements marked **[verified]** were checked by request against a live instance running
-that commit; the rest are read off the source. Re-check before relying on a number, and
-see `docs/environment.local.md` for what the instances were at the time.
+Most of what is here was checked on **2026-08-24** against bitmagnet `trunk` at
+`77fdb9de7`. Statements marked **[verified]** were checked by request against a live
+instance; the rest are read off the source. Re-check before relying on a number, and see
+`docs/environment.local.md` for what the instances were at the time.
 
-Nothing behind a credential has been verified: the probes were all anonymous, so
-registration, login, API keys and the whole `auth` namespace are read off the source only.
+Rechecked on **2026-08-29** against `trunk` at `a76cb8f5c`, which is what the development
+instance now runs: the error-code table, the two browser mutations, and the shapes of
+`listInvitations`, `listRoles`, `invite` and `deleteInvitation` — the last four by sending
+them anonymously and confirming they reach authorization rather than failing validation.
+
+Nothing behind a credential has been verified. Every probe has been anonymous or
+deliberately refused, so registration, login, API keys and the whole `auth` namespace are
+read off the source and confirmed only as far as their refusals. Closing that is
+`.scratch/identity-and-permissions/issues/16-build-credentialed-e2e-harness.md`.

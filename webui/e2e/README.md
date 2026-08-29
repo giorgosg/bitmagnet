@@ -52,12 +52,17 @@ what a disposable instance is for.
 The way through is a bitmagnet with a known state per run, which is more than a config
 flag. It has three parts, in two other places:
 
-- `../btm-testdb` — a local PostgreSQL holding ~100k torrents sampled from a real crawl,
-  a seed database that clones in about a second, and a reset.
+- `../btm-testdb` — **built, as of 2026-08-29.** A local PostgreSQL holding ~100k torrents
+  sampled from a real crawl, a seed database to clone from, and a reset, driven by
+  `bin/testdb`. Its corpus is deliberately messy — about 87% of contents carry no content
+  type and four in five torrents have no file information — because that is what a real
+  index looks like and what the UI has to branch on.
 - `../bitmagnet` — a fixture-server command standing up the real Gin, auth middleware, and
   gqlgen stack against a cloned database, printing a bootstrap invitation this harness can
   register a throwaway admin through. It has to live there: those packages are under
-  `internal/`, which Go will not let another module import.
+  `internal/`, which Go will not let another module import. Tracked as
+  `.scratch/test-fixtures/issues/02-add-a-fixture-server-command.md`; **not built yet**,
+  and the remaining blocker.
 - Here — a second Playwright project that consumes both, leaving this credential-free
   suite runnable with no services present.
 

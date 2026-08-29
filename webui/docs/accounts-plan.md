@@ -63,20 +63,26 @@ Accounts introduce `Duration` (API-key and invitation expiry), which is a **Go d
 string** — `"24h0m0s"` — not seconds and not ISO 8601. `DateTime` is already used by the
 row model; `createdAt`, `lastLoginAt` and `expiresAt` need the same treatment.
 
-### 3. A place for the token, which means a port
+### 3. A place for the token — superseded
 
-Elm cannot read `localStorage`. The token crosses the boundary twice:
+**This item was replaced and is kept only so the change is legible.** It planned to hold
+the JWT in `localStorage` and move it across a port on login and logout, the way the
+Angular UI does.
 
-- **In, at startup**, as a flag alongside `apiUrl` — so the first request is already
-  authenticated and there is no unauthenticated flash.
-- **Out, on login and logout**, through an outgoing port that writes or clears it.
+[ADR 0005](adr/0005-use-an-http-only-cookie-for-browser-authentication.md) settled on an
+HttpOnly cookie instead: `loginBrowser` and `logoutBrowser` set and clear it server-side,
+and **Magnes never sees the credential at all**. There is nothing to persist, nothing to
+attach to a request, and nothing for a cross-site script to read.
 
-Subscribe to the `storage` event in `index.html` and feed it back through an incoming
-port. That is what makes a second tab logging out take effect here, and it costs nothing —
-the Angular UI re-reads storage on a 10-second timer to get the same result.
+What survives of the plan is the tab synchronization, minus the credential. A
+`BroadcastChannel` message says only "authentication changed"; each tab then asks
+`self.identity` what it may now do. `public/index.html` carries that pair of ports.
 
-Keep the key namespaced to Magnes, not `bitmagnet-jwt`: two UIs served from one origin
-would otherwise share one slot.
+One port does carry a password, in one direction, once: after a successful registration or
+sign-in, Magnes offers the username and the password just typed to
+`navigator.credentials.store`, because Elm's `onSubmit` prevents the default and no
+password manager would otherwise see a submission to offer saving on. That is the person's
+own password on its way out of the model, not bitmagnet's credential. See ticket 17.
 
 ### 4. One place that builds a request
 

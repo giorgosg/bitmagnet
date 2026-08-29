@@ -9,14 +9,19 @@ its own UI; Magnes is a second one, built against the same GraphQL API.
 ## Status
 
 Runs. Search, sort, facet filters, infinite scroll, row expansion down to a file tree and
-`/torrent/<hash>` are built. Identity and permission work is now in progress against the
-fork's browser-cookie contract. See [docs/plan.md](docs/plan.md) for the completed first
-milestone and [docs/accounts-plan.md](docs/accounts-plan.md) for the current phase.
+`/torrent/<hash>` are built.
 
-Accounts are next, and [the bitmagnet fork](https://github.com/giorgosg/bitmagnet) now
-has them — along with an option to serve a UI like this one from its own origin. Both are
-live on the instance this is developed against. The next phase is worked out in
-[docs/](docs/README.md).
+Identity and permissions are most of the way in, against
+[the bitmagnet fork](https://github.com/giorgosg/bitmagnet)'s browser-cookie contract:
+registration through an Invitation, sign-in, a User overview with sign-out, Invitation
+administration, and a header menu that offers only the pages the current Identity may
+reach. API keys and the User and Role administration screens are still placeholders, and
+none of the signed-in half has been exercised end to end in a browser — that needs a
+disposable instance rather than someone's real password.
+
+See [docs/plan.md](docs/plan.md) for the completed first milestone and
+[docs/accounts-plan.md](docs/accounts-plan.md) for the current phase; the working notes
+are in [docs/](docs/README.md).
 
 ## Running it
 
@@ -34,7 +39,13 @@ so one compiled bundle works against any instance.
 The fork can also serve Magnes itself, from the API's own origin, which removes CORS from
 the picture entirely. Point `http_server.static.dir` at a build of `public/`, set the
 deployed HTML base and `window.MAGNES_BASE_PATH` to the mount path, and set
-`window.MAGNES_API_URL = "/graphql"`. See
+`window.MAGNES_API_URL = "/graphql"`.
+
+**That mount has to be reached over HTTPS.** bitmagnet cannot serve TLS itself, and its
+browser credential is a cookie marked `Secure`, which a browser on an insecure origin
+discards without reporting anything — so over plain HTTP registration works, login appears
+to work, and the person stays anonymous. Put a TLS-terminating proxy in front of it, and
+pass the browser's `Host` through with its port. See
 [docs/serving-and-testing.md](docs/serving-and-testing.md).
 
 ## Approach
