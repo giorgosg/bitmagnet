@@ -164,9 +164,13 @@ In dependency order, each usable before the next exists:
 3. **API keys** — list, create, **delete**. The secret is shown once, at creation, and is
    never retrievable; the UI has to be emphatic about that. Scoping a key means the object
    action list from `listObjectActions`.
-4. **Register** — username, password, email, invitation code. Entropy meter from
+4. **Register** — username, password, invitation code. Entropy meter from
    `self.passwordEntropy`, **debounced** — it is a server round trip per keystroke as the
-   Angular UI wrote it.
+   Angular UI wrote it. **No email field**: `auth.email_verification` is inert (see "What
+   Magnes cannot fix from here" below), so collecting an address would imply a
+   verification nothing performs. An instance setting `auth.email_required` therefore
+   cannot be registered with from Magnes, and `EMAIL_REQUIRED` maps to a message that says
+   so; the setting defaults to `false`.
 5. **Users admin** — list with `usernameLike` search, change role, enable/disable, delete.
    Every one of those mutations is unbuilt in the Angular UI, so there is nothing to port.
 6. **Invitations admin** — list, create with role and expiry, delete. Show the code as a

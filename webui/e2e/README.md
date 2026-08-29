@@ -36,9 +36,14 @@ path from `extensions.code` to the rendered sentence is genuinely exercised.
 ## What this cannot cover yet
 
 Everything past a successful sign-in: the redirect to `returnUrl`, sign-out, API-key
-management, registration, and the administration workflows. Those need a User to exist,
-and pointing them at a shared instance would mean either a real password in CI or tests
-that mutate someone's live data.
+management, and the administration workflows. Those need a User to exist, and pointing
+them at a shared instance would mean either a real password in CI or tests that mutate
+someone's live data.
+
+Registration is a case of its own. Every refusal is covered here, as is the live
+`self.passwordEntropy` round trip — bitmagnet answers it anonymously — but a *successful*
+registration would consume a real Invitation and leave a User behind, which is exactly
+what a disposable instance is for.
 
 The way through is a bitmagnet with a known state per run, which is more than a config
 flag. It has three parts, in two other places:

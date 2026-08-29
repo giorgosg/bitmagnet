@@ -20,6 +20,7 @@ import Login
 import Magnes.Api.Enum.ContentType as ContentType
 import Magnes.Api.Enum.FilesStatus exposing (FilesStatus(..))
 import Process
+import Register
 import Route exposing (Route)
 import Set exposing (Set)
 import Sort exposing (Sort)
@@ -84,10 +85,19 @@ type alias Model =
     -- signed in and the page has to be able to say a refusal out loud.
     , signOut : UserOverview.SignOut
 
+    -- The registration form, held for the same reason the login form is: a keystroke
+    -- must not lose what is typed, and it is dropped on success so the password stops
+    -- existing in the model the moment it stops being needed.
+    , register : Register.Form
+
     -- Why the Identity in flight is being fetched. It is read only to word a failure —
     -- "could not resolve who you are" is the wrong sentence immediately after someone
     -- deliberately signed out.
     , identityRefresh : Refresh
+
+    -- Separate counter for the password-entropy debounce. `self.passwordEntropy` is a
+    -- server round trip, and bitmagnet's own UI spends one per keystroke.
+    , scoring : Int
 
     -- Separate counter for the debounce, because a keystroke is not yet a new query.
     -- Bumping the epoch here would strand an in-flight page — the reply would be dropped
@@ -222,6 +232,14 @@ debounceMs =
     300
 
 
+{-| Quiet period before a typed password is sent to be scored. Longer than the search
+debounce: nothing on screen is waiting for it, and it is a round trip per pause.
+-}
+scoringDebounceMs : Float
+scoringDebounceMs =
+    500
+
+
 init : Flags -> Url -> Nav.Key -> ( Model, Cmd Msg )
 init flags url key =
     let
@@ -248,8 +266,10 @@ init flags url key =
       , filtersOpen = not (Facet.isEmpty (filtersFor route))
       , login = Login.empty
       , signOut = UserOverview.Ready
+      , register = Register.prefilled (invitationCodeFor route)
       , identityRefresh = Resolving
       , epoch = 0
+      , scoring = 0
       , typing = 0
       }
     , Cmd.batch
@@ -258,6 +278,20 @@ init flags url key =
         , Task.perform GotZone Time.here
         ]
     )
+
+
+{-| The Invitation a registration link carries. Registration is the only route that has
+one, and arriving anywhere else empties the form rather than leaving a code from a link
+followed earlier.
+-}
+invitationCodeFor : Route -> Maybe String
+invitationCodeFor route =
+    case route of
+        Route.Register params ->
+            params.code
+
+        _ ->
+            Nothing
 
 
 filtersFor : Route -> Facet.Filters
@@ -324,6 +358,13 @@ type Msg
     | LoginPasswordChanged String
     | LoginSubmitted
     | GotLogin (Result (Graphql.Http.Error ()) ())
+    | RegisterUsernameChanged String
+    | RegisterPasswordChanged String
+    | RegisterInvitationCodeChanged String
+    | RegisterSubmitted
+    | ScoringDebounceElapsed Int
+    | GotPasswordEntropy Int (Result (Graphql.Http.Error Register.Strength) Register.Strength)
+    | GotRegistration (Result (Graphql.Http.Error String) String)
     | SignOutRequested
     | GotSignOut (Result (Graphql.Http.Error ()) ())
     | AuthenticationChangedHere Refresh
@@ -374,6 +415,98 @@ update msg model =
                 [ Nav.replaceUrl model.key (Route.toHref model.basePath destination)
                 , refresh
                 ]
+            )
+
+        RegisterUsernameChanged username ->
+            ( { model | register = Register.withUsername username model.register }, Cmd.none )
+
+        RegisterInvitationCodeChanged code ->
+            ( { model | register = Register.withInvitationCode code model.register }, Cmd.none )
+
+        RegisterPasswordChanged password ->
+            let
+                scoring =
+                    model.scoring + 1
+            in
+            ( { model
+                | register = Register.withPassword password model.register
+                , scoring = scoring
+              }
+            , if String.isEmpty password then
+                Cmd.none
+
+              else
+                Process.sleep scoringDebounceMs
+                    |> Task.perform (\_ -> ScoringDebounceElapsed scoring)
+            )
+
+        ScoringDebounceElapsed scoring ->
+            if scoring /= model.scoring then
+                -- Another keystroke landed; that one owns the measurement.
+                ( model, Cmd.none )
+
+            else
+                ( model
+                , Register.measure model.apiUrl
+                    (Register.passwordOf model.register)
+                    (GotPasswordEntropy scoring)
+                )
+
+        GotPasswordEntropy scoring result ->
+            if scoring /= model.scoring then
+                ( model, Cmd.none )
+
+            else
+                let
+                    measurement =
+                        case result of
+                            Ok strength ->
+                                Register.Measured strength
+
+                            -- The password is not the thing that failed, so nothing is
+                            -- claimed about it. Registration remains submittable, and
+                            -- bitmagnet is the one that decides anyway.
+                            Err _ ->
+                                Register.Unmeasurable
+                in
+                ( { model | register = Register.withEntropy measurement model.register }
+                , Cmd.none
+                )
+
+        RegisterSubmitted ->
+            if not (Register.canSubmit model.register) then
+                ( model, Cmd.none )
+
+            else
+                ( { model | register = Register.withState Register.Submitting model.register }
+                , Register.submit model.apiUrl
+                    (Register.credentials model.register)
+                    GotRegistration
+                )
+
+        GotRegistration (Err error) ->
+            ( { model
+                | register =
+                    Register.withState (Register.Rejected (ApiError.fromError error))
+                        model.register
+              }
+            , Cmd.none
+            )
+
+        GotRegistration (Ok username) ->
+            -- Registering does not authenticate the browser: bitmagnet sets no cookie and
+            -- the spec requires the person to sign in with what they just chose. Dropping
+            -- the form takes the password with it, and the username is carried across so
+            -- the login form opens on the name that was actually created.
+            --
+            -- `replaceUrl`, so going back does not return to a form whose Invitation has
+            -- now been claimed.
+            ( { model
+                | register = Register.empty
+                , login = Login.withUsername username Login.empty
+              }
+            , Nav.replaceUrl model.key
+                (Route.toHref model.basePath (Route.Login { returnUrl = Nothing }))
             )
 
         SignOutRequested ->
@@ -494,6 +627,16 @@ update msg model =
                             -- page ends it, so coming back does not reopen it as though
                             -- something had just failed.
                             , signOut = UserOverview.Ready
+
+                            -- Arriving at registration takes the Invitation from the
+                            -- link; arriving anywhere else drops a password that is no
+                            -- longer being typed into anything.
+                            , register = Register.prefilled (invitationCodeFor route)
+
+                            -- And abandons any measurement of that password. Without
+                            -- this, one still in flight when the page was left comes
+                            -- back to a form nobody has typed into and scores it.
+                            , scoring = model.scoring + 1
                             , results = results
                             , epoch = epoch
                             , infiniteList = InfiniteList.init
@@ -501,7 +644,7 @@ update msg model =
                 in
                 ( navigated
                 , Cmd.batch
-                    [ cmd, scrollListToTop, focusIfLoginAppeared model navigated ]
+                    [ cmd, scrollListToTop, focusIfFormAppeared model navigated ]
                 )
 
         FieldChanged field ->
@@ -673,6 +816,15 @@ update msg model =
                             )
 
 
+registerMessages : Register.Messages Msg
+registerMessages =
+    { usernameChanged = RegisterUsernameChanged
+    , passwordChanged = RegisterPasswordChanged
+    , invitationCodeChanged = RegisterInvitationCodeChanged
+    , submitted = RegisterSubmitted
+    }
+
+
 userOverviewMessages : UserOverview.Messages Msg
 userOverviewMessages =
     { signOutRequested = SignOutRequested }
@@ -710,33 +862,46 @@ loginMessages =
     }
 
 
-{-| `autofocus` never fires here: `Browser.application` renders the form as a virtual-DOM
+{-| `autofocus` never fires here: `Browser.application` renders a form as a virtual-DOM
 patch rather than a new document. Focus is moved explicitly instead.
 
-What matters is when the form _appears_, which is not the same as when the login route is
+What matters is when the form _appears_, which is not the same as when its route is
 entered. Arriving cold on `/login` renders "Resolving Identity…" first, because the guard
 cannot decide anything until `self.identity` answers — so focusing on arrival targets an
 element that does not exist yet, and silently does nothing. The form appears on whichever
 comes second, the navigation or the Identity, so both ask this.
 
 -}
-focusIfLoginAppeared : Model -> Model -> Cmd Msg
-focusIfLoginAppeared before after =
-    if showsLoginForm after && not (showsLoginForm before) then
-        Task.attempt (\_ -> Ignored) (Browser.Dom.focus Login.usernameFieldId)
+focusIfFormAppeared : Model -> Model -> Cmd Msg
+focusIfFormAppeared before after =
+    case ( firstField before, firstField after ) of
+        ( _, Nothing ) ->
+            Cmd.none
 
-    else
-        Cmd.none
+        ( appeared, Just field ) ->
+            if appeared == Just field then
+                -- The same form was already on screen; the cursor is wherever the person
+                -- put it, and moving it back to the top would be taking it from them.
+                Cmd.none
+
+            else
+                Task.attempt (\_ -> Ignored) (Browser.Dom.focus field)
 
 
-showsLoginForm : Model -> Bool
-showsLoginForm model =
+{-| The field focus belongs in on the page as currently drawn, if any. A route whose guard
+has not resolved is not showing its form yet, and neither is a route without one.
+-}
+firstField : Model -> Maybe String
+firstField model =
     case ( model.route, Route.guard model.basePath model.identity model.route ) of
         ( Route.Login _, Route.Allowed ) ->
-            True
+            Just Login.usernameFieldId
+
+        ( Route.Register _, Route.Allowed ) ->
+            Just Register.usernameFieldId
 
         _ ->
-            False
+            Nothing
 
 
 {-| Every failed request asks the same question first: does this say the Identity Magnes
@@ -992,7 +1157,7 @@ identityResolved identity model =
     in
     -- The reason is spent once an Identity arrives; a later failure is its own event.
     ( { resolved | identityRefresh = Resolving }
-    , Cmd.batch [ cmd, focusIfLoginAppeared model resolved ]
+    , Cmd.batch [ cmd, focusIfFormAppeared model resolved ]
     )
 
 
@@ -1565,7 +1730,7 @@ viewAllowedRoute model =
             Login.view loginMessages model.login
 
         Route.Register _ ->
-            p [ class "notice" ] [ text "Register User." ]
+            Register.view registerMessages model.register
 
         Route.UserOverview ->
             case model.identity of

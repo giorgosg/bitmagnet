@@ -100,6 +100,10 @@ suite =
                             , ApiError.PasswordInsufficientEntropy
                             , ApiError.UsernameInvalid
                             ]
+            , test "an instance that requires an email says so rather than refusing barely" <|
+                \_ ->
+                    from [ coded "EMAIL_REQUIRED" [] ]
+                        |> Expect.equal ApiError.EmailRequired
             , test "an authorization refusal carries the refused Object action" <|
                 \_ ->
                     from

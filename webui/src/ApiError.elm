@@ -62,6 +62,7 @@ type Failure
     | InvitationExpired
     | InvitationClaimed
     | PasswordInsufficientEntropy
+    | EmailRequired
     | Unauthorized Refusal
     | UserAuthenticationRequired
     | ApiKeyManagementForbidden
@@ -198,6 +199,9 @@ fromCode code refused =
         "PASSWORD_INSUFFICIENT_ENTROPY" ->
             Just PasswordInsufficientEntropy
 
+        "EMAIL_REQUIRED" ->
+            Just EmailRequired
+
         "UNAUTHORIZED" ->
             Just (Unauthorized refused)
 
@@ -266,6 +270,13 @@ toMessage failure =
 
         PasswordInsufficientEntropy ->
             "That password is too easy to guess. Make it longer or less predictable."
+
+        -- Magnes neither shows nor collects an email address in this phase, because
+        -- bitmagnet's verification of one is inert; see the spec's cross-repository
+        -- scope. An instance configured to require one therefore cannot be registered
+        -- with from here, and saying which setting is in the way beats a bare refusal.
+        EmailRequired ->
+            "This instance requires an email address to register, which Magnes does not yet collect."
 
         Unauthorized { objectAction } ->
             case objectAction of

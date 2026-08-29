@@ -288,6 +288,8 @@ for telling which of several fields failed, but it is no longer the only signal.
 | `INVITATION_EXPIRED` | Registration, code past its expiry |
 | `INVITATION_CLAIMED` | Registration, code already used |
 | `PASSWORD_INSUFFICIENT_ENTROPY` | Below `auth.password_min_entropy` (default 70) |
+| `EMAIL_REQUIRED` | `auth.email_required` is on and no address was given |
+| `EMAIL_INVALID` | Registration or invitation, malformed address |
 | `UNAUTHORIZED` | Refusal; carries `namespace`, `object`, `action` |
 | `USER_SESSION_REQUIRED` | Operation needs a User-authenticated Identity |
 | `API_KEY_MANAGEMENT_FORBIDDEN` | An API-key Identity may not manage API keys |
@@ -296,3 +298,11 @@ for telling which of several fields failed, but it is no longer the only signal.
 
 Codes without a case in `src/ApiError.elm` fall back to the server's own message, so a
 newer bitmagnet stays legible without a client change.
+
+The two email codes are read from `error_presenter.go` and its
+`auth_error_codes_integration_test.go`, **not observed live** — Magnes collects no email
+address, so it can provoke neither. `EMAIL_REQUIRED` is mapped anyway, because an instance
+with `auth.email_required` on (it defaults off) cannot be registered with from Magnes at
+all, and saying which setting is in the way beats a bare refusal. `EMAIL_INVALID` is
+deliberately left unmapped: Magnes sends no address that could be malformed, so a case for
+it would be unreachable.
