@@ -85,14 +85,25 @@ Run `task gen-gorm` afterwards if the change touches `internal/model`.
 
 ## Testing against a real database
 
-`internal/database/dbtest` creates and drops a fully migrated, isolated database per test:
+`internal/database/dbtest` creates and drops an isolated database per test, by either of
+two paths:
 
 ```go
-db := dbtest.New(t) // db.Gorm, db.Query, db.Pool, db.DSN, db.Name
+db := dbtest.New(t)       // empty, fully migrated
+db := dbtest.NewSeeded(t) // cloned from the fixture template, corpus included
 ```
 
-These tests **skip silently** when `TEST_POSTGRES_DSN` is unset, so a bare `go test ./...`
-proves considerably less than it appears to.
+Both hand back the same `*dbtest.DB` — `db.Gorm`, `db.Query`, `db.Pool`, `db.DSN`,
+`db.Name` — and differ only in how the database was provisioned. `New` migrates from
+empty, which is what the auth tests want. `NewSeeded` clones a seed template built by the
+local btm-testdb project, so the database arrives populated for the cost of a file copy;
+the template's name carries the migration version it was built at, and one that does not
+match the migrations in this tree is refused rather than handed back.
+
+Each path **skips silently** without its own variable — `TEST_POSTGRES_DSN`, which CI
+sets, and `TEST_POSTGRES_TEMPLATE_DSN`, which only a checkout with fixtures has — so a
+bare `go test ./...` proves considerably less than it appears to. See
+[docs/hacking.md](../hacking.md).
 
 ---
 

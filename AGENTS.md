@@ -167,6 +167,12 @@ and proves less than it appears to. CI supplies a PostgreSQL 16 service.
 TEST_POSTGRES_DSN='postgres://postgres:postgres@localhost:5432/postgres' go test ./...
 ```
 
+Tests that need a populated index rather than an empty one use `dbtest.NewSeeded(t)`,
+which clones the local btm-testdb fixture template; those **skip** unless
+`TEST_POSTGRES_TEMPLATE_DSN` names the fixture instance, the same way — a checkout
+without fixtures runs everything that does not need them. See
+[docs/hacking.md](docs/hacking.md).
+
 ## Shapes to follow
 
 - **A subsystem** is `internal/<feature>/` with `config.go`, `factory.go`, the
