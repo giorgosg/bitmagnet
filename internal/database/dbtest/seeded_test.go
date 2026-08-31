@@ -39,23 +39,80 @@ func TestTemplateVersion(t *testing.T) {
 	}
 }
 
-func TestLatestSeedName(t *testing.T) {
+func TestPickSeedTemplate(t *testing.T) {
 	t.Parallel()
 
-	// Numeric order, not lexicographic: btm_seed_9 is older than btm_seed_10.
-	template, ok := latestSeedName([]string{"btm_seed_9", "btm_seed_10"})
-	require.True(t, ok)
-	require.Equal(t, seedTemplate{name: "btm_seed_10", version: 10}, template)
+	for _, tc := range []struct {
+		name        string
+		names       []string
+		treeVersion int
+		want        seedTemplate
+		ok          bool
+	}{
+		{
+			// The instance accumulates templates: btm-testdb never drops a
+			// superseded one. A checkout must get the template built at its own
+			// migration version, even when a newer one sits beside it, or a
+			// maintenance branch is refused a fixture that is present.
+			name:        "exact match wins over a newer template",
+			names:       []string{"btm_seed_22", "btm_seed_23"},
+			treeVersion: 22,
+			want:        seedTemplate{name: "btm_seed_22", version: 22},
+			ok:          true,
+		},
+		{
+			name:        "exact match wins from the middle of the pile",
+			names:       []string{"btm_seed_21", "btm_seed_23", "btm_seed_22"},
+			treeVersion: 22,
+			want:        seedTemplate{name: "btm_seed_22", version: 22},
+			ok:          true,
+		},
+		{
+			// No exact match: hand back the newest and let checkFresh name it
+			// stale, which says more than "no template here" would.
+			name:        "newest wins when nothing matches exactly",
+			names:       []string{"btm_seed_9", "btm_seed_10"},
+			treeVersion: 11,
+			want:        seedTemplate{name: "btm_seed_10", version: 10},
+			ok:          true,
+		},
+		{
+			// Numeric order, not lexicographic: btm_seed_9 is older than btm_seed_10.
+			name:        "newest is numeric, not lexicographic",
+			names:       []string{"btm_seed_10", "btm_seed_9"},
+			treeVersion: 22,
+			want:        seedTemplate{name: "btm_seed_10", version: 10},
+			ok:          true,
+		},
+		{
+			name:        "non-templates are ignored",
+			names:       []string{"btm_seed_22", "btm_seed_21", "bitmagnet", "postgres"},
+			treeVersion: 22,
+			want:        seedTemplate{name: "btm_seed_22", version: 22},
+			ok:          true,
+		},
+		{
+			name:        "no templates at all",
+			names:       []string{"bitmagnet", "postgres", "template0"},
+			treeVersion: 22,
+		},
+		{
+			name:        "no databases at all",
+			names:       nil,
+			treeVersion: 22,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	template, ok = latestSeedName([]string{"btm_seed_22", "btm_seed_21", "bitmagnet", "postgres"})
-	require.True(t, ok)
-	require.Equal(t, seedTemplate{name: "btm_seed_22", version: 22}, template)
+			template, ok := pickSeedTemplate(tc.names, tc.treeVersion)
+			require.Equal(t, tc.ok, ok)
 
-	_, ok = latestSeedName([]string{"bitmagnet", "postgres", "template0"})
-	require.False(t, ok)
-
-	_, ok = latestSeedName(nil)
-	require.False(t, ok)
+			if tc.ok {
+				require.Equal(t, tc.want, template)
+			}
+		})
+	}
 }
 
 func TestTreeMigrationVersion(t *testing.T) {
@@ -127,6 +184,16 @@ func TestNewSeededClonesSeedTemplate(t *testing.T) {
 	// of a file-level copy, not a migration run.
 	require.Less(t, elapsed, 5*time.Second, "seeding should cost about a second")
 	t.Logf("cloned a seeded database in %s", elapsed)
+
+	// torrent_contents is what the corpus is measured in — btm-testdb samples it
+	// and carries the torrents belonging to the sampled hashes across with it, so
+	// counting torrents alone would pass on a template whose contents table came
+	// across truncated.
+	var contents int64
+	require.NoError(t, db.Gorm.Raw(`SELECT count(*) FROM torrent_contents`).Scan(&contents).Error)
+	require.GreaterOrEqual(
+		t, contents, int64(50_000),
+		"expected the fixture corpus (~100k torrent contents), got a fraction of it")
 
 	var torrents int64
 	require.NoError(t, db.Gorm.Raw(`SELECT count(*) FROM torrents`).Scan(&torrents).Error)

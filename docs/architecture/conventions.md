@@ -94,6 +94,9 @@ Database tests **skip silently** without `TEST_POSTGRES_DSN`:
 TEST_POSTGRES_DSN='postgres://postgres:postgres@localhost:5432/postgres' go test ./...
 ```
 
+A test that needs a populated index rather than an empty one calls `dbtest.NewSeeded(t)`,
+which skips on a second variable, `TEST_POSTGRES_TEMPLATE_DSN` — see [data.md](data.md).
+
 ## Lint
 
 `golangci-lint` must come from `nix develop` — it has to be built with a Go at least as

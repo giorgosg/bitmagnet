@@ -72,13 +72,30 @@ func templateVersion(name string) (int, bool) {
 	return version, true
 }
 
-// latestSeedName picks the newest template out of the database names an
-// instance reports: the highest version wins, numerically — lexicographic order
-// would prefer btm_seed_9 over btm_seed_10.
-func latestSeedName(names []string) (seedTemplate, bool) {
+// pickSeedTemplate chooses which template to clone out of the database names an
+// instance reports. A template built at exactly this tree's migration version
+// wins: btm-testdb never drops a superseded template, so after a schema bump the
+// instance holds several at once, and taking the newest unconditionally would
+// refuse a checkout the matching template it is already sitting on.
+//
+// Failing an exact match the newest wins — numerically, since lexicographic
+// order would prefer btm_seed_9 over btm_seed_10 — leaving [checkFresh] to
+// report it as stale, which points at a rebuild more usefully than "no template
+// here" would.
+func pickSeedTemplate(names []string, treeVersion int) (seedTemplate, bool) {
 	best, found := seedTemplate{}, false
+
 	for _, name := range names {
-		if version, ok := templateVersion(name); ok && (!found || version > best.version) {
+		version, ok := templateVersion(name)
+		if !ok {
+			continue
+		}
+
+		if version == treeVersion {
+			return seedTemplate{name: name, version: version}, true
+		}
+
+		if !found || version > best.version {
 			best, found = seedTemplate{name: name, version: version}, true
 		}
 	}
@@ -204,12 +221,12 @@ func provisionSeeded(ctx context.Context, adminDSN string) (*DB, *sql.DB, error)
 		return nil, nil, fmt.Errorf("connecting to the fixture instance at %s: %w", redactedDSN(adminDSN), err)
 	}
 
-	template, err := findSeedTemplate(ctx, admin)
+	treeVersion, err := treeMigrationVersion()
 	if err != nil {
 		return nil, nil, err
 	}
 
-	treeVersion, err := treeMigrationVersion()
+	template, err := findSeedTemplate(ctx, admin, treeVersion)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -249,10 +266,11 @@ func provisionSeeded(ctx context.Context, adminDSN string) (*DB, *sql.DB, error)
 	return db, sqlDB, nil
 }
 
-// findSeedTemplate reports the seed template to clone: the newest btm_seed_<n>
-// database on the fixture instance. A [skipError] comes back when there is none,
-// which is what "the fixtures have not been built here" looks like.
-func findSeedTemplate(ctx context.Context, admin *sql.DB) (seedTemplate, error) {
+// findSeedTemplate reports the seed template to clone: the btm_seed_<n> database
+// on the fixture instance that [pickSeedTemplate] selects for treeVersion. A
+// [skipError] comes back when there is none, which is what "the fixtures have
+// not been built here" looks like.
+func findSeedTemplate(ctx context.Context, admin *sql.DB, treeVersion int) (seedTemplate, error) {
 	// A regular expression rather than LIKE, so the underscore in btm_seed is
 	// matched literally and versions are anchored at both ends.
 	rows, err := admin.QueryContext(ctx, `SELECT datname FROM pg_database WHERE datname ~ '^btm_seed_[0-9]+$'`)
@@ -277,7 +295,7 @@ func findSeedTemplate(ctx context.Context, admin *sql.DB) (seedTemplate, error) 
 		return seedTemplate{}, fmt.Errorf("reading the database names on the fixture instance: %w", err)
 	}
 
-	template, ok := latestSeedName(names)
+	template, ok := pickSeedTemplate(names, treeVersion)
 	if !ok {
 		return seedTemplate{}, skipError{
 			"no seed template (btm_seed_<version>) exists on the fixture instance; " +
