@@ -801,7 +801,15 @@ update msg model =
                         )
 
                     else
-                        ( { model | users = Users.withAction Users.Working model.users }
+                        -- Any ask armed on another row is spent: it was armed against a
+                        -- screen where nothing was running, and its two buttons are the
+                        -- one pair a running act would otherwise leave live.
+                        ( { model
+                            | users =
+                                model.users
+                                    |> Users.withConfirming Nothing
+                                    |> Users.withAction Users.Working
+                          }
                         , Users.setRole model.apiUrl userId role GotUserRole
                         )
 

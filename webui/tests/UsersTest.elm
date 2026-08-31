@@ -277,5 +277,21 @@ suite =
                         |> rendered administrator
                         |> Query.findAll [ Selector.disabled True ]
                         |> Query.count (Expect.equal 8)
+            , test "an armed ask waits too, rather than being the one live pair" <|
+                \_ ->
+                    -- An ask armed while the screen was quiet outlives the act that
+                    -- started on another row. Both its buttons are clicks the state
+                    -- could not place: confirming would put a second act in flight, and
+                    -- declining would clear the action the running one is still using.
+                    loaded [ ada, grace ]
+                        |> Users.withConfirming (Just (Users.Delete 2))
+                        |> Users.withAction Users.Working
+                        |> rendered administrator
+                        |> Expect.all
+                            [ Query.findAll [ Selector.tag "button" ]
+                                >> Query.count (Expect.equal 5)
+                            , Query.findAll [ Selector.tag "button", Selector.disabled True ]
+                                >> Query.count (Expect.equal 5)
+                            ]
             ]
         ]

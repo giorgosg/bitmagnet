@@ -23,6 +23,7 @@ import Graphql.SelectionSet as SelectionSet exposing (SelectionSet)
 import Html exposing (Html, button, div, h1, input, label, li, option, p, text, ul)
 import Html.Attributes exposing (attribute, class, disabled, for, id, selected, spellcheck, type_, value)
 import Html.Events exposing (onClick, onInput)
+import Html.Keyed
 import Identity
 import Magnes.Api.InputObject as InputObject
 import Magnes.Api.Mutation as Mutation
@@ -67,8 +68,8 @@ type Confirming
 
 {-| How the act in flight or just attempted is going. One at a time: the acts all
 refetch the list on success, so two in flight would race each other's refetch. While
-one runs, every row's controls wait, because the state could not tell a second click
-what it belonged to.
+one runs, every row's controls wait — an armed ask's own two buttons included, since
+the state could not tell a second click what it belonged to.
 
 `Refused` is announced above the list — the row it was about may not survive the next
 refetch, and a refusal that vanishes into a row teaches silence.
@@ -273,14 +274,6 @@ view zone messages identity state =
 
                 _ ->
                     Nothing
-
-        busy =
-            case state.action of
-                Working ->
-                    True
-
-                _ ->
-                    False
     in
     div [ class "page" ]
         [ h1 [] [ text "Users" ]
@@ -296,7 +289,7 @@ view zone messages identity state =
                     [ disabledNotice
                     , searchBox messages state
                     , actionFailure state.action
-                    , listed zone messages mayMutate self busy state loadedPage
+                    , listed zone messages mayMutate self state loadedPage
                     , paging messages state loadedPage
                     ]
         ]
@@ -349,8 +342,8 @@ searchBox messages state =
         ]
 
 
-listed : Time.Zone -> Messages msg -> Bool -> Maybe Int -> Bool -> State -> Page -> Html msg
-listed zone messages mayMutate self busy state loadedPage =
+listed : Time.Zone -> Messages msg -> Bool -> Maybe Int -> State -> Page -> Html msg
+listed zone messages mayMutate self state loadedPage =
     if List.isEmpty loadedPage.users then
         if String.isEmpty state.query then
             p [ class "notice" ] [ text "No Users." ]
@@ -361,18 +354,18 @@ listed zone messages mayMutate self busy state loadedPage =
 
     else
         ul [ class "users" ]
-            (List.map (row zone messages mayMutate self busy state.confirming loadedPage.roles) loadedPage.users)
+            (List.map (row zone messages mayMutate self state.action state.confirming loadedPage.roles) loadedPage.users)
 
 
-row : Time.Zone -> Messages msg -> Bool -> Maybe Int -> Bool -> Maybe Confirming -> List String -> Identity.User -> Html msg
-row zone messages mayMutate self busy confirming roles user =
+row : Time.Zone -> Messages msg -> Bool -> Maybe Int -> Action -> Maybe Confirming -> List String -> Identity.User -> Html msg
+row zone messages mayMutate self action confirming roles user =
     li [ class "user" ]
         [ div [ class "user-name" ] [ text user.username ]
         , div [ class "user-facts" ]
             [ Html.span [ class "user-role" ] [ text user.role ]
             , Html.span [] [ text ("Last signed in: " ++ lastSignIn zone user) ]
             ]
-        , acts messages mayMutate self busy confirming roles user
+        , acts messages mayMutate self action confirming roles user
         ]
 
 
@@ -415,67 +408,114 @@ Object action so an Identity without `auth::mutate` is not shown controls that w
 only refuse — bitmagnet stays the enforcer either way. An armed ask replaces the
 whole block: the select included, so a declined Role choice cannot stay on display
 as though it were still pending.
+
+The block is keyed because a `select` the person has touched is the browser's to
+display, not Elm's: the DOM keeps whatever was chosen, and Elm patches nothing while
+the Role the options are drawn from has not moved. A refused Role change moves
+nothing, so the rejected Role would sit in the box looking applied. `roleKey` throws
+the stale control away and builds an honest one — after a refusal, and after a Role
+that really did change — while leaving the choice on display for as long as the act
+is still in flight. Verified in a browser, since `Test.Html` does not model the DOM
+state a form control carries.
+
 -}
-acts : Messages msg -> Bool -> Maybe Int -> Bool -> Maybe Confirming -> List String -> Identity.User -> Html msg
-acts messages mayMutate self busy confirming roles user =
+acts : Messages msg -> Bool -> Maybe Int -> Action -> Maybe Confirming -> List String -> Identity.User -> Html msg
+acts messages mayMutate self action confirming roles user =
+    let
+        busy =
+            working action
+    in
     if not mayMutate then
         text ""
 
     else
-        div [ class "user-acts" ] <|
+        Html.Keyed.node "div" [ class "user-acts" ] <|
             case askFor user confirming of
                 Just ask ->
-                    [ askPanel messages self user ask ]
+                    [ ( "ask", askPanel messages busy self user ask ) ]
 
                 Nothing ->
-                    [ Html.select
-                        [ class "user-role-select"
-                        , attribute "aria-label" ("Role for " ++ user.username)
-                        , disabled busy
-                        , onInput (messages.roleChosen user.id)
-                        ]
-                        (List.map
-                            (\role ->
-                                option [ value role, selected (role == user.role) ] [ text role ]
+                    [ ( roleKey action user
+                      , Html.select
+                            [ class "user-role-select"
+                            , attribute "aria-label" ("Role for " ++ user.username)
+                            , disabled busy
+                            , onInput (messages.roleChosen user.id)
+                            ]
+                            (List.map
+                                (\role ->
+                                    option [ value role, selected (role == user.role) ] [ text role ]
+                                )
+                                roles
                             )
-                            roles
-                        )
-                    , button [ type_ "button", disabled busy, onClick (messages.disableRequested user.id) ] [ text "Disable" ]
-                    , button [ type_ "button", disabled busy, onClick (messages.enableRequested user.id) ] [ text "Enable" ]
-                    , button [ type_ "button", class "danger", disabled busy, onClick (messages.deleteRequested user.id) ] [ text "Delete" ]
+                      )
+                    , ( "disable", button [ type_ "button", disabled busy, onClick (messages.disableRequested user.id) ] [ text "Disable" ] )
+                    , ( "enable", button [ type_ "button", disabled busy, onClick (messages.enableRequested user.id) ] [ text "Enable" ] )
+                    , ( "delete", button [ type_ "button", class "danger", disabled busy, onClick (messages.deleteRequested user.id) ] [ text "Delete" ] )
                     ]
+
+
+working : Action -> Bool
+working action =
+    case action of
+        Working ->
+            True
+
+        _ ->
+            False
+
+
+{-| What the Role select is showing the truth of. It changes when the Role changes, and
+when an act is refused — the two moments the box may be displaying something the server
+never agreed to. It does not change while an act is in flight, so a choice being applied
+stays on screen until there is an answer.
+-}
+roleKey : Action -> Identity.User -> String
+roleKey action user =
+    case action of
+        Refused _ ->
+            "role-refused-" ++ user.role
+
+        _ ->
+            "role-" ++ user.role
 
 
 {-| One armed ask: what it would do, then the two clicks — the second one does it,
 the first is what asking was for. The confirmation carries no User: the ask armed in
 the state is the one thing it can mean, and the row it is on supplies the rest.
+
+Both clicks wait while an act is in flight, for the same reason every other control
+does. Declining waits too, and not only for symmetry: it clears the action along with
+the ask, so a decline mid-flight would announce that nothing was running while
+something still was.
+
 -}
-askPanel : Messages msg -> Maybe Int -> Identity.User -> Confirming -> Html msg
-askPanel messages self user ask =
+askPanel : Messages msg -> Bool -> Maybe Int -> Identity.User -> Confirming -> Html msg
+askPanel messages busy self user ask =
     div [ class "user-confirm" ]
         [ Html.span [] [ text (warning self user ask) ]
         , case ask of
             Delete _ ->
-                confirmButton messages "Delete"
+                confirmButton messages busy "Delete"
 
             Disable _ ->
-                confirmButton messages "Disable"
+                confirmButton messages busy "Disable"
 
             Enable _ ->
-                confirmButton messages "Enable"
+                confirmButton messages busy "Enable"
 
             ChangeOwnRole _ ->
-                confirmButton messages "Change"
+                confirmButton messages busy "Change"
         , button
-            [ type_ "button", onClick messages.cancelled ]
+            [ type_ "button", disabled busy, onClick messages.cancelled ]
             [ text "Keep" ]
         ]
 
 
-confirmButton : Messages msg -> String -> Html msg
-confirmButton messages label_ =
+confirmButton : Messages msg -> Bool -> String -> Html msg
+confirmButton messages busy label_ =
     button
-        [ type_ "button", class "danger", onClick messages.confirmed ]
+        [ type_ "button", class "danger", disabled busy, onClick messages.confirmed ]
         [ text label_ ]
 
 

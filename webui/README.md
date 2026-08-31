@@ -14,10 +14,10 @@ Runs. Search, sort, facet filters, infinite scroll, row expansion down to a file
 Identity and permissions are most of the way in, against
 [the bitmagnet fork](https://github.com/giorgosg/bitmagnet)'s browser-cookie contract:
 registration through an Invitation, sign-in, a User overview with sign-out, Invitation
-administration, and a header menu that offers only the pages the current Identity may
-reach. API keys and the User and Role administration screens are still placeholders, and
-none of the signed-in half has been exercised end to end in a browser — that needs a
-disposable instance rather than someone's real password.
+administration, User administration, and a header menu that offers only the pages the
+current Identity may reach. API keys and the Role administration screen are still
+placeholders, and none of the signed-in half has been exercised end to end in a browser
+— that needs a disposable instance rather than someone's real password.
 
 See [docs/plan.md](docs/plan.md) for the completed first milestone and
 [docs/accounts-plan.md](docs/accounts-plan.md) for the current phase; the working notes
