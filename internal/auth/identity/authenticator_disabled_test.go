@@ -31,7 +31,10 @@ type testStack struct {
 	authenticator identity.Authenticator
 	userService   user.Service
 	apiKeyService api_key.Service
-	query         *dao.Query
+	// apiKeyRepository is set only by the stacks whose tests write a key the
+	// service would refuse; see putAPIKey.
+	apiKeyRepository api_key.Repository
+	query            *dao.Query
 }
 
 func newTestStack(t *testing.T) testStack {
@@ -57,11 +60,10 @@ func newTestStack(t *testing.T) testStack {
 		values.LoginRequestsPerMinute,
 		values.LoginRequestBurst,
 	)
-	apiKeyService := api_key.NewService(api_key.NewRepository(provider))
-
 	objectActions := func() []rbac.ObjectAction {
 		return []rbac.ObjectAction{rbac.NewObjectAction("test", "test", "query")}
 	}
+	apiKeyService := api_key.NewService(api_key.NewRepository(provider), objectActions)
 	rbacService := rbac.NewService(
 		rbac.NewRepository(provider),
 		objectActions,
@@ -248,11 +250,10 @@ func TestExpiredTokenFallsBackToAnonymous(t *testing.T) {
 		values.PasswordMinEntropy, values.PasswordHashingCost,
 		values.LoginRequestsPerMinute, values.LoginRequestBurst,
 	)
-	apiKeyService := api_key.NewService(api_key.NewRepository(provider))
-
 	objectActions := func() []rbac.ObjectAction {
 		return []rbac.ObjectAction{rbac.NewObjectAction("test", "test", "query")}
 	}
+	apiKeyService := api_key.NewService(api_key.NewRepository(provider), objectActions)
 	rbacService := rbac.NewService(
 		rbac.NewRepository(provider), objectActions,
 		rbac.PermissionProviders(rbac.CorePermissions, rbac.VerbatimPermissions(objectActions)),

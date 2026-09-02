@@ -3,6 +3,7 @@ package api_key
 import (
 	"context"
 
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/rbac"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
 )
 
@@ -13,12 +14,18 @@ type Service interface {
 	Delete(ctx context.Context, req DeleteRequest) error
 }
 
-func NewService(repository Repository) Service {
+// NewService takes the registered object actions rather than the rbac service:
+// a key's permissions are checked against the registry, and depending on the
+// service itself would put api_key inside the cycle rbac.ServiceLazy exists to
+// break. The provider is the same one listObjectActions serves.
+func NewService(repository Repository, objectActions rbac.ObjectActionProvider) Service {
 	return service{
-		repository: repository,
+		repository:    repository,
+		objectActions: objectActions,
 	}
 }
 
 type service struct {
-	repository Repository
+	repository    Repository
+	objectActions rbac.ObjectActionProvider
 }

@@ -293,3 +293,20 @@ func TestGraphQLUnknownRoleErrorCodes(t *testing.T) {
 		requireGraphQLErrorCode(t, response, "ROLE_NOT_FOUND")
 	})
 }
+
+// createAPIKey stored whatever object actions it was handed: api_key_permissions
+// has no foreign key to a registry, because there is no registry table. A typo
+// produced a key that grants nothing and reported success.
+func TestGraphQLCreateAPIKeyInvalidPermissionErrorCode(t *testing.T) {
+	t.Parallel()
+
+	server, code := newAuthTestServer(t)
+	adminToken := loginAsAdmin(t, server, code)
+
+	response := query(t, server, adminToken, `mutation { self { createAPIKey(input: {
+		name: "typo",
+		permissions: [{namespace: "graphql", object: "torrent", action: "quury"}]
+	}) { id } } }`)
+
+	requireGraphQLErrorCode(t, response, "PERMISSION_INVALID")
+}
