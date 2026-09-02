@@ -261,3 +261,35 @@ func TestGraphQLErrorPresenterKeepsProtocolErrorsUseful(t *testing.T) {
 	assert.NotEmpty(t, response.Errors[0].Locations)
 	assert.Equal(t, "GRAPHQL_VALIDATION_FAILED", response.Errors[0].Extensions["code"])
 }
+
+// A role name the caller made up reaches the database as a foreign-key
+// violation on invitations.role_name. Unclassified, that is presented as
+// INTERNAL_SERVER_ERROR: a message naming a constraint, for what is a typo in a
+// field. setUserRole reports the same condition, so both are covered here.
+func TestGraphQLUnknownRoleErrorCodes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("invite", func(t *testing.T) {
+		t.Parallel()
+
+		server, code := newAuthTestServer(t)
+		adminToken := loginAsAdmin(t, server, code)
+
+		response := query(t, server, adminToken,
+			`mutation { auth { invite(input: {role: "administrator"}) { code } } }`)
+
+		requireGraphQLErrorCode(t, response, "ROLE_NOT_FOUND")
+	})
+
+	t.Run("setUserRole", func(t *testing.T) {
+		t.Parallel()
+
+		server, code := newAuthTestServer(t)
+		adminToken := loginAsAdmin(t, server, code)
+
+		response := query(t, server, adminToken,
+			`mutation { auth { setUserRole(userId: 1, roleName: "administrator") { id } } }`)
+
+		requireGraphQLErrorCode(t, response, "ROLE_NOT_FOUND")
+	})
+}

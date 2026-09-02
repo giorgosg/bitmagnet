@@ -23,6 +23,7 @@ const (
 	ErrorCodeEmailRequired                       = "EMAIL_REQUIRED"
 	ErrorCodeEmailInvalid                        = "EMAIL_INVALID"
 	ErrorCodePasswordInsufficientEntropy         = "PASSWORD_INSUFFICIENT_ENTROPY"
+	ErrorCodeRoleNotFound                        = "ROLE_NOT_FOUND"
 	ErrorCodeUnauthorized                        = "UNAUTHORIZED"
 	ErrorCodeAuthenticationInfrastructureFailure = "AUTHENTICATION_INFRASTRUCTURE_FAILURE"
 	ErrorCodeUserSessionRequired                 = "USER_SESSION_REQUIRED"
@@ -124,6 +125,13 @@ var userErrorPresentations = []errorClassification{
 		presentation: errorPresentation{
 			code:    ErrorCodePasswordInsufficientEntropy,
 			message: "password has insufficient entropy",
+		},
+	},
+	{
+		target: user.ErrRoleNotFound,
+		presentation: errorPresentation{
+			code:    ErrorCodeRoleNotFound,
+			message: "role not found",
 		},
 	},
 }
