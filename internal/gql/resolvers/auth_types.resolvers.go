@@ -20,7 +20,7 @@ import (
 // Permissions is the resolver for the permissions field. It reports what the
 // key was scoped to, which is a property of the key and does not move when the
 // owning user's role does. What the key can currently reach is Self.permissions.
-func (r *aPIKeyResolver) Permissions(_ context.Context, obj *model.APIKey) ([]gen.AuthObjectAction, error) {
+func (r *aPIKeyResolver) Permissions(ctx context.Context, obj *model.APIKey) ([]gen.AuthObjectAction, error) {
 	return gqlmodel.ObjectActionsToGql(
 		slice.Map(obj.Permissions, func(perm model.APIKeyPermission) rbac.ObjectAction {
 			return rbac.NewObjectAction(perm.Namespace, perm.Object, perm.Action)
