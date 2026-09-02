@@ -475,13 +475,13 @@ type Msg
     | GotUserEnabled (Result (Graphql.Http.Error Identity.User) Identity.User)
     | GotUserDeleted (Result (Graphql.Http.Error ()) ())
     | RoleNameChanged String
-    | RolePermissionToggled Identity.ObjectAction
+    | RoleActionToggled Identity.ObjectAction
     | RoleSubmitted
     | RoleEditRequested String
     | RoleEditCancelled
     | RoleDeleteRequested String
-    | RoleDeleteConfirmed String
-    | RoleDeleteCancelled
+    | RoleActConfirmed
+    | RoleActCancelled
     | GotRoles Int (Result (Graphql.Http.Error Roles.Page) Roles.Page)
     | GotRoleSaved (Result (Graphql.Http.Error Roles.Role) Roles.Role)
     | GotRoleDeleted String (Result (Graphql.Http.Error ()) ())
@@ -947,7 +947,7 @@ update msg model =
             , Cmd.none
             )
 
-        RolePermissionToggled action ->
+        RoleActionToggled action ->
             ( { model | roles = Roles.withDraft (Roles.toggle action model.roles.draft) model.roles }
             , Cmd.none
             )
@@ -964,8 +964,21 @@ update msg model =
                     in
                     -- The submit button is disabled without a name, but Enter in the name
                     -- field submits the form regardless, so the refusal lives here too.
-                    if String.isEmpty name then
+                    -- So does the refusal to write a Role the form is only reading.
+                    if String.isEmpty name || not (Roles.writable draft) then
                         ( model, Cmd.none )
+
+                    else if Roles.ownRole model.identity == Just name then
+                        -- Writing the Role you are holding this screen with can take the
+                        -- administration Permission out from under you, and bitmagnet
+                        -- does not prevent it. The spec asks for a warning first, so the
+                        -- save is armed rather than sent.
+                        ( { model
+                            | roles =
+                                Roles.withConfirming (Just (Roles.SavingOwn name)) model.roles
+                          }
+                        , Cmd.none
+                        )
 
                     else
                         ( { model | roles = Roles.withSubmission Roles.Saving model.roles }
@@ -1006,20 +1019,32 @@ update msg model =
             ( { model | roles = Roles.withDraft Roles.newDraft model.roles }, Cmd.none )
 
         RoleDeleteRequested name ->
-            ( { model | roles = Roles.withConfirming (Just name) model.roles }, Cmd.none )
+            ( { model | roles = Roles.withConfirming (Just (Roles.Deleting name)) model.roles }
+            , Cmd.none
+            )
 
-        RoleDeleteCancelled ->
+        RoleActCancelled ->
             ( { model | roles = Roles.withConfirming Nothing model.roles }, Cmd.none )
 
-        RoleDeleteConfirmed name ->
-            ( { model
-                | roles =
-                    model.roles
-                        |> Roles.withConfirming Nothing
-                        |> Roles.withSubmission Roles.Saving
-              }
-            , Roles.delete model.apiUrl name (GotRoleDeleted name)
-            )
+        RoleActConfirmed ->
+            -- Which act the confirmation belongs to is what was armed; the ask in the
+            -- state is the one place the Role is named, so the message carries nothing.
+            case ( model.roles.confirming, model.roles.listing ) of
+                ( Just (Roles.Deleting name), _ ) ->
+                    ( { model | roles = armed model.roles }
+                    , Roles.delete model.apiUrl name (GotRoleDeleted name)
+                    )
+
+                ( Just (Roles.SavingOwn name), Roles.Loaded loadedPage ) ->
+                    ( { model | roles = armed model.roles }
+                    , Roles.put model.apiUrl
+                        name
+                        (Roles.desiredActions loadedPage.actions model.roles.draft)
+                        GotRoleSaved
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
 
         GotRoles rolesEpoch (Ok fetched) ->
             if rolesEpoch /= model.rolesEpoch then
@@ -1081,7 +1106,16 @@ update msg model =
                     else
                         model.roles
             in
-            fetchRoles { model | roles = Roles.withSubmission Roles.Ready edited }
+            -- The refusal a previous deletion left is spent: it was about an attempt that
+            -- this one has now outlived, and leaving it up reports a failure over a list
+            -- that just succeeded.
+            fetchRoles
+                { model
+                    | roles =
+                        edited
+                            |> Roles.withSubmission Roles.Ready
+                            |> Roles.withDeletion Nothing
+                }
 
         GotRoleDeleted _ (Err error) ->
             onRequestFailure error
@@ -1453,13 +1487,13 @@ usersMessages =
 rolesMessages : Roles.Messages Msg
 rolesMessages =
     { nameChanged = RoleNameChanged
-    , actionToggled = RolePermissionToggled
+    , actionToggled = RoleActionToggled
     , submitted = RoleSubmitted
     , editRequested = RoleEditRequested
     , editCancelled = RoleEditCancelled
     , deleteRequested = RoleDeleteRequested
-    , deleteConfirmed = RoleDeleteConfirmed
-    , deleteCancelled = RoleDeleteCancelled
+    , confirmed = RoleActConfirmed
+    , cancelled = RoleActCancelled
     }
 
 
@@ -1586,6 +1620,15 @@ fetchUsers model =
     ( { model | usersEpoch = usersEpoch }
     , Users.fetch model.apiUrl model.users.query model.users.offset (GotUsers usersEpoch)
     )
+
+
+{-| An armed Role act, confirmed: the ask is spent and the act is the only one running.
+-}
+armed : Roles.State -> Roles.State
+armed roles =
+    roles
+        |> Roles.withConfirming Nothing
+        |> Roles.withSubmission Roles.Saving
 
 
 {-| Refetch the Role listing under a fresh epoch, so only the answer to this very question
@@ -2595,22 +2638,13 @@ tally : FeedState -> String
 tally feed =
     let
         counted =
-            Format.count feed.total ++ " " ++ plural feed.total "result"
+            Format.count feed.total ++ " " ++ Format.plural feed.total "result"
     in
     if feed.totalIsEstimate then
         "about " ++ counted
 
     else
         counted
-
-
-plural : Int -> String -> String
-plural n noun =
-    if n == 1 then
-        noun
-
-    else
-        noun ++ "s"
 
 
 viewItem : Route.BasePath -> Bool -> Item -> Html Msg
@@ -2718,9 +2752,9 @@ viewMeta item =
             List.filterMap identity
                 [ Just item.published
                 , Maybe.map (\ct -> String.replace "_" " " (ContentType.toString ct)) row.contentType
-                , Maybe.map (\n -> Format.count n ++ " " ++ plural n "file") row.filesCount
-                , Maybe.map (\n -> Format.count n ++ " " ++ plural n "seeder") row.seeders
-                , Maybe.map (\n -> Format.count n ++ " " ++ plural n "leecher") row.leechers
+                , Maybe.map (\n -> Format.count n ++ " " ++ Format.plural n "file") row.filesCount
+                , Maybe.map (\n -> Format.count n ++ " " ++ Format.plural n "seeder") row.seeders
+                , Maybe.map (\n -> Format.count n ++ " " ++ Format.plural n "leecher") row.leechers
                 ]
     in
     [ div [ class "meta", classList [ ( "with-name", showsRawName item ) ] ]
@@ -2841,7 +2875,7 @@ omissions fileList =
                 []
 
             else
-                [ String.fromInt fileList.hidden ++ " padding " ++ plural fileList.hidden "file" ++ " hidden" ]
+                [ String.fromInt fileList.hidden ++ " padding " ++ Format.plural fileList.hidden "file" ++ " hidden" ]
 
         cap =
             if fileList.capped then

@@ -145,18 +145,19 @@ back merely writes a row for something that was already answering. The schema re
 flag for both, so a stored row that duplicates a core permission cannot be told apart from
 the core permission alone.
 
-**Deleting a role is two foreign keys**, and neither is visible in the schema
+**Deleting a role is three foreign keys**, none of them visible in the GraphQL schema
 (`migrations/00022_auth.sql`):
 
 | Table | Reference | What deleting a role does |
 | --- | --- | --- |
 | `role_permissions` | `on delete cascade` | its permissions go with it |
-| `invitations` | `on delete cascade` | **every unclaimed invitation issued for it is deleted** |
+| `invitations` | `on delete cascade` | **every invitation issued for it is deleted**, claimed or not |
 | `users` | no cascade | Postgres **refuses** the delete while any user holds the role |
 
 So a role in use cannot be deleted, and the refusal arrives as an opaque database error
 rather than a coded one; and a role nobody holds can still take invitations with it
-silently. `deleteRole` additionally refuses the four core role names before touching the
+silently. The cascade draws no claimed/unclaimed distinction — `invitations.claimed_by` is
+just another column — so the record of invitations already used goes as well. `deleteRole` additionally refuses the four core role names before touching the
 database at all (`rbac.service.DeleteRole`).
 
 `Duration` is gqlgen's `graphql.Duration` — a Go duration string, `"24h0m0s"`, parsed with

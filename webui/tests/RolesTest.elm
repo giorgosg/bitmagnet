@@ -67,9 +67,36 @@ curator =
     }
 
 
+{-| `anon`: core, and the one Role the Anonymous access setting governs.
+-}
+anonymous : Roles.Role
+anonymous =
+    { name = "anon"
+    , core = True
+    , permissions = [ { objectAction = Identity.graphql "self" "query", core = True } ]
+    }
+
+
 page : Roles.Page
 page =
-    { roles = [ administrator, reader, curator ], actions = offered }
+    { roles = [ administrator, reader, curator, anonymous ], actions = offered }
+
+
+{-| Someone administering while holding a Role this screen can write — which is what makes
+saving it self-affecting.
+-}
+curatorIdentity : Identity.Identity
+curatorIdentity =
+    Identity.UserAuthenticated
+        { id = 4
+        , username = "grace"
+        , role = "curator"
+        , email = Nothing
+        , lastLoginAt = Nothing
+        , createdAt = Time.millisToPosix 0
+        , updatedAt = Time.millisToPosix 0
+        }
+        [ Identity.graphql "auth" "query", Identity.graphql "auth" "mutate" ]
 
 
 administratorIdentity : Identity.Identity
@@ -108,8 +135,8 @@ messages =
     , editRequested = always ()
     , editCancelled = ()
     , deleteRequested = always ()
-    , deleteConfirmed = always ()
-    , deleteCancelled = ()
+    , confirmed = ()
+    , cancelled = ()
     }
 
 
@@ -204,6 +231,15 @@ suite =
                         |> Roles.withDraft (draftOf "user")
                         |> rendered administratorIdentity
                         |> Query.has [ Selector.text "cannot be revoked" ]
+            , test "names the fixed Permissions rather than only counting them" <|
+                \_ ->
+                    -- admin's is `**::**::**`, which no checkbox draws, so a bare count
+                    -- would leave the Role that holds everything looking like it holds
+                    -- nothing.
+                    loaded
+                        |> Roles.withDraft (draftOf "admin")
+                        |> rendered administratorIdentity
+                        |> Query.has [ Selector.text "**::**::**" ]
             , test "names the Permissions it cannot show rather than hiding them" <|
                 \_ ->
                     loaded
@@ -234,9 +270,10 @@ suite =
                             ]
             , test "says which Roles are core" <|
                 \_ ->
+                    -- admin, user and anon; curator is the instance's own.
                     rendered administratorIdentity loaded
                         |> Query.findAll [ Selector.class "role-core" ]
-                        |> Query.count (Expect.equal 2)
+                        |> Query.count (Expect.equal 3)
             , test "a core Role offers no deletion" <|
                 \_ ->
                     -- The server refuses it, so offering the click would only teach that
@@ -256,7 +293,7 @@ suite =
             [ test "asks before doing it" <|
                 \_ ->
                     loaded
-                        |> Roles.withConfirming (Just "curator")
+                        |> Roles.withConfirming (Just (Roles.Deleting "curator"))
                         |> rendered administratorIdentity
                         |> Query.has [ Selector.text "Delete the Role curator?" ]
             , test "says the deletion will be refused while anyone holds the Role" <|
@@ -265,21 +302,21 @@ suite =
                     -- Postgres refuses and bitmagnet passes the refusal through as an
                     -- opaque database error. Better to say so before the click.
                     loaded
-                        |> Roles.withConfirming (Just "curator")
+                        |> Roles.withConfirming (Just (Roles.Deleting "curator"))
                         |> rendered administratorIdentity
                         |> Query.has [ Selector.text "still holds it" ]
-            , test "says the Invitations issued for it go too" <|
+            , test "says every Invitation issued for it goes too, claimed or not" <|
                 \_ ->
-                    -- `invitations.role_name` cascades, so unclaimed codes for this Role
-                    -- disappear with it and nothing else would ever say so.
+                    -- `invitations.role_name` cascades with no claimed/unclaimed
+                    -- distinction, so saying "unclaimed" would understate it.
                     loaded
-                        |> Roles.withConfirming (Just "curator")
+                        |> Roles.withConfirming (Just (Roles.Deleting "curator"))
                         |> rendered administratorIdentity
-                        |> Query.has [ Selector.text "Invitation" ]
+                        |> Query.has [ Selector.text "claimed or not" ]
             , test "the ask can be declined" <|
                 \_ ->
                     loaded
-                        |> Roles.withConfirming (Just "curator")
+                        |> Roles.withConfirming (Just (Roles.Deleting "curator"))
                         |> rendered administratorIdentity
                         |> Query.has [ Selector.tag "button", Selector.text "Keep" ]
             ]
@@ -299,26 +336,121 @@ suite =
         , describe "an act in flight"
             [ test "nothing offers a second act while one is running" <|
                 \_ ->
-                    -- A save and a deletion both refetch the list, so two in flight
-                    -- would race. Three Roles: two core with an Edit each, one with an
-                    -- Edit and a Delete, and the form's own submit. All of them wait.
+                    -- A save and a deletion both refetch the list, so two in flight would
+                    -- race. Four Roles: a View each for admin and anon, an Edit for user,
+                    -- an Edit and a Delete for curator, and the form's own submit. All of
+                    -- them wait.
                     loaded
                         |> Roles.withSubmission Roles.Saving
                         |> rendered administratorIdentity
                         |> Expect.all
                             [ Query.findAll [ Selector.tag "button" ]
-                                >> Query.count (Expect.equal 5)
+                                >> Query.count (Expect.equal 6)
                             , Query.findAll [ Selector.tag "button", Selector.disabled True ]
-                                >> Query.count (Expect.equal 5)
+                                >> Query.count (Expect.equal 6)
                             ]
             , test "an armed deletion waits too, rather than being the one live pair" <|
                 \_ ->
+                    -- curator's row is now its ask, so its Delete and Keep stand in for
+                    -- the Edit and Delete it had: six either way, and none of them live.
                     loaded
-                        |> Roles.withConfirming (Just "curator")
+                        |> Roles.withConfirming (Just (Roles.Deleting "curator"))
                         |> Roles.withSubmission Roles.Saving
                         |> rendered administratorIdentity
                         |> Query.findAll [ Selector.tag "button", Selector.disabled True ]
-                        |> Query.count (Expect.equal 5)
+                        |> Query.count (Expect.equal 6)
+            ]
+        , describe "a Role this screen may not write"
+            [ test "admin is opened to be read, not edited" <|
+                \_ ->
+                    -- The spec: "`admin` remains fixed at its wildcard Permission". A save
+                    -- would write rows beside a Permission held in memory and change
+                    -- nothing, so there is nothing to press.
+                    loaded
+                        |> Roles.withDraft (draftOf "admin")
+                        |> rendered administratorIdentity
+                        |> Expect.all
+                            [ Query.hasNot [ Selector.class "submit" ]
+                            , Query.has [ Selector.text "fixes admin at its wildcard Permission" ]
+                            ]
+            , test "anon is left to the Anonymous access setting" <|
+                \_ ->
+                    -- The spec: "`anon` remains governed by Anonymous access
+                    -- configuration".
+                    loaded
+                        |> Roles.withDraft (draftOf "anon")
+                        |> rendered administratorIdentity
+                        |> Expect.all
+                            [ Query.hasNot [ Selector.class "submit" ]
+                            , Query.has [ Selector.text "Anonymous access setting" ]
+                            ]
+            , test "none of its boxes can be ticked" <|
+                \_ ->
+                    loaded
+                        |> Roles.withDraft (draftOf "anon")
+                        |> rendered administratorIdentity
+                        |> Query.findAll
+                            [ Selector.attribute (Html.Attributes.type_ "checkbox")
+                            , Selector.disabled True
+                            ]
+                        |> Query.count (Expect.equal (List.length offered))
+            , test "its row offers a read rather than an edit" <|
+                \_ ->
+                    Roles.empty
+                        |> Roles.withListing (Roles.Loaded { roles = [ administrator ], actions = offered })
+                        |> rendered administratorIdentity
+                        |> Expect.all
+                            [ Query.has [ Selector.tag "button", Selector.text "View" ]
+                            , Query.hasNot [ Selector.tag "button", Selector.text "Edit" ]
+                            ]
+            , test "a core Role the spec does allow assigning to is still edited" <|
+                \_ ->
+                    -- "Additional Permissions may be assigned to the `editor` and `user`
+                    -- Roles" — core is not the same question as writable.
+                    Roles.empty
+                        |> Roles.withListing (Roles.Loaded { roles = [ reader ], actions = offered })
+                        |> rendered administratorIdentity
+                        |> Query.has [ Selector.tag "button", Selector.text "Edit" ]
+            ]
+        , describe "saving the Role you hold yourself"
+            [ test "asks before doing it" <|
+                \_ ->
+                    -- The spec requires a clear warning before a self-affecting or
+                    -- potentially locking mutation, and bitmagnet prevents neither.
+                    loaded
+                        |> Roles.withDraft (draftOf "curator")
+                        |> Roles.withConfirming (Just (Roles.SavingOwn "curator"))
+                        |> rendered curatorIdentity
+                        |> Query.has [ Selector.text "Save your own Role, curator" ]
+            , test "says what is lost when administration is not among the ticks" <|
+                \_ ->
+                    -- curator holds no `auth::mutate`, so saving it as drawn takes this
+                    -- very screen away from the person pressing the button.
+                    loaded
+                        |> Roles.withDraft (draftOf "curator")
+                        |> Roles.withConfirming (Just (Roles.SavingOwn "curator"))
+                        |> rendered curatorIdentity
+                        |> Query.has [ Selector.text "only another administrator could give it back" ]
+            , test "says it takes effect on you when administration is kept" <|
+                \_ ->
+                    loaded
+                        |> Roles.withDraft (Roles.toggle (Identity.graphql "auth" "mutate") (draftOf "curator"))
+                        |> Roles.withConfirming (Just (Roles.SavingOwn "curator"))
+                        |> rendered curatorIdentity
+                        |> Query.has [ Selector.text "takes effect on you" ]
+            , test "the ask can be declined" <|
+                \_ ->
+                    loaded
+                        |> Roles.withDraft (draftOf "curator")
+                        |> Roles.withConfirming (Just (Roles.SavingOwn "curator"))
+                        |> rendered curatorIdentity
+                        |> Query.has [ Selector.tag "button", Selector.text "Keep" ]
+            , test "someone else's Role is saved without an ask" <|
+                \_ ->
+                    loaded
+                        |> Roles.withDraft (draftOf "curator")
+                        |> rendered administratorIdentity
+                        |> Query.has [ Selector.class "submit" ]
             ]
         , describe "a refused save"
             [ test "is announced rather than leaving the form looking saved" <|

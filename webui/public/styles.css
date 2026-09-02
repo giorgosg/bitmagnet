@@ -950,10 +950,35 @@ main {
   margin: 0.75rem 0;
 }
 
-/* Written as a child rule on purpose: `.panel > *` carries the same specificity and comes
-   later in this file, so a bare `.permissions { max-width: none }` loses to it. */
-.panel > .permissions {
+/* `.panel > *` caps every child at the 22rem a field wants to be typed into. On this form
+   only the name field is that; the grid, the notices and the ask are layout and prose, and
+   the cap squeezes them into a third of the panel while the grid beside them spans it all.
+   Qualified with `.panel` on purpose: `.panel > *` is written later in this file, so a
+   selector that merely ties it on specificity — `.role-editor > *` — loses on order and
+   the grid silently collapses back into one column. */
+.panel.role-editor > * {
   max-width: none;
+}
+
+/* Prose still wants a measure — just not a form field's. */
+.panel.role-editor > .notice,
+.panel.role-editor > .role-confirm,
+.panel.role-editor > .role-naming {
+  max-width: 48rem;
+}
+
+/* The one child that really is a form field. */
+.panel.role-editor .role-naming input {
+  max-width: 22rem;
+}
+
+/* The ask that stands where the save button was: it is the screen's most consequential
+   sentence, so it reads as a warning rather than as another quiet notice. */
+.panel.role-editor > .role-confirm {
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent-soft);
 }
 
 .permission-group h3 {

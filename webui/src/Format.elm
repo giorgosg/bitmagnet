@@ -1,4 +1,4 @@
-module Format exposing (bytes, count, date, dateTime)
+module Format exposing (bytes, count, date, dateTime, forCount, plural)
 
 {-| Human-readable numbers and dates: sizes and counts for the row, dates and times
 wherever a moment is shown to a person.
@@ -146,3 +146,26 @@ groupsOfThree chars =
         _ ->
             (List.take 3 chars |> List.reverse |> String.fromList)
                 :: groupsOfThree (List.drop 3 chars)
+
+
+{-| The regular plural: the noun as it stands for one, with an "s" for any other number.
+-}
+plural : Int -> String -> String
+plural n noun =
+    if n == 1 then
+        noun
+
+    else
+        noun ++ "s"
+
+
+{-| One of two wordings, chosen by a count, for the words the "s" does not cover — "it"
+and "them", "a Permission" and "Permissions".
+-}
+forCount : Int -> { one : String, many : String } -> String
+forCount n wording =
+    if n == 1 then
+        wording.one
+
+    else
+        wording.many

@@ -1,4 +1,4 @@
-module Roles exposing (Draft, Listing(..), Messages, Page, Permission, Role, State, Submission(..), delete, desiredActions, draftNamed, empty, fetch, newDraft, put, toggle, view, withConfirming, withDeletion, withDraft, withListing, withName, withSubmission)
+module Roles exposing (Confirming(..), Draft, Listing(..), Messages, Page, Permission, Role, State, Submission(..), delete, desiredActions, draftNamed, empty, fetch, newDraft, ownRole, put, toggle, view, withConfirming, withDeletion, withDraft, withListing, withName, withSubmission, writable)
 
 {-| Administering Roles: what each one grants, and the two ways that changes.
 
@@ -92,7 +92,30 @@ the first where it was. There is no rename, and the form does not offer one.
 -}
 type Naming
     = Unnamed
-    | Fixed
+    | Named
+
+
+{-| Whether this Role's Permissions may be written at all, and if not, why.
+
+The spec settles two of them: "`admin` remains fixed at its wildcard Permission and `anon`
+remains governed by Anonymous access configuration", and additional Permissions are for
+`editor` and `user`. Neither is a rule bitmagnet enforces — `putRole` would write rows for
+either — so it is enforced here, and the reason is carried rather than inferred, because a
+disabled grid with no explanation is indistinguishable from a broken one.
+
+-}
+type Writing
+    = Writable
+    | ReadOnly String
+
+
+{-| The ask that has been made but not yet answered. One at a time, as on the User screen:
+arming two is how the wrong one gets clicked. Neither carries anything but the Role's name,
+because the ask itself is what the confirmation means.
+-}
+type Confirming
+    = Deleting String
+    | SavingOwn String
 
 
 {-| A Role as it would be saved. `chosen` holds the keys of the Object actions ticked;
@@ -102,6 +125,7 @@ checkbox can express, kept so that saving cannot revoke them.
 type alias Draft =
     { name : String
     , naming : Naming
+    , writing : Writing
     , chosen : Set String
     , locked : List Identity.ObjectAction
     , carried : List Identity.ObjectAction
@@ -112,14 +136,20 @@ type alias State =
     { listing : Listing
     , draft : Draft
     , submission : Submission
-    , confirming : Maybe String
+    , confirming : Maybe Confirming
     , deletion : Maybe ApiError.Failure
     }
 
 
 newDraft : Draft
 newDraft =
-    { name = "", naming = Unnamed, chosen = Set.empty, locked = [], carried = [] }
+    { name = ""
+    , naming = Unnamed
+    , writing = Writable
+    , chosen = Set.empty
+    , locked = []
+    , carried = []
+    }
 
 
 empty : State
@@ -150,11 +180,11 @@ withSubmission submission state =
     { state | submission = submission }
 
 
-{-| Arming a deletion also clears the last one's refusal, which was about another Role.
+{-| Arming an ask also clears the last deletion's refusal, which was about another Role.
 -}
-withConfirming : Maybe String -> State -> State
-withConfirming name state =
-    { state | confirming = name, deletion = Nothing }
+withConfirming : Maybe Confirming -> State -> State
+withConfirming confirming state =
+    { state | confirming = confirming, deletion = Nothing }
 
 
 withDeletion : Maybe ApiError.Failure -> State -> State
@@ -171,11 +201,11 @@ withName name draft =
 what the form may change, what it may only report, and what it must carry.
 -}
 draftNamed : String -> Page -> Maybe Draft
-draftNamed name page_ =
-    page_.roles
+draftNamed name listing =
+    listing.roles
         |> List.filter (\role -> role.name == name)
         |> List.head
-        |> Maybe.map (draftFor page_.actions)
+        |> Maybe.map (draftFor listing.actions)
 
 
 draftFor : List Identity.ObjectAction -> Role -> Draft
@@ -191,11 +221,33 @@ draftFor offered role =
             List.partition (\permission -> Set.member (key permission.objectAction) offeredKeys) stored
     in
     { name = role.name
-    , naming = Fixed
+    , naming = Named
+    , writing = writingFor role
     , chosen = Set.fromList (List.map (.objectAction >> key) shown)
     , locked = List.map .objectAction held
     , carried = List.map .objectAction unshown
     }
+
+
+{-| Whether a save would mean anything for this Draft. `Main` asks before sending, and the
+form asks before offering a button, so the reason itself stays in here.
+-}
+writable : Draft -> Bool
+writable draft =
+    draft.writing == Writable
+
+
+writingFor : Role -> Writing
+writingFor role =
+    case role.name of
+        "admin" ->
+            ReadOnly "bitmagnet fixes admin at its wildcard Permission, which grants everything and is held in memory. Nothing written here would add to it or take anything away."
+
+        "anon" ->
+            ReadOnly "What anon holds follows the instance's Anonymous access setting, not this form. Editing it here would be overruled by the setting."
+
+        _ ->
+            Writable
 
 
 toggle : Identity.ObjectAction -> Draft -> Draft
@@ -306,8 +358,8 @@ type alias Messages msg =
     , editRequested : String -> msg
     , editCancelled : msg
     , deleteRequested : String -> msg
-    , deleteConfirmed : String -> msg
-    , deleteCancelled : msg
+    , confirmed : msg
+    , cancelled : msg
     }
 
 
@@ -335,7 +387,7 @@ view messages identity state =
             Loaded loadedPage ->
                 div []
                     [ if mayMutate then
-                        editor messages state loadedPage
+                        editor messages busy (ownRole identity) state loadedPage
 
                       else
                         text ""
@@ -345,46 +397,117 @@ view messages identity state =
         ]
 
 
+{-| The Role the viewer holds, when a User is holding this screen. It is what makes a save
+self-affecting, and the only reason this module is given the Identity beyond the gate.
+-}
+ownRole : Identity.Identity -> Maybe String
+ownRole identity =
+    case identity of
+        Identity.UserAuthenticated user _ ->
+            Just user.role
+
+        Identity.APIKeyAuthenticated user _ _ ->
+            Just user.role
+
+        _ ->
+            Nothing
+
+
 {-| One form for both acts, because bitmagnet has one mutation for both. What changes
 between them is the name: typed for a Role being made, fixed for one being edited.
 -}
-editor : Messages msg -> State -> Page -> Html msg
-editor messages state loadedPage =
+editor : Messages msg -> Bool -> Maybe String -> State -> Page -> Html msg
+editor messages busy own state loadedPage =
     let
-        busy =
-            state.submission == Saving
+        mayWrite =
+            writable state.draft
     in
-    Html.form [ class "panel", onSubmit messages.submitted ]
+    Html.form [ class "panel role-editor", onSubmit messages.submitted ]
         [ h2 [] [ text (heading state.draft) ]
         , naming messages busy state.draft
-        , permissionGrid messages busy loadedPage.actions state.draft
+        , readOnlyNotice state.draft
+        , permissionGrid messages (busy || not mayWrite) loadedPage.actions state.draft
         , lockedNotice state.draft
         , carriedNotice state.draft
         , outcome state.submission
-        , button
-            [ type_ "submit"
-            , class "submit"
+        , if not mayWrite then
+            -- Visible, and immutable: there is nothing to press, because nothing pressed
+            -- here would change what the Role holds.
+            text ""
 
-            -- A Role with no name is not a Role bitmagnet will take, and `onSubmit` still
-            -- fires on Enter, so `Main` refuses it as well.
-            , disabled (busy || String.isEmpty (String.trim state.draft.name))
-            ]
-            [ text (submitLabel state) ]
+          else
+            case state.confirming of
+                Just (SavingOwn _) ->
+                    ownSaveAsk messages busy state.draft
+
+                _ ->
+                    button
+                        [ type_ "submit"
+                        , class "submit"
+
+                        -- A Role with no name is not a Role bitmagnet will take, and
+                        -- `onSubmit` still fires on Enter, so `Main` refuses it as well.
+                        , disabled (busy || String.isEmpty (String.trim state.draft.name))
+                        ]
+                        [ text (submitLabel state own) ]
         ]
+
+
+{-| Saving the Role you yourself hold, asked before it happens.
+
+The spec requires a clear warning before a self-affecting or potentially locking mutation,
+and this is the locking one on this screen: bitmagnet does not stop a Role from writing
+away the `auth::mutate` its own holder is standing on, and once written there is no screen
+left to undo it from. The ask names that rather than the general shape of the change.
+
+-}
+ownSaveAsk : Messages msg -> Bool -> Draft -> Html msg
+ownSaveAsk messages busy draft =
+    div [ class "role-confirm", attribute "role" "alert" ]
+        [ Html.span [] [ text (ownSaveWarning draft) ]
+        , button
+            [ type_ "button", class "danger", disabled busy, onClick messages.confirmed ]
+            [ text ("Save " ++ draft.name) ]
+        , button
+            [ type_ "button", disabled busy, onClick messages.cancelled ]
+            [ text "Keep" ]
+        ]
+
+
+ownSaveWarning : Draft -> String
+ownSaveWarning draft =
+    if Set.member (key (Identity.graphql "auth" "mutate")) draft.chosen then
+        "Save your own Role, " ++ draft.name ++ "? It is the Role you are holding this screen with, so what you have ticked takes effect on you."
+
+    else
+        "Save your own Role, " ++ draft.name ++ ", without administration? You are removing the Permission this screen runs on, and only another administrator could give it back."
+
+
+readOnlyNotice : Draft -> Html msg
+readOnlyNotice draft =
+    case draft.writing of
+        ReadOnly reason ->
+            p [ class "notice" ] [ text reason ]
+
+        Writable ->
+            text ""
 
 
 heading : Draft -> String
 heading draft =
-    case draft.naming of
-        Unnamed ->
+    case ( draft.naming, draft.writing ) of
+        ( Unnamed, _ ) ->
             "Create a Role"
 
-        Fixed ->
+        ( Named, ReadOnly _ ) ->
+            draft.name
+
+        ( Named, Writable ) ->
             "Editing " ++ draft.name
 
 
-submitLabel : State -> String
-submitLabel state =
+submitLabel : State -> Maybe String -> String
+submitLabel state own =
     if state.submission == Saving then
         "Saving…"
 
@@ -393,8 +516,13 @@ submitLabel state =
             Unnamed ->
                 "Create Role"
 
-            Fixed ->
-                "Save " ++ state.draft.name
+            Named ->
+                if own == Just state.draft.name then
+                    -- The click that follows is an ask, not the save.
+                    "Save " ++ state.draft.name ++ "…"
+
+                else
+                    "Save " ++ state.draft.name
 
 
 {-| A Role that exists is named, not renameable: `putRole` writes to the name it is given,
@@ -419,10 +547,15 @@ naming messages busy draft =
                     []
                 ]
 
-        Fixed ->
+        Named ->
             div [ class "role-naming" ]
-                [ p [ class "notice" ]
-                    [ text ("Editing " ++ draft.name ++ ". A Role cannot be renamed: saving under another name would make a second Role and leave this one as it is.") ]
+                [ case draft.writing of
+                    Writable ->
+                        p [ class "notice" ]
+                            [ text ("Editing " ++ draft.name ++ ". A Role cannot be renamed: saving under another name would make a second Role and leave this one as it is.") ]
+
+                    ReadOnly _ ->
+                        text ""
                 , button
                     [ type_ "button", disabled busy, onClick messages.editCancelled ]
                     [ text "Create a Role instead" ]
@@ -474,7 +607,7 @@ type Holding
 
 holding : Draft -> Identity.ObjectAction -> Holding
 holding draft action =
-    if List.any (\locked -> key locked == key action) draft.locked then
+    if List.member action draft.locked then
         Core
 
     else if Set.member (key action) draft.chosen then
@@ -496,10 +629,16 @@ lockedNotice draft =
     else
         p [ class "notice" ]
             [ text
-                ("Ticked and fixed: bitmagnet grants "
-                    ++ Format.count (List.length draft.locked)
-                    ++ plural (List.length draft.locked) " Permission" " Permissions"
-                    ++ " to this Role itself, and they cannot be revoked here."
+                ("Fixed: bitmagnet grants "
+                    ++ Format.forCount (List.length draft.locked)
+                        { one = "this Permission", many = "these Permissions" }
+                    ++ " to the Role itself, and they cannot be revoked here — "
+                    ++ String.join ", " (List.map key draft.locked)
+                    ++ ". "
+                    ++ Format.forCount (List.length draft.locked)
+                        { one = "It is ticked above unless bitmagnet does not name it as an Object action, in which case no box can show it."
+                        , many = "They are ticked above except any bitmagnet does not name as an Object action, which no box can show."
+                        }
                 )
             ]
 
@@ -517,25 +656,17 @@ carriedNotice draft =
         p [ class "notice" ]
             [ text
                 ("Kept as they are: this Role holds "
-                    ++ plural (List.length draft.carried) "a Permission" "Permissions"
+                    ++ Format.forCount (List.length draft.carried)
+                        { one = "a Permission", many = "Permissions" }
                     ++ " bitmagnet does not list as an Object action, so no box above can show "
-                    ++ plural (List.length draft.carried) "it" "them"
+                    ++ Format.forCount (List.length draft.carried) { one = "it", many = "them" }
                     ++ " — "
                     ++ String.join ", " (List.map key draft.carried)
                     ++ ". Saving leaves "
-                    ++ plural (List.length draft.carried) "it" "them"
+                    ++ Format.forCount (List.length draft.carried) { one = "it", many = "them" }
                     ++ " in place."
                 )
             ]
-
-
-plural : Int -> String -> String -> String
-plural n one many =
-    if n == 1 then
-        one
-
-    else
-        many
 
 
 outcome : Submission -> Html msg
@@ -572,7 +703,7 @@ deletionFailure deletion =
             text ""
 
 
-listed : Messages msg -> Bool -> Bool -> Maybe String -> Page -> Html msg
+listed : Messages msg -> Bool -> Bool -> Maybe Confirming -> Page -> Html msg
 listed messages mayMutate busy confirming loadedPage =
     if List.isEmpty loadedPage.roles then
         p [ class "notice" ] [ text "No Roles." ]
@@ -582,7 +713,7 @@ listed messages mayMutate busy confirming loadedPage =
             (List.map (row messages mayMutate busy confirming) loadedPage.roles)
 
 
-row : Messages msg -> Bool -> Bool -> Maybe String -> Role -> Html msg
+row : Messages msg -> Bool -> Bool -> Maybe Confirming -> Role -> Html msg
 row messages mayMutate busy confirming role =
     li [ class "role" ]
         [ div [ class "role-name" ] [ text role.name ]
@@ -604,26 +735,26 @@ grants role =
         n =
             List.length role.permissions
     in
-    Format.count n ++ plural n " Permission" " Permissions"
+    Format.count n ++ " " ++ Format.plural n "Permission"
 
 
 {-| A core Role is offered no deletion, because bitmagnet refuses one: `DeleteRole` checks
 the name against its own list before it touches the database. Offering the click would
 only teach that the screen does not know the rules it is presenting.
 -}
-acts : Messages msg -> Bool -> Bool -> Maybe String -> Role -> Html msg
+acts : Messages msg -> Bool -> Bool -> Maybe Confirming -> Role -> Html msg
 acts messages mayMutate busy confirming role =
     if not mayMutate then
         text ""
 
-    else if confirming == Just role.name then
+    else if confirming == Just (Deleting role.name) then
         div [ class "role-confirm" ]
             [ Html.span [] [ text (warning role) ]
             , button
-                [ type_ "button", class "danger", disabled busy, onClick (messages.deleteConfirmed role.name) ]
+                [ type_ "button", class "danger", disabled busy, onClick messages.confirmed ]
                 [ text "Delete" ]
             , button
-                [ type_ "button", disabled busy, onClick messages.deleteCancelled ]
+                [ type_ "button", disabled busy, onClick messages.cancelled ]
                 [ text "Keep" ]
             ]
 
@@ -631,7 +762,7 @@ acts messages mayMutate busy confirming role =
         div [ class "role-acts" ]
             [ button
                 [ type_ "button", disabled busy, onClick (messages.editRequested role.name) ]
-                [ text "Edit" ]
+                [ text (openLabel role) ]
             , if role.core then
                 text ""
 
@@ -642,20 +773,34 @@ acts messages mayMutate busy confirming role =
             ]
 
 
+{-| A Role whose Permissions cannot be written is opened to be read, and the button says
+so rather than promising an edit that the form will then refuse.
+-}
+openLabel : Role -> String
+openLabel role =
+    case writingFor role of
+        Writable ->
+            "Edit"
+
+        ReadOnly _ ->
+            "View"
+
+
 {-| What deleting costs, in the terms of the database that will decide it.
 
 `users.role_name` references `roles(name)` with no cascade, so Postgres refuses the delete
 while anyone holds the Role and bitmagnet passes the refusal through as an opaque database
 error — worth saying before the click rather than after it. `invitations.role_name`
-cascades, so the unclaimed codes issued for this Role go with it silently, and this is the
-only place that would ever say so.
+cascades with no claimed/unclaimed distinction, so every Invitation issued for this Role
+goes with it silently — the codes nobody has used yet and the record of the ones already
+claimed alike — and this is the only place that would ever say so.
 
 -}
 warning : Role -> String
 warning role =
     "Delete the Role "
         ++ role.name
-        ++ "? It will be refused while any User still holds it, and every unclaimed Invitation issued for it is deleted with it."
+        ++ "? It will be refused while any User still holds it, and every Invitation issued for it, claimed or not, is deleted with it."
 
 
 {-| Namespaces in the order bitmagnet listed their actions, each with its own.
