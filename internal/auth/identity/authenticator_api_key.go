@@ -45,6 +45,12 @@ func (a authenticatorAPIKey) Authenticate(ctx context.Context, token string) (Id
 		return nil, !revokedAPIKey(err), err
 	}
 
+	// Only the anonymous role is resolved here. The owning User's Role is needed
+	// as a policy *subject*, not as a set of permissions, and its name is already
+	// on the key's User - so looking it up would buy nothing and cost a failure
+	// mode: GetRoles errors when a role is absent from the cached snapshot, which
+	// another process can create inside the RBACCacheTTL window, and that error
+	// would fail the whole request rather than merely denying it.
 	anon, err := a.rbac.GetRole(ctx, rbac.RoleAnon)
 	if err != nil {
 		return nil, true, err

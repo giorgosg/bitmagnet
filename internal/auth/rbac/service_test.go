@@ -2,6 +2,7 @@ package rbac_test
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -380,4 +381,121 @@ func TestService_delete_role_invalidates_the_role_cache(t *testing.T) {
 
 	_, err = test.service.GetAllRoles(t.Context())
 	require.NoError(t, err)
+}
+
+// FilterAllowed answers "which of these object actions may this subject
+// perform" through casbin, so a caller that has to report an identity's
+// effective set never has to re-derive the glob semantics of the matcher.
+// Reimplementing them is how a report comes to disagree with enforcement,
+// which is the defect it exists to prevent.
+func TestService_filter_allowed_agrees_with_enforce(t *testing.T) {
+	t.Parallel()
+
+	test := newTestHarness(t)
+
+	editorAction := rbac.NewObjectAction("graphql", "torrent", "query")
+	adminAction := rbac.NewObjectAction("graphql", "auth", "mutate")
+
+	test.repository.EXPECT().
+		GetPermissions(t.Context()).
+		Return([]rbac.Permission{
+			rbac.NewPermission(rbac.SubjectRole{Role: rbac.RoleEditor}, editorAction),
+		}, nil).
+		Once()
+
+	candidates := []rbac.ObjectAction{editorAction, adminAction}
+
+	allowed, err := test.service.FilterAllowed(
+		t.Context(),
+		[]rbac.Subject{rbac.SubjectRole{Role: rbac.RoleEditor}},
+		candidates,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []rbac.ObjectAction{editorAction}, allowed)
+
+	// The control: whatever the filter returns, Enforce must agree one by one.
+	for _, candidate := range candidates {
+		expected, err := test.service.Enforce(
+			t.Context(), rbac.SubjectRole{Role: rbac.RoleEditor}, candidate,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, expected, slices.Contains(allowed, candidate),
+			"FilterAllowed and Enforce disagree about %v", candidate)
+	}
+}
+
+// The admin role's permission is stored as the pattern "**::**::**", so a
+// caller intersecting concrete sets by equality would report that an admin
+// holds nothing. casbin globs the stored value against the request; the filter
+// has to inherit that, not approximate it.
+func TestService_filter_allowed_honours_wildcard_policies(t *testing.T) {
+	t.Parallel()
+
+	test := newTestHarness(t)
+
+	test.repository.EXPECT().
+		GetPermissions(t.Context()).
+		Return([]rbac.Permission{}, nil).
+		Once()
+
+	candidates := []rbac.ObjectAction{
+		rbac.NewObjectAction("graphql", "torrent", "query"),
+		rbac.NewObjectAction("http", "metrics", "query"),
+	}
+
+	allowed, err := test.service.FilterAllowed(
+		t.Context(),
+		[]rbac.Subject{rbac.SubjectRole{Role: rbac.RoleAdmin}},
+		candidates,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, candidates, allowed, "admin's ** policy covers every candidate")
+}
+
+// Any one subject allowing the action is enough, matching EnforceAny — an API
+// key's second gate is satisfied by its own selection or by the anon role.
+func TestService_filter_allowed_accepts_any_subject(t *testing.T) {
+	t.Parallel()
+
+	test := newTestHarness(t)
+
+	action := rbac.NewObjectAction("graphql", "torrent", "query")
+
+	test.repository.EXPECT().
+		GetPermissions(t.Context()).
+		Return([]rbac.Permission{
+			rbac.NewPermission(rbac.SubjectRole{Role: rbac.RoleEditor}, action),
+		}, nil).
+		Once()
+
+	allowed, err := test.service.FilterAllowed(
+		t.Context(),
+		[]rbac.Subject{
+			rbac.SubjectRole{Role: rbac.Role("unknown")},
+			rbac.SubjectRole{Role: rbac.RoleEditor},
+		},
+		[]rbac.ObjectAction{action},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []rbac.ObjectAction{action}, allowed)
+}
+
+func TestService_filter_allowed_short_circuits_on_empty_input(t *testing.T) {
+	t.Parallel()
+
+	test := newTestHarness(t)
+
+	// No repository call is expected: with nothing to decide there is nothing
+	// to ask casbin, so the semaphore is not taken either.
+	allowed, err := test.service.FilterAllowed(
+		t.Context(), []rbac.Subject{rbac.SubjectRole{Role: rbac.RoleAdmin}}, nil,
+	)
+	require.NoError(t, err)
+	assert.Empty(t, allowed)
+
+	allowed, err = test.service.FilterAllowed(
+		t.Context(), nil, []rbac.ObjectAction{rbac.NewObjectAction("a", "b", "c")},
+	)
+	require.NoError(t, err)
+	assert.Empty(t, allowed)
 }

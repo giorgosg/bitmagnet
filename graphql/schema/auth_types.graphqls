@@ -19,6 +19,12 @@ type APIKey {
   name: String!
   userId: Int!
   user: User!
+  """
+  This key's selected object actions: the ones named when it was created. A
+  property of the key, so it does not change when the owning user's role does.
+  What the key may exercise right now is `Self.permissions`.
+  """
+  permissions: [AuthObjectAction!]!
   expiresAt: DateTime
   createdAt: DateTime!
 }

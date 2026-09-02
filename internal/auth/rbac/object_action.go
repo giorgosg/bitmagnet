@@ -1,6 +1,11 @@
 package rbac
 
-import "cmp"
+import (
+	"cmp"
+
+	"github.com/bitmagnet-io/bitmagnet/internal/model"
+	"github.com/bitmagnet-io/bitmagnet/internal/slice"
+)
 
 // type ObjectAction interface {
 // 	Namespace() string
@@ -47,4 +52,14 @@ func NewObjectAction(namespace string, object string, action string) ObjectActio
 		Object:    object,
 		Action:    action,
 	}
+}
+
+// ObjectActionsFromAPIKeyPermissions reads an API key's stored rows as the
+// object actions they name. It lives here rather than on model.APIKeyPermission
+// because rbac imports model, not the other way round, and the row type is
+// generated.
+func ObjectActionsFromAPIKeyPermissions(permissions []model.APIKeyPermission) []ObjectAction {
+	return slice.Map(permissions, func(perm model.APIKeyPermission) ObjectAction {
+		return NewObjectAction(perm.Namespace, perm.Object, perm.Action)
+	})
 }

@@ -29,6 +29,10 @@ func (browserSessionIdentity) Self() identity.Self {
 	return identity.Self{User: &model.User{ID: 1, Username: "admin", RoleName: "admin"}}
 }
 
+func (browserSessionIdentity) EffectivePermissions(context.Context) ([]rbac.ObjectAction, error) {
+	return []rbac.ObjectAction{httpserver.ObjectAction}, nil
+}
+
 func (browserSessionIdentity) Enforce(_ context.Context, objectAction rbac.ObjectAction) (bool, error) {
 	return objectAction == httpserver.ObjectAction, nil
 }

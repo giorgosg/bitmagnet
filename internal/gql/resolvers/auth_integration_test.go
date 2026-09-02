@@ -31,6 +31,7 @@ import (
 	gqlhttpserver "github.com/bitmagnet-io/bitmagnet/internal/gql/httpserver"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql/resolvers"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
+	torznab_httpserver "github.com/bitmagnet-io/bitmagnet/internal/torznab/httpserver"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -116,8 +117,6 @@ func newAuthTestServerWithConfigAndAuthenticator(
 		values.LoginRequestsPerMinute,
 		values.LoginRequestBurst,
 	)
-	apiKeyService := api_key.NewService(api_key.NewRepository(provider))
-
 	// Built exactly as production does, directive and all: without it the
 	// schema resolves an identity and then ignores it.
 	schema := gql.NewExecutableSchema(gql.Config{
@@ -127,11 +126,20 @@ func newAuthTestServerWithConfigAndAuthenticator(
 		},
 	})
 
-	// The @auth directives in the schema are the object action set.
-	schemaObjectActions := gqlauth.ObjectActions(
-		directive.ExtractAuthDirectives(directive.ExtractSchemaDirectives(schema.Schema())),
+	// The @auth directives in the schema are the GraphQL object action set. The
+	// non-GraphQL surfaces contribute their own through the same value group in
+	// authfx, and createAPIKey now checks a requested permission against the
+	// whole registry - so a stack registering only half of it would refuse keys
+	// production accepts.
+	registeredObjectActions := append(
+		gqlauth.ObjectActions(
+			directive.ExtractAuthDirectives(directive.ExtractSchemaDirectives(schema.Schema())),
+		),
+		append(http_auth.ObjectActionProvider()(), torznab_httpserver.ObjectAction)...,
 	)
-	objectActions := func() []rbac.ObjectAction { return schemaObjectActions }
+	objectActions := func() []rbac.ObjectAction { return registeredObjectActions }
+
+	apiKeyService := api_key.NewService(api_key.NewRepository(provider), objectActions)
 
 	rbacService := rbac.NewService(
 		rbac.NewRepository(provider),
@@ -249,7 +257,8 @@ type identityBody struct {
 }
 
 type apiKeyBody struct {
-	Name string `json:"name"`
+	Name        string             `json:"name"`
+	Permissions []objectActionBody `json:"permissions"`
 }
 
 type selfIdentityBody struct {

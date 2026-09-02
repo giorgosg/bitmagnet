@@ -57,11 +57,10 @@ func newTestStack(t *testing.T) testStack {
 		values.LoginRequestsPerMinute,
 		values.LoginRequestBurst,
 	)
-	apiKeyService := api_key.NewService(api_key.NewRepository(provider))
-
 	objectActions := func() []rbac.ObjectAction {
 		return []rbac.ObjectAction{rbac.NewObjectAction("test", "test", "query")}
 	}
+	apiKeyService := api_key.NewService(api_key.NewRepository(provider), objectActions)
 	rbacService := rbac.NewService(
 		rbac.NewRepository(provider),
 		objectActions,
@@ -248,11 +247,10 @@ func TestExpiredTokenFallsBackToAnonymous(t *testing.T) {
 		values.PasswordMinEntropy, values.PasswordHashingCost,
 		values.LoginRequestsPerMinute, values.LoginRequestBurst,
 	)
-	apiKeyService := api_key.NewService(api_key.NewRepository(provider))
-
 	objectActions := func() []rbac.ObjectAction {
 		return []rbac.ObjectAction{rbac.NewObjectAction("test", "test", "query")}
 	}
+	apiKeyService := api_key.NewService(api_key.NewRepository(provider), objectActions)
 	rbacService := rbac.NewService(
 		rbac.NewRepository(provider), objectActions,
 		rbac.PermissionProviders(rbac.CorePermissions, rbac.VerbatimPermissions(objectActions)),

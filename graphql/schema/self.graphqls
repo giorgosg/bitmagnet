@@ -36,6 +36,12 @@ type CreateAPIKeyResult {
 type Self {
   user: User
   apiKey: APIKey
+  """
+  The object actions this identity may exercise right now. For an API key that is
+  its selected object actions, or the anonymous role's, narrowed by the owning
+  user's role — because enforcement requires both, so this narrows when the role
+  does. The selection itself stays visible on `apiKey.permissions`.
+  """
   permissions: [AuthObjectAction!]!
 }
 

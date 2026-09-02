@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/99designs/gqlgen/graphql"
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/api_key"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/user"
 	gqlauth "github.com/bitmagnet-io/bitmagnet/internal/gql/auth"
 	"github.com/vektah/gqlparser/v2/gqlerror"
@@ -23,6 +24,8 @@ const (
 	ErrorCodeEmailRequired                       = "EMAIL_REQUIRED"
 	ErrorCodeEmailInvalid                        = "EMAIL_INVALID"
 	ErrorCodePasswordInsufficientEntropy         = "PASSWORD_INSUFFICIENT_ENTROPY"
+	ErrorCodeRoleNotFound                        = "ROLE_NOT_FOUND"
+	ErrorCodePermissionInvalid                   = "PERMISSION_INVALID"
 	ErrorCodeUnauthorized                        = "UNAUTHORIZED"
 	ErrorCodeAuthenticationInfrastructureFailure = "AUTHENTICATION_INFRASTRUCTURE_FAILURE"
 	ErrorCodeUserSessionRequired                 = "USER_SESSION_REQUIRED"
@@ -41,7 +44,10 @@ type errorClassification struct {
 	presentation errorPresentation
 }
 
-var userErrorPresentations = []errorClassification{
+// serviceErrorPresentations maps the auth services' sentinel errors to their
+// public code. It covers more than package user since createAPIKey started
+// refusing unregistered object actions.
+var serviceErrorPresentations = []errorClassification{
 	{
 		target: user.ErrCredentialsInvalid,
 		presentation: errorPresentation{
@@ -126,6 +132,20 @@ var userErrorPresentations = []errorClassification{
 			message: "password has insufficient entropy",
 		},
 	},
+	{
+		target: user.ErrRoleNotFound,
+		presentation: errorPresentation{
+			code:    ErrorCodeRoleNotFound,
+			message: "role not found",
+		},
+	},
+	{
+		target: api_key.ErrPermissionInvalid,
+		presentation: errorPresentation{
+			code:    ErrorCodePermissionInvalid,
+			message: "invalid api key permission",
+		},
+	},
 }
 
 func errorPresenter(ctx context.Context, err error) *gqlerror.Error {
@@ -198,7 +218,7 @@ func classifyError(err error) (errorPresentation, bool) {
 		}, true
 	}
 
-	for _, candidate := range userErrorPresentations {
+	for _, candidate := range serviceErrorPresentations {
 		if errors.Is(err, candidate.target) {
 			return candidate.presentation, true
 		}

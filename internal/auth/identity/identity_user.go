@@ -15,12 +15,16 @@ type User struct {
 }
 
 func (u User) Self() Self {
-	return Self{
-		User: &u.User,
-		Permissions: slice.Map(u.role.Permissions, func(perm rbac.Permission) rbac.ObjectAction {
-			return perm.ObjectAction()
-		}),
-	}
+	return Self{User: &u.User}
+}
+
+// EffectivePermissions is the User's Role, verbatim: Enforce asks exactly one
+// question, of exactly that subject, so the role's permissions are already the
+// effective set.
+func (u User) EffectivePermissions(_ context.Context) ([]rbac.ObjectAction, error) {
+	return slice.Map(u.role.Permissions, func(perm rbac.Permission) rbac.ObjectAction {
+		return perm.ObjectAction()
+	}), nil
 }
 
 func (u User) Enforce(ctx context.Context, objectAction rbac.ObjectAction) (bool, error) {

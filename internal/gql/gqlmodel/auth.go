@@ -30,10 +30,15 @@ func (SelfQuery) Identity(ctx context.Context) (gen.Self, error) {
 
 	self := id.Self()
 
+	permissions, err := id.EffectivePermissions(ctx)
+	if err != nil {
+		return gen.Self{}, err
+	}
+
 	return gen.Self{
 		User:        self.User,
 		APIKey:      self.APIKey,
-		Permissions: ObjectActionsToGql(self.Permissions),
+		Permissions: ObjectActionsToGql(permissions),
 	}, nil
 }
 

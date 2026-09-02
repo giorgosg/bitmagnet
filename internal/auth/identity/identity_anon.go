@@ -12,12 +12,16 @@ type Anon struct {
 	enforcer rbac.Enforcer
 }
 
-func (a Anon) Self() Self {
-	return Self{
-		Permissions: slice.Map(a.Permissions, func(perm rbac.Permission) rbac.ObjectAction {
-			return perm.ObjectAction()
-		}),
-	}
+func (Anon) Self() Self {
+	return Self{}
+}
+
+// EffectivePermissions is the anonymous Role, verbatim, for the same reason as
+// User's.
+func (a Anon) EffectivePermissions(_ context.Context) ([]rbac.ObjectAction, error) {
+	return slice.Map(a.Permissions, func(perm rbac.Permission) rbac.ObjectAction {
+		return perm.ObjectAction()
+	}), nil
 }
 
 func (a Anon) Enforce(ctx context.Context, objectAction rbac.ObjectAction) (bool, error) {

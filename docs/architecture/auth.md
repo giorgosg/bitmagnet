@@ -159,7 +159,21 @@ decision that asks more than one question is worth combining. `EnforceEvery` tak
 of subject groups — every group must allow, and a group is satisfied by any subject in it
 — and answers them in one `BatchEnforce` under one acquisition. `identity.APIKey` is the
 caller that needs it: its role gate and its scope gate are two questions for one decision,
-and asked separately they serialised an N-field query 2N times.
+and asked separately they serialised an N-field query 2N times. `FilterAllowed` is the
+same idea for a different shape of question — which of these object actions does this
+subject allow — and exists so that reporting an identity's permissions asks casbin rather
+than reimplementing its matcher.
+
+**Selected is not the same as effective.** An API key names the object actions it may
+perform, and `createAPIKey` checks each against the registered set: `api_key_permissions`
+has no foreign key to a registry because there is no registry table, so an unchecked typo
+produced a key that granted nothing and reported success, and an unchecked wildcard —
+matched by `globMatch` at enforcement — collapsed the key's own gate to "anything".
+What the key was scoped to is reported by `APIKey.permissions`; what it can currently
+reach is `Self.permissions`, which intersects that selection (or the anonymous role's
+permissions, the other way its second gate is satisfied) with the owning user's role
+through `FilterAllowed`. The two differ whenever the owner's role is narrowed after the
+key was minted, and reporting the selection alone claimed authority the enforcer refuses.
 
 ## Resisting anonymous abuse
 
