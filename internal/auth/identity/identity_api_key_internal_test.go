@@ -166,7 +166,6 @@ func newFilteringAPIKey(enforcer rbac.Enforcer) APIKey {
 				rbac.NewPermission(rbac.SubjectRole{Role: rbac.RoleAnon}, anonAction),
 			},
 		},
-		userRole: rbac.RoleInfo{Role: rbac.Role("editor")},
 		enforcer: enforcer,
 	}
 }

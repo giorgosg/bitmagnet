@@ -11,7 +11,6 @@ import (
 type APIKey struct {
 	model.APIKey
 	anon     rbac.RoleInfo
-	userRole rbac.RoleInfo
 	enforcer rbac.Enforcer
 }
 
@@ -39,25 +38,21 @@ func (a APIKey) EffectivePermissions(ctx context.Context) ([]rbac.ObjectAction, 
 	// Candidates are what the second gate accepts: the key's own selection, or
 	// the anonymous role's permissions.
 	candidates := append(
-		slice.Map(a.Permissions, func(perm model.APIKeyPermission) rbac.ObjectAction {
-			return rbac.ObjectAction{
-				Namespace: perm.Namespace,
-				Object:    perm.Object,
-				Action:    perm.Action,
-			}
-		}),
+		rbac.ObjectActionsFromAPIKeyPermissions(a.Permissions),
 		slice.Map(a.anon.Permissions, func(perm rbac.Permission) rbac.ObjectAction {
 			return perm.ObjectAction()
 		})...,
 	)
 
-	// The first gate then narrows them. Asking the enforcer rather than
-	// intersecting the two lists here is deliberate: role permissions are stored
-	// as glob patterns - admin's is "**::**::**" - so equality would report that
-	// an admin's key holds nothing.
+	// The first gate then narrows them, named exactly as Enforce names it, so the
+	// report and the decision cannot disagree about the subject.
+	//
+	// Asking the enforcer rather than intersecting the two lists here is
+	// deliberate: role permissions are stored as glob patterns - admin's is
+	// "**::**::**" - so equality would report that an admin's key holds nothing.
 	return a.enforcer.FilterAllowed(
 		ctx,
-		[]rbac.Subject{rbac.SubjectRole{Role: a.userRole.Role}},
+		[]rbac.Subject{rbac.SubjectRole{Role: rbac.Role(a.User.RoleName)}},
 		candidates,
 	)
 }
@@ -75,15 +70,12 @@ func (a APIKey) Enforce(ctx context.Context, objectAction rbac.ObjectAction) (bo
 		ctx,
 		[][]rbac.Subject{
 			{rbac.SubjectRole{Role: rbac.Role(a.User.RoleName)}},
-			append(slice.Map(a.Permissions, func(perm model.APIKeyPermission) rbac.Subject {
-				return rbac.SubjectPermission{
-					ObjectAction: rbac.ObjectAction{
-						Namespace: perm.Namespace,
-						Object:    perm.Object,
-						Action:    perm.Action,
-					},
-				}
-			}), rbac.SubjectRole{Role: a.anon.Role}),
+			append(slice.Map(
+				rbac.ObjectActionsFromAPIKeyPermissions(a.Permissions),
+				func(objectAction rbac.ObjectAction) rbac.Subject {
+					return rbac.SubjectPermission{ObjectAction: objectAction}
+				},
+			), rbac.SubjectRole{Role: a.anon.Role}),
 		},
 		objectAction,
 	)

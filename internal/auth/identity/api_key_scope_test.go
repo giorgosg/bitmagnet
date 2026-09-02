@@ -25,7 +25,7 @@ var scopeTestObjectAction = rbac.NewObjectAction("test", "test", "query")
 // an API key's own permission list any effect at all, so a stack without them
 // denies every scoped key and cannot tell a working scope check from a broken
 // one.
-func newScopeStack(t *testing.T) testStack {
+func newScopeStack(t *testing.T) scopeStack {
 	t.Helper()
 
 	db := dbtest.New(t)
@@ -48,26 +48,37 @@ func newScopeStack(t *testing.T) testStack {
 	}
 	apiKeyRepository := api_key.NewRepository(provider)
 	apiKeyService := api_key.NewService(apiKeyRepository, objectActions)
+
 	rbacService := rbac.NewService(
 		rbac.NewRepository(provider), objectActions,
 		rbac.PermissionProviders(rbac.CorePermissions, rbac.VerbatimPermissions(objectActions)),
 		rbac.CacheTTL(time.Minute),
 	)
 
-	return testStack{
-		authenticator:    identity.NewAuthenticator(jwtService, userService, apiKeyService, rbacService),
-		userService:      userService,
-		apiKeyService:    apiKeyService,
+	return scopeStack{
+		testStack: testStack{
+			authenticator: identity.NewAuthenticator(jwtService, userService, apiKeyService, rbacService),
+			userService:   userService,
+			apiKeyService: apiKeyService,
+			query:         db.Query,
+		},
 		apiKeyRepository: apiKeyRepository,
-		query:            db.Query,
 	}
+}
+
+// scopeStack is a testStack that can also write a key the service would refuse.
+// The repository handle lives here rather than on testStack because only these
+// tests need it.
+type scopeStack struct {
+	testStack
+	apiKeyRepository api_key.Repository
 }
 
 // putAPIKey writes a key straight through the repository, bypassing the
 // service's validation of the requested object actions. It is how a permission
 // the service would now refuse still gets into the table, which is what the
 // enforcement-level guarantees have to be tested against.
-func (s testStack) putAPIKey(
+func (s scopeStack) putAPIKey(
 	t *testing.T,
 	userID int,
 	name string,

@@ -2797,9 +2797,9 @@ type APIKey {
   userId: Int!
   user: User!
   """
-  The object actions this key was scoped to. A property of the key, so it does
-  not change when the owning user's role does; what the key can currently reach
-  is ` + "`" + `Self.permissions` + "`" + `.
+  This key's selected object actions: the ones named when it was created. A
+  property of the key, so it does not change when the owning user's role does.
+  What the key may exercise right now is ` + "`" + `Self.permissions` + "`" + `.
   """
   permissions: [AuthObjectAction!]!
   expiresAt: DateTime
@@ -3449,10 +3449,10 @@ type Self {
   user: User
   apiKey: APIKey
   """
-  The object actions this identity can currently exercise. For an API key that
-  is its selection intersected with the owning user's role, because enforcement
-  requires both — so it narrows when the role does. The selection itself stays
-  visible on ` + "`" + `apiKey.permissions` + "`" + `.
+  The object actions this identity may exercise right now. For an API key that is
+  its selected object actions, or the anonymous role's, narrowed by the owning
+  user's role — because enforcement requires both, so this narrows when the role
+  does. The selection itself stays visible on ` + "`" + `apiKey.permissions` + "`" + `.
   """
   permissions: [AuthObjectAction!]!
 }

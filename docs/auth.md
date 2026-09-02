@@ -125,8 +125,9 @@ message or its wrapping. Application errors retain their GraphQL `path` and `loc
 two session-specific codes are field-level account constraints, not Role-Permission
 refusals, so they do not invent an Object action. `ROLE_NOT_FOUND` and
 `PERMISSION_INVALID` are input validation: both name something the caller supplied that
-the server does not recognise, and both were previously foreign-key violations or silent
-acceptance reaching the client as `INTERNAL_SERVER_ERROR` or as a key that grants nothing. Authentication infrastructure and
+the server does not recognise. Previously one reached the client as a foreign-key
+violation presented as `INTERNAL_SERVER_ERROR`, and the other was accepted silently as a
+key that grants nothing. Authentication infrastructure and
 unclassified internal failures use fixed public messages; their underlying error details
 are not returned to the client. GraphQL parsing and validation errors remain gqlgen's
 ordinary protocol errors rather than being mislabeled as application failures.

@@ -163,14 +163,17 @@ func (s *service) EnforceEvery(
 		return false, err
 	}
 
-	offset := 0
+	blocks, err := splitBatchResults(results, slice.Map(groups, func(subjects []Subject) int {
+		return len(subjects)
+	}))
+	if err != nil {
+		return false, err
+	}
 
-	for _, subjects := range groups {
-		if !slices.Contains(results[offset:offset+len(subjects)], true) {
+	for _, block := range blocks {
+		if !slices.Contains(block, true) {
 			return false, nil
 		}
-
-		offset += len(subjects)
 	}
 
 	return true, nil
@@ -198,9 +201,13 @@ func (s *service) FilterAllowed(
 		return nil, err
 	}
 
+	// One block of answers per object action, each block asking every subject.
 	requests := make([][]any, 0, len(objectActions)*len(subjects))
+	widths := make([]int, 0, len(objectActions))
+
 	for _, objectAction := range objectActions {
 		requests = append(requests, batchRequests(subjects, objectAction)...)
+		widths = append(widths, len(subjects))
 	}
 
 	results, err := casbin.BatchEnforce(requests)
@@ -208,15 +215,17 @@ func (s *service) FilterAllowed(
 		return nil, err
 	}
 
+	blocks, err := splitBatchResults(results, widths)
+	if err != nil {
+		return nil, err
+	}
+
 	allowed := make([]ObjectAction, 0, len(objectActions))
-	offset := 0
 
-	for _, objectAction := range objectActions {
-		if slices.Contains(results[offset:offset+len(subjects)], true) {
-			allowed = append(allowed, objectAction)
+	for i, block := range blocks {
+		if slices.Contains(block, true) {
+			allowed = append(allowed, objectActions[i])
 		}
-
-		offset += len(subjects)
 	}
 
 	return allowed, nil
@@ -531,6 +540,35 @@ func subjectString(sub Subject) string {
 
 func objectString(objAct ObjectAction) string {
 	return fmt.Sprintf("%s::%s", objAct.Namespace, objAct.Object)
+}
+
+// splitBatchResults cuts one BatchEnforce answer list into the blocks it was
+// assembled from. Both batching callers build their request list as consecutive
+// blocks and then have to read it back the same way, and getting the two out of
+// step would silently attribute one question's answer to another.
+//
+// casbin returns one result per request, so a short list means the enforcer
+// broke its own contract; that is an error rather than a slice-bounds panic on
+// an authorization path.
+func splitBatchResults(results []bool, widths []int) ([][]bool, error) {
+	total := 0
+	for _, width := range widths {
+		total += width
+	}
+
+	if len(results) != total {
+		return nil, fmt.Errorf("casbin returned %d results for %d requests", len(results), total)
+	}
+
+	blocks := make([][]bool, 0, len(widths))
+	offset := 0
+
+	for _, width := range widths {
+		blocks = append(blocks, results[offset:offset+width])
+		offset += width
+	}
+
+	return blocks, nil
 }
 
 func batchRequests(subs []Subject, objAct ObjectAction) [][]any {

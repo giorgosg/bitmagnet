@@ -20,9 +20,9 @@ type APIKey {
   userId: Int!
   user: User!
   """
-  The object actions this key was scoped to. A property of the key, so it does
-  not change when the owning user's role does; what the key can currently reach
-  is `Self.permissions`.
+  This key's selected object actions: the ones named when it was created. A
+  property of the key, so it does not change when the owning user's role does.
+  What the key may exercise right now is `Self.permissions`.
   """
   permissions: [AuthObjectAction!]!
   expiresAt: DateTime

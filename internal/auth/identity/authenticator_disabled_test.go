@@ -31,10 +31,7 @@ type testStack struct {
 	authenticator identity.Authenticator
 	userService   user.Service
 	apiKeyService api_key.Service
-	// apiKeyRepository is set only by the stacks whose tests write a key the
-	// service would refuse; see putAPIKey.
-	apiKeyRepository api_key.Repository
-	query            *dao.Query
+	query         *dao.Query
 }
 
 func newTestStack(t *testing.T) testStack {

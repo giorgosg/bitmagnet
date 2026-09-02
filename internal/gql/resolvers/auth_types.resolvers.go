@@ -14,7 +14,6 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel/gen"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
-	"github.com/bitmagnet-io/bitmagnet/internal/slice"
 )
 
 // Permissions is the resolver for the permissions field. It reports what the
@@ -22,9 +21,7 @@ import (
 // owning user's role does. What the key can currently reach is Self.permissions.
 func (r *aPIKeyResolver) Permissions(ctx context.Context, obj *model.APIKey) ([]gen.AuthObjectAction, error) {
 	return gqlmodel.ObjectActionsToGql(
-		slice.Map(obj.Permissions, func(perm model.APIKeyPermission) rbac.ObjectAction {
-			return rbac.NewObjectAction(perm.Namespace, perm.Object, perm.Action)
-		}),
+		rbac.ObjectActionsFromAPIKeyPermissions(obj.Permissions),
 	), nil
 }
 

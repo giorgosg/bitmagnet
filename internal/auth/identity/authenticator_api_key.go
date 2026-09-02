@@ -45,29 +45,20 @@ func (a authenticatorAPIKey) Authenticate(ctx context.Context, token string) (Id
 		return nil, !revokedAPIKey(err), err
 	}
 
-	// Both roles in one lookup. The key's reported permissions are its selection
-	// narrowed by the owning User's Role, so the Role is needed as well as anon
-	// - and GetRoles answers both from the same cached snapshot rather than
-	// taking it twice.
-	roles, err := a.rbac.GetRoles(ctx, []rbac.Role{rbac.RoleAnon, rbac.Role(apiKey.User.RoleName)})
+	// Only the anonymous role is resolved here. The owning User's Role is needed
+	// as a policy *subject*, not as a set of permissions, and its name is already
+	// on the key's User - so looking it up would buy nothing and cost a failure
+	// mode: GetRoles errors when a role is absent from the cached snapshot, which
+	// another process can create inside the RBACCacheTTL window, and that error
+	// would fail the whole request rather than merely denying it.
+	anon, err := a.rbac.GetRole(ctx, rbac.RoleAnon)
 	if err != nil {
 		return nil, true, err
 	}
 
-	identity := APIKey{
+	return APIKey{
 		APIKey:   apiKey,
+		anon:     anon,
 		enforcer: a.rbac,
-	}
-
-	for _, role := range roles {
-		if role.Role == rbac.RoleAnon {
-			identity.anon = role
-		}
-
-		if role.Role == rbac.Role(apiKey.User.RoleName) {
-			identity.userRole = role
-		}
-	}
-
-	return identity, true, nil
+	}, true, nil
 }

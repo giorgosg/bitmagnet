@@ -352,7 +352,8 @@ func TestSelfPermissionsForAnAPIKeyAgreeWithEnforcement(t *testing.T) {
 
 	// While the owner is an admin, the selection is honoured and reported.
 	requireNoGqlErrors(t, query(t, server, key, adminQuery))
-	assert.Contains(t, identityPermissions(t, query(t, server, key, permissionsQuery)),
+	assert.Contains(t,
+		objectActionStrings(selfIdentity(t, query(t, server, key, permissionsQuery)).Permissions),
 		"graphql::auth::query", "an allowed action must be reported")
 
 	// Demote the owner. The key is unchanged; what it can reach is not.
@@ -364,17 +365,21 @@ func TestSelfPermissionsForAnAPIKeyAgreeWithEnforcement(t *testing.T) {
 	require.NotEmpty(t, denied.Errors, "the enforcer must refuse what the Role no longer allows")
 	assert.Equal(t, "unauthorized", denied.Errors[0].Message)
 
-	response := query(t, server, key, permissionsQuery)
-	assert.NotContains(t, identityPermissions(t, response), "graphql::auth::query",
+	reported := selfIdentity(t, query(t, server, key, permissionsQuery))
+	assert.NotContains(t, objectActionStrings(reported.Permissions), "graphql::auth::query",
 		"a refused action must not be reported as held")
 
 	// The selection itself is unchanged, and is still visible - a client shows
-	// what the key was scoped to alongside what it can currently reach.
-	assert.Equal(t, []string{"graphql::auth::query"}, apiKeyPermissions(t, response),
+	// what the key was selected for alongside what it can currently reach.
+	require.NotNil(t, reported.APIKey)
+	assert.Equal(t, []string{"graphql::auth::query"}, objectActionStrings(reported.APIKey.Permissions),
 		"the selected set is a property of the key and does not move with the Role")
 }
 
-func identityPermissions(t *testing.T, response gqlResponse) []string {
+// selfIdentity unmarshals a self.identity response. The two permission sets it
+// carries are the point of the test above: what the identity may currently do,
+// and - for an API key - what it was selected for.
+func selfIdentity(t *testing.T, response gqlResponse) identityBody {
 	t.Helper()
 	requireNoGqlErrors(t, response)
 
@@ -382,19 +387,7 @@ func identityPermissions(t *testing.T, response gqlResponse) []string {
 
 	require.NoError(t, json.Unmarshal(response.Data, &body))
 
-	return objectActionStrings(body.Self.Identity.Permissions)
-}
-
-func apiKeyPermissions(t *testing.T, response gqlResponse) []string {
-	t.Helper()
-	requireNoGqlErrors(t, response)
-
-	var body identityResponse
-
-	require.NoError(t, json.Unmarshal(response.Data, &body))
-	require.NotNil(t, body.Self.Identity.APIKey)
-
-	return objectActionStrings(body.Self.Identity.APIKey.Permissions)
+	return body.Self.Identity
 }
 
 func objectActionStrings(actions []objectActionBody) []string {

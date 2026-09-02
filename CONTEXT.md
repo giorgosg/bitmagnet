@@ -54,6 +54,18 @@ The operator-facing switch deciding whether this instance answers callers who pr
 credential. It is a property of the instance, not of any Identity.
 _Avoid_: Auth enabled, public mode, open mode
 
+**Selected Object actions**:
+The Object actions named on an API key when it was created. A property of the key: it is
+stored on the key and does not change when anything else does.
+_Avoid_: Scope, key scope, key permissions
+
+**Effective Object actions**:
+The Object actions an Identity may exercise right now. For an API key this is its Selected
+Object actions, or the anonymous Role's, narrowed by the owning User's Role — because
+enforcement requires both. The two differ whenever a User's Role is narrowed after one of
+their keys was created.
+_Avoid_: Actual permissions, real permissions, granted scope
+
 ---
 
 Only the authentication vocabulary is settled so far. The indexing terms — torrent,
