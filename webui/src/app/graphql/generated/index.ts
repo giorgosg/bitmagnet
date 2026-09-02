@@ -31,6 +31,12 @@ export type ApiKey = {
   expiresAt?: Maybe<Scalars['DateTime']['output']>;
   id: Scalars['Int']['output'];
   name: Scalars['String']['output'];
+  /**
+   * The object actions this key was scoped to. A property of the key, so it does
+   * not change when the owning user's role does; what the key can currently reach
+   * is `Self.permissions`.
+   */
+  permissions: Array<AuthObjectAction>;
   user: User;
   userId: Scalars['Int']['output'];
 };
@@ -651,6 +657,12 @@ export type Season = {
 export type Self = {
   __typename?: 'Self';
   apiKey?: Maybe<ApiKey>;
+  /**
+   * The object actions this identity can currently exercise. For an API key that
+   * is its selection intersected with the owning user's role, because enforcement
+   * requires both — so it narrows when the role does. The selection itself stays
+   * visible on `apiKey.permissions`.
+   */
   permissions: Array<AuthObjectAction>;
   user?: Maybe<User>;
 };

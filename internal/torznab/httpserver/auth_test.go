@@ -29,8 +29,12 @@ type stubIdentity struct {
 	permissions []rbac.ObjectAction
 }
 
-func (s stubIdentity) Self() identity.Self {
-	return identity.Self{Permissions: s.permissions}
+func (stubIdentity) Self() identity.Self {
+	return identity.Self{}
+}
+
+func (s stubIdentity) EffectivePermissions(context.Context) ([]rbac.ObjectAction, error) {
+	return s.permissions, nil
 }
 
 func (s stubIdentity) Enforce(_ context.Context, objectAction rbac.ObjectAction) (bool, error) {

@@ -25,6 +25,22 @@ type Enforcer interface {
 	// semaphore is process-global and the @auth directive fires per field, so the
 	// difference is per field of every query.
 	EnforceEvery(ctx context.Context, groups [][]Subject, objectAction ObjectAction) (bool, error)
+	// FilterAllowed returns the object actions any of the subjects allows,
+	// preserving the order they were given in.
+	//
+	// It exists so that a caller reporting what an identity may do asks casbin
+	// rather than reimplementing the matcher. The policy side of that matcher
+	// holds glob patterns - the admin role's permission is literally
+	// "**::**::**" - so an intersection computed by equality would report that
+	// an admin holds nothing, and any hand-rolled approximation is a second
+	// source of truth that can drift from the decision it describes.
+	//
+	// One batch, so the whole set costs one acquisition of the semaphore.
+	FilterAllowed(
+		ctx context.Context,
+		subjects []Subject,
+		objectActions []ObjectAction,
+	) ([]ObjectAction, error)
 }
 
 type Service interface {
@@ -158,6 +174,52 @@ func (s *service) EnforceEvery(
 	}
 
 	return true, nil
+}
+
+func (s *service) FilterAllowed(
+	ctx context.Context,
+	subjects []Subject,
+	objectActions []ObjectAction,
+) ([]ObjectAction, error) {
+	if len(subjects) == 0 || len(objectActions) == 0 {
+		return nil, nil
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case s.sem <- struct{}{}:
+	}
+
+	defer func() { <-s.sem }()
+
+	casbin, err := s.acquireCasbin(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	requests := make([][]any, 0, len(objectActions)*len(subjects))
+	for _, objectAction := range objectActions {
+		requests = append(requests, batchRequests(subjects, objectAction)...)
+	}
+
+	results, err := casbin.BatchEnforce(requests)
+	if err != nil {
+		return nil, err
+	}
+
+	allowed := make([]ObjectAction, 0, len(objectActions))
+	offset := 0
+
+	for _, objectAction := range objectActions {
+		if slices.Contains(results[offset:offset+len(subjects)], true) {
+			allowed = append(allowed, objectAction)
+		}
+
+		offset += len(subjects)
+	}
+
+	return allowed, nil
 }
 
 func (s *service) GetAllRoles(ctx context.Context) ([]RoleInfo, error) {

@@ -9,10 +9,24 @@ import (
 	"context"
 	"time"
 
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/rbac"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel"
+	"github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel/gen"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
+	"github.com/bitmagnet-io/bitmagnet/internal/slice"
 )
+
+// Permissions is the resolver for the permissions field. It reports what the
+// key was scoped to, which is a property of the key and does not move when the
+// owning user's role does. What the key can currently reach is Self.permissions.
+func (r *aPIKeyResolver) Permissions(_ context.Context, obj *model.APIKey) ([]gen.AuthObjectAction, error) {
+	return gqlmodel.ObjectActionsToGql(
+		slice.Map(obj.Permissions, func(perm model.APIKeyPermission) rbac.ObjectAction {
+			return rbac.NewObjectAction(perm.Namespace, perm.Object, perm.Action)
+		}),
+	), nil
+}
 
 // ExpiresAt is the resolver for the expiresAt field.
 func (r *aPIKeyResolver) ExpiresAt(ctx context.Context, obj *model.APIKey) (*time.Time, error) {

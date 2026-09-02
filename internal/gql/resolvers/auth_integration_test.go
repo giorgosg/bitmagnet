@@ -257,7 +257,8 @@ type identityBody struct {
 }
 
 type apiKeyBody struct {
-	Name string `json:"name"`
+	Name        string             `json:"name"`
+	Permissions []objectActionBody `json:"permissions"`
 }
 
 type selfIdentityBody struct {

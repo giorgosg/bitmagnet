@@ -57,12 +57,13 @@ type DirectiveRoot struct {
 
 type ComplexityRoot struct {
 	APIKey struct {
-		CreatedAt func(childComplexity int) int
-		ExpiresAt func(childComplexity int) int
-		ID        func(childComplexity int) int
-		Name      func(childComplexity int) int
-		User      func(childComplexity int) int
-		UserID    func(childComplexity int) int
+		CreatedAt   func(childComplexity int) int
+		ExpiresAt   func(childComplexity int) int
+		ID          func(childComplexity int) int
+		Name        func(childComplexity int) int
+		Permissions func(childComplexity int) int
+		User        func(childComplexity int) int
+		UserID      func(childComplexity int) int
 	}
 
 	AuthMutation struct {
@@ -557,6 +558,7 @@ type ComplexityRoot struct {
 // region    ************************** generated!.gotpl **************************
 
 type APIKeyResolver interface {
+	Permissions(ctx context.Context, obj *model.APIKey) ([]gen.AuthObjectAction, error)
 	ExpiresAt(ctx context.Context, obj *model.APIKey) (*time.Time, error)
 }
 type ContentResolver interface {
@@ -656,6 +658,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.APIKey.Name(childComplexity), true
+	case "APIKey.permissions":
+		if e.ComplexityRoot.APIKey.Permissions == nil {
+			break
+		}
+
+		return e.ComplexityRoot.APIKey.Permissions(childComplexity), true
 	case "APIKey.user":
 		if e.ComplexityRoot.APIKey.User == nil {
 			break
@@ -2788,6 +2796,12 @@ type APIKey {
   name: String!
   userId: Int!
   user: User!
+  """
+  The object actions this key was scoped to. A property of the key, so it does
+  not change when the owning user's role does; what the key can currently reach
+  is ` + "`" + `Self.permissions` + "`" + `.
+  """
+  permissions: [AuthObjectAction!]!
   expiresAt: DateTime
   createdAt: DateTime!
 }
@@ -3434,6 +3448,12 @@ type CreateAPIKeyResult {
 type Self {
   user: User
   apiKey: APIKey
+  """
+  The object actions this identity can currently exercise. For an API key that
+  is its selection intersected with the owning user's role, because enforcement
+  requires both — so it narrows when the role does. The selection itself stays
+  visible on ` + "`" + `apiKey.permissions` + "`" + `.
+  """
   permissions: [AuthObjectAction!]!
 }
 
@@ -3661,6 +3681,8 @@ func (ec *executionContext) childFields_APIKey(ctx context.Context, field graphq
 		return ec.fieldContext_APIKey_userId(ctx, field)
 	case "user":
 		return ec.fieldContext_APIKey_user(ctx, field)
+	case "permissions":
+		return ec.fieldContext_APIKey_permissions(ctx, field)
 	case "expiresAt":
 		return ec.fieldContext_APIKey_expiresAt(ctx, field)
 	case "createdAt":
@@ -5369,6 +5391,38 @@ func (ec *executionContext) fieldContext_APIKey_user(_ context.Context, field gr
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return ec.childFields_User(ctx, field)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _APIKey_permissions(ctx context.Context, field graphql.CollectedField, obj *model.APIKey) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_APIKey_permissions(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.APIKey().Permissions(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []gen.AuthObjectAction) graphql.Marshaler {
+			return ec.marshalNAuthObjectAction2ᚕgithubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐAuthObjectActionᚄ(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_APIKey_permissions(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "APIKey",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_AuthObjectAction(ctx, field)
 		},
 	}
 	return fc, nil
@@ -16220,6 +16274,44 @@ func (ec *executionContext) _APIKey(ctx context.Context, sel ast.SelectionSet, o
 			if out.Values[i] == graphql.Null {
 				atomic.AddUint32(&out.Invalids, 1)
 			}
+		case "permissions":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._APIKey_permissions(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "expiresAt":
 			field := field
 

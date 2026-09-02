@@ -223,8 +223,12 @@ type ReleaseYearFacetInput struct {
 }
 
 type Self struct {
-	User        *model.User        `json:"user,omitempty"`
-	APIKey      *model.APIKey      `json:"apiKey,omitempty"`
+	User   *model.User   `json:"user,omitempty"`
+	APIKey *model.APIKey `json:"apiKey,omitempty"`
+	// The object actions this identity can currently exercise. For an API key that
+	// is its selection intersected with the owning user's role, because enforcement
+	// requires both — so it narrows when the role does. The selection itself stays
+	// visible on `apiKey.permissions`.
 	Permissions []AuthObjectAction `json:"permissions"`
 }
 

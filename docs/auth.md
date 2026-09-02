@@ -113,6 +113,8 @@ message or its wrapping. Application errors retain their GraphQL `path` and `loc
 | `EMAIL_REQUIRED`                        | `auth.email_required` is on and no email was supplied          |
 | `EMAIL_INVALID`                         | The email does not match the server's address pattern          |
 | `PASSWORD_INSUFFICIENT_ENTROPY`         | The password is below `auth.password_min_entropy`              |
+| `ROLE_NOT_FOUND`                        | The named Role does not exist                                  |
+| `PERMISSION_INVALID`                    | A requested API-key Object action is not a registered one      |
 | `UNAUTHORIZED`                          | The Identity lacks the refused GraphQL Object action           |
 | `AUTHENTICATION_INFRASTRUCTURE_FAILURE` | A credential could not be resolved because a dependency failed |
 | `USER_SESSION_REQUIRED`                 | The field requires an interactive User session                 |
@@ -121,7 +123,10 @@ message or its wrapping. Application errors retain their GraphQL `path` and `loc
 
 `UNAUTHORIZED` also includes `namespace`, `object`, and `action` in its extensions. The
 two session-specific codes are field-level account constraints, not Role-Permission
-refusals, so they do not invent an Object action. Authentication infrastructure and
+refusals, so they do not invent an Object action. `ROLE_NOT_FOUND` and
+`PERMISSION_INVALID` are input validation: both name something the caller supplied that
+the server does not recognise, and both were previously foreign-key violations or silent
+acceptance reaching the client as `INTERNAL_SERVER_ERROR` or as a key that grants nothing. Authentication infrastructure and
 unclassified internal failures use fixed public messages; their underlying error details
 are not returned to the client. GraphQL parsing and validation errors remain gqlgen's
 ordinary protocol errors rather than being mislabeled as application failures.

@@ -140,7 +140,7 @@ func TestCreateRefusesTheWholeRequestWhenOneActionIsInvalid(t *testing.T) {
 	})
 
 	require.Error(t, err)
-	assert.ErrorIs(t, err, api_key.ErrPermissionInvalid)
+	require.ErrorIs(t, err, api_key.ErrPermissionInvalid)
 	h.repository.AssertNotCalled(t, "Create")
 }
 

@@ -224,6 +224,10 @@ type failingIdentity struct{ err error }
 
 func (failingIdentity) Self() identity.Self { return identity.Self{} }
 
+func (f failingIdentity) EffectivePermissions(context.Context) ([]rbac.ObjectAction, error) {
+	return nil, f.err
+}
+
 func (f failingIdentity) Enforce(context.Context, rbac.ObjectAction) (bool, error) {
 	return false, f.err
 }
@@ -309,4 +313,95 @@ func TestGraphQLCreateAPIKeyInvalidPermissionErrorCode(t *testing.T) {
 	}) { id } } }`)
 
 	requireGraphQLErrorCode(t, response, "PERMISSION_INVALID")
+}
+
+// self.permissions is what a client presents to the operator, so it has to
+// agree with what Enforce actually grants.
+//
+// APIKey.Enforce requires both the owning User's Role and the key's own
+// selection (or anon). The reported set was the selection concatenated with
+// anon's and never intersected with the Role, so a key selected for
+// torrent:delete whose owner is demoted kept listing torrent:delete while the
+// enforcer refused it.
+func TestSelfPermissionsForAnAPIKeyAgreeWithEnforcement(t *testing.T) {
+	t.Parallel()
+
+	cfg := authconfig.NewDefaultConfig()
+	// With the open baseline anon holds nearly everything, which would mask the
+	// intersection under a set the Role happens to allow anyway.
+	cfg.AnonymousAccess = false
+
+	server, code := newAuthTestServerWithConfig(t, cfg)
+	adminToken := loginAsAdmin(t, server, code)
+
+	// A second administrator, so demoting one does not leave the instance
+	// without any.
+	deputyToken := registerAndLoginAsRole(t, server, adminToken, "admin", "deputy")
+	key := apiKeyFrom(t, createAPIKeyAs(
+		t, server, deputyToken, "wide", "graphql", "auth", "query",
+	))
+
+	// A top-level field, so reaching it needs exactly the one action the key
+	// names and no parent gate as well - and unlike version:query, the user role
+	// does not hold it, so demotion actually withdraws it.
+	adminQuery := `{ auth { listUsers { totalCount } } }`
+	permissionsQuery := `{ self { identity {
+		permissions { namespace object action }
+		apiKey { name permissions { namespace object action } }
+	} } }`
+
+	// While the owner is an admin, the selection is honoured and reported.
+	requireNoGqlErrors(t, query(t, server, key, adminQuery))
+	assert.Contains(t, identityPermissions(t, query(t, server, key, permissionsQuery)),
+		"graphql::auth::query", "an allowed action must be reported")
+
+	// Demote the owner. The key is unchanged; what it can reach is not.
+	requireNoGqlErrors(t, query(t, server, adminToken, `mutation { auth { setUserRole(
+		userId: 2, roleName: "user"
+	) { role } } }`))
+
+	denied := query(t, server, key, adminQuery)
+	require.NotEmpty(t, denied.Errors, "the enforcer must refuse what the Role no longer allows")
+	assert.Equal(t, "unauthorized", denied.Errors[0].Message)
+
+	response := query(t, server, key, permissionsQuery)
+	assert.NotContains(t, identityPermissions(t, response), "graphql::auth::query",
+		"a refused action must not be reported as held")
+
+	// The selection itself is unchanged, and is still visible - a client shows
+	// what the key was scoped to alongside what it can currently reach.
+	assert.Equal(t, []string{"graphql::auth::query"}, apiKeyPermissions(t, response),
+		"the selected set is a property of the key and does not move with the Role")
+}
+
+func identityPermissions(t *testing.T, response gqlResponse) []string {
+	t.Helper()
+	requireNoGqlErrors(t, response)
+
+	var body identityResponse
+
+	require.NoError(t, json.Unmarshal(response.Data, &body))
+
+	return objectActionStrings(body.Self.Identity.Permissions)
+}
+
+func apiKeyPermissions(t *testing.T, response gqlResponse) []string {
+	t.Helper()
+	requireNoGqlErrors(t, response)
+
+	var body identityResponse
+
+	require.NoError(t, json.Unmarshal(response.Data, &body))
+	require.NotNil(t, body.Self.Identity.APIKey)
+
+	return objectActionStrings(body.Self.Identity.APIKey.Permissions)
+}
+
+func objectActionStrings(actions []objectActionBody) []string {
+	strs := make([]string, 0, len(actions))
+	for _, action := range actions {
+		strs = append(strs, action.Namespace+"::"+action.Object+"::"+action.Action)
+	}
+
+	return strs
 }

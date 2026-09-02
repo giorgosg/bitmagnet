@@ -45,14 +45,29 @@ func (a authenticatorAPIKey) Authenticate(ctx context.Context, token string) (Id
 		return nil, !revokedAPIKey(err), err
 	}
 
-	anon, err := a.rbac.GetRole(ctx, rbac.RoleAnon)
+	// Both roles in one lookup. The key's reported permissions are its selection
+	// narrowed by the owning User's Role, so the Role is needed as well as anon
+	// - and GetRoles answers both from the same cached snapshot rather than
+	// taking it twice.
+	roles, err := a.rbac.GetRoles(ctx, []rbac.Role{rbac.RoleAnon, rbac.Role(apiKey.User.RoleName)})
 	if err != nil {
 		return nil, true, err
 	}
 
-	return APIKey{
+	identity := APIKey{
 		APIKey:   apiKey,
-		anon:     anon,
 		enforcer: a.rbac,
-	}, true, nil
+	}
+
+	for _, role := range roles {
+		if role.Role == rbac.RoleAnon {
+			identity.anon = role
+		}
+
+		if role.Role == rbac.Role(apiKey.User.RoleName) {
+			identity.userRole = role
+		}
+	}
+
+	return identity, true, nil
 }
