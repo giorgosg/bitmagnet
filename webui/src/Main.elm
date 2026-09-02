@@ -23,6 +23,7 @@ import Magnes.Api.Enum.ContentType as ContentType
 import Magnes.Api.Enum.FilesStatus exposing (FilesStatus(..))
 import Process
 import Register
+import Roles
 import Route exposing (Route)
 import Set exposing (Set)
 import Sort exposing (Sort)
@@ -108,6 +109,14 @@ type alias Model =
 
     -- Separate counter for the search debounce, because a keystroke is not yet a search.
     , userTyping : Int
+
+    -- The Role administration screen: the Roles and every Object action, the Role being
+    -- written, and which deletion has been asked about but not yet confirmed.
+    , roles : Roles.State
+
+    -- Separate counter for the Role listing's fetches, on the same reasoning as the
+    -- User listing's: an answer to a question this screen is no longer asking is dropped.
+    , rolesEpoch : Int
 
     -- Whether the header's Identity menu is showing. Presentational, so it is not in the
     -- URL: it is closed by navigating, and reopening it is one click.
@@ -294,6 +303,8 @@ init flags url key =
       , users = Users.empty
       , usersEpoch = 0
       , userTyping = 0
+      , roles = Roles.empty
+      , rolesEpoch = 0
       , menuOpen = False
       , identityRefresh = Resolving
       , epoch = 0
@@ -463,6 +474,17 @@ type Msg
     | GotUserRole (Result (Graphql.Http.Error Identity.User) Identity.User)
     | GotUserEnabled (Result (Graphql.Http.Error Identity.User) Identity.User)
     | GotUserDeleted (Result (Graphql.Http.Error ()) ())
+    | RoleNameChanged String
+    | RolePermissionToggled Identity.ObjectAction
+    | RoleSubmitted
+    | RoleEditRequested String
+    | RoleEditCancelled
+    | RoleDeleteRequested String
+    | RoleDeleteConfirmed String
+    | RoleDeleteCancelled
+    | GotRoles Int (Result (Graphql.Http.Error Roles.Page) Roles.Page)
+    | GotRoleSaved (Result (Graphql.Http.Error Roles.Role) Roles.Role)
+    | GotRoleDeleted String (Result (Graphql.Http.Error ()) ())
     | SignOutRequested
     | GotSignOut (Result (Graphql.Http.Error ()) ())
     | AuthenticationChangedHere Refresh
@@ -920,6 +942,161 @@ update msg model =
             -- Identity is refetched into whatever the server now says it is.
             actAccepted model
 
+        RoleNameChanged name ->
+            ( { model | roles = Roles.withDraft (Roles.withName name model.roles.draft) model.roles }
+            , Cmd.none
+            )
+
+        RolePermissionToggled action ->
+            ( { model | roles = Roles.withDraft (Roles.toggle action model.roles.draft) model.roles }
+            , Cmd.none
+            )
+
+        RoleSubmitted ->
+            case model.roles.listing of
+                Roles.Loaded loadedPage ->
+                    let
+                        draft =
+                            model.roles.draft
+
+                        name =
+                            String.trim draft.name
+                    in
+                    -- The submit button is disabled without a name, but Enter in the name
+                    -- field submits the form regardless, so the refusal lives here too.
+                    if String.isEmpty name then
+                        ( model, Cmd.none )
+
+                    else
+                        ( { model | roles = Roles.withSubmission Roles.Saving model.roles }
+                        , Roles.put model.apiUrl
+                            name
+                            (Roles.desiredActions loadedPage.actions draft)
+                            GotRoleSaved
+                        )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        RoleEditRequested name ->
+            case model.roles.listing of
+                Roles.Loaded loadedPage ->
+                    case Roles.draftNamed name loadedPage of
+                        -- The Draft is built from the Role as the server last described
+                        -- it, which is what keeps a save from revoking what the form was
+                        -- never shown. An armed deletion is spent: it was armed against a
+                        -- screen that is now editing something.
+                        Just draft ->
+                            ( { model
+                                | roles =
+                                    model.roles
+                                        |> Roles.withDraft draft
+                                        |> Roles.withConfirming Nothing
+                              }
+                            , Cmd.none
+                            )
+
+                        Nothing ->
+                            ( model, Cmd.none )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        RoleEditCancelled ->
+            ( { model | roles = Roles.withDraft Roles.newDraft model.roles }, Cmd.none )
+
+        RoleDeleteRequested name ->
+            ( { model | roles = Roles.withConfirming (Just name) model.roles }, Cmd.none )
+
+        RoleDeleteCancelled ->
+            ( { model | roles = Roles.withConfirming Nothing model.roles }, Cmd.none )
+
+        RoleDeleteConfirmed name ->
+            ( { model
+                | roles =
+                    model.roles
+                        |> Roles.withConfirming Nothing
+                        |> Roles.withSubmission Roles.Saving
+              }
+            , Roles.delete model.apiUrl name (GotRoleDeleted name)
+            )
+
+        GotRoles rolesEpoch (Ok fetched) ->
+            if rolesEpoch /= model.rolesEpoch then
+                ( model, Cmd.none )
+
+            else
+                ( { model | roles = Roles.withListing (Roles.Loaded fetched) model.roles }
+                , Cmd.none
+                )
+
+        GotRoles rolesEpoch (Err error) ->
+            if rolesEpoch /= model.rolesEpoch then
+                ( model, Cmd.none )
+
+            else
+                onRequestFailure error
+                    model
+                    (\_ current ->
+                        ( { current
+                            | roles =
+                                Roles.withListing
+                                    (Roles.Failed (ApiError.fromError error))
+                                    current.roles
+                          }
+                        , Cmd.none
+                        )
+                    )
+
+        GotRoleSaved (Ok role) ->
+            -- The act is over the moment the server says so; the listing is refetched
+            -- because the answer to `putRole` is one Role and this screen is about all
+            -- of them.
+            fetchRoles
+                { model | roles = Roles.withSubmission (Roles.Saved role.name) model.roles }
+
+        GotRoleSaved (Err error) ->
+            onRequestFailure error
+                model
+                (\_ current ->
+                    ( { current
+                        | roles =
+                            Roles.withSubmission
+                                (Roles.Rejected (ApiError.fromError error))
+                                current.roles
+                      }
+                    , Cmd.none
+                    )
+                )
+
+        GotRoleDeleted name (Ok ()) ->
+            -- Editing the Role that has just stopped existing is a form that would
+            -- recreate it on save, so that Draft goes with it. Another Role's edit is
+            -- left alone.
+            let
+                edited =
+                    if model.roles.draft.name == name then
+                        Roles.withDraft Roles.newDraft model.roles
+
+                    else
+                        model.roles
+            in
+            fetchRoles { model | roles = Roles.withSubmission Roles.Ready edited }
+
+        GotRoleDeleted _ (Err error) ->
+            onRequestFailure error
+                model
+                (\_ current ->
+                    ( { current
+                        | roles =
+                            current.roles
+                                |> Roles.withSubmission Roles.Ready
+                                |> Roles.withDeletion (Just (ApiError.fromError error))
+                      }
+                    , Cmd.none
+                    )
+                )
+
         SignOutRequested ->
             if model.signOut == UserOverview.SigningOut then
                 ( model, Cmd.none )
@@ -1035,6 +1212,8 @@ update msg model =
                             | users = Users.empty
                             , usersEpoch = model.usersEpoch + 1
                             , userTyping = model.userTyping + 1
+                            , roles = Roles.empty
+                            , rolesEpoch = model.rolesEpoch + 1
                         }
 
                     epoch =
@@ -1271,6 +1450,19 @@ usersMessages =
     }
 
 
+rolesMessages : Roles.Messages Msg
+rolesMessages =
+    { nameChanged = RoleNameChanged
+    , actionToggled = RolePermissionToggled
+    , submitted = RoleSubmitted
+    , editRequested = RoleEditRequested
+    , editCancelled = RoleEditCancelled
+    , deleteRequested = RoleDeleteRequested
+    , deleteConfirmed = RoleDeleteConfirmed
+    , deleteCancelled = RoleDeleteCancelled
+    }
+
+
 registerMessages : Register.Messages Msg
 registerMessages =
     { usernameChanged = RegisterUsernameChanged
@@ -1393,6 +1585,21 @@ fetchUsers model =
     in
     ( { model | usersEpoch = usersEpoch }
     , Users.fetch model.apiUrl model.users.query model.users.offset (GotUsers usersEpoch)
+    )
+
+
+{-| Refetch the Role listing under a fresh epoch, so only the answer to this very question
+is applied. Both acts come through here once the server has accepted them: `putRole`
+answers with one Role and `deleteRole` with nothing, and the screen is about all of them.
+-}
+fetchRoles : Model -> ( Model, Cmd Msg )
+fetchRoles model =
+    let
+        rolesEpoch =
+            model.rolesEpoch + 1
+    in
+    ( { model | rolesEpoch = rolesEpoch }
+    , Roles.fetch model.apiUrl (GotRoles rolesEpoch)
     )
 
 
@@ -1566,15 +1773,16 @@ loadWhenReady identity apiUrl epochs route =
                 load apiUrl epochs route
 
 
-{-| The three counters a load has to carry. They are separate because they answer
+{-| The four counters a load has to carry. They are separate because they answer
 different questions: whether a page belongs to the search that is on screen, to the
-Identity that is in hand, and to the visit of the User screen that asked for it. A
-response that fails any check is dropped.
+Identity that is in hand, and to the visit of the User or the Role screen that asked for
+it. A response that fails any check is dropped.
 -}
 type alias Epochs =
     { query : Int
     , identity : Int
     , users : Int
+    , roles : Int
     }
 
 
@@ -1595,7 +1803,11 @@ guardedLoad model identity epoch route =
         Route.Allowed ->
             loadWhenReady identity
                 model.apiUrl
-                { query = epoch, identity = model.identityEpoch, users = model.usersEpoch }
+                { query = epoch
+                , identity = model.identityEpoch
+                , users = model.usersEpoch
+                , roles = model.rolesEpoch
+                }
                 route
 
 
@@ -1669,6 +1881,8 @@ beginIdentityRefresh reason model =
         , invitations = Invitations.empty
         , users = Users.empty
         , usersEpoch = model.usersEpoch + 1
+        , roles = Roles.empty
+        , rolesEpoch = model.rolesEpoch + 1
 
         -- And a pending search-debounce is spent: the timer it would fire belongs to a
         -- screen that no longer holds the search it was typed into.
@@ -1762,7 +1976,7 @@ load apiUrl epochs route =
             ( Blank, Users.fetch apiUrl "" 0 (GotUsers epochs.users) )
 
         Route.AdminRoles ->
-            ( Blank, Cmd.none )
+            ( Blank, Roles.fetch apiUrl (GotRoles epochs.roles) )
 
         Route.AdminInvitations ->
             ( Blank, Invitations.fetch apiUrl 0 (GotInvitations epochs.identity) )
@@ -2232,7 +2446,7 @@ viewAllowedRoute model =
             Users.view model.zone usersMessages model.identity model.users
 
         Route.AdminRoles ->
-            p [ class "notice" ] [ text "Role administration." ]
+            Roles.view rolesMessages model.identity model.roles
 
         Route.AdminInvitations ->
             Invitations.view model.basePath model.zone invitationsMessages model.identity model.invitations

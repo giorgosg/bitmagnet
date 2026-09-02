@@ -133,7 +133,31 @@ resolver, no schema field. A user cannot change their own password through any A
 Closing that needs a schema change in bitmagnet.
 
 `putRole` is a **replace, not a merge**: the object actions given become the role's entire
-permission set. Read the role first, or an edit silently revokes everything unlisted.
+permission set. Read the role first, or an edit silently revokes everything unlisted. It
+also **upserts on the name**, so there is no rename: saving a role under a different name
+leaves the original where it was and creates a second beside it.
+
+`Role.permissions` merges two sources, and `Permission.core` is what tells them apart. A
+core permission is held **in memory** by `mergeCoreRolePermissions` — admin's `**/**/**`
+and the `anon`/`user` baseline — and has no row in `role_permissions`. `putRole` writes
+only the stored set, so it can neither grant nor revoke a core permission, and sending one
+back merely writes a row for something that was already answering. The schema reports one
+flag for both, so a stored row that duplicates a core permission cannot be told apart from
+the core permission alone.
+
+**Deleting a role is two foreign keys**, and neither is visible in the schema
+(`migrations/00022_auth.sql`):
+
+| Table | Reference | What deleting a role does |
+| --- | --- | --- |
+| `role_permissions` | `on delete cascade` | its permissions go with it |
+| `invitations` | `on delete cascade` | **every unclaimed invitation issued for it is deleted** |
+| `users` | no cascade | Postgres **refuses** the delete while any user holds the role |
+
+So a role in use cannot be deleted, and the refusal arrives as an opaque database error
+rather than a coded one; and a role nobody holds can still take invitations with it
+silently. `deleteRole` additionally refuses the four core role names before touching the
+database at all (`rbac.service.DeleteRole`).
 
 `Duration` is gqlgen's `graphql.Duration` — a Go duration string, `"24h0m0s"`, parsed with
 `time.ParseDuration`. Not seconds, not ISO 8601.

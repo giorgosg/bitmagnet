@@ -868,6 +868,138 @@ main {
   border-color: var(--accent);
 }
 
+/* Roles -------------------------------------------------------------------- */
+
+/* The Role rows sit on the same skeleton as the Users and the Invitations: the name
+   leading, the quiet facts underneath, the acts last. */
+.roles {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.role {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--faint);
+}
+
+.role-name {
+  font-weight: 600;
+}
+
+.role-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+/* A core Role is bitmagnet's, not this instance's: it cannot be deleted, and the badge
+   is what says so before the missing button does. */
+.role-core {
+  padding: 0.0625rem 0.375rem;
+  border: 1px solid var(--faint);
+  border-radius: 999px;
+  color: var(--fg);
+  font-size: 0.75rem;
+}
+
+.role-acts,
+.role-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.role-confirm {
+  font-size: 0.8125rem;
+}
+
+.role-naming {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.375rem;
+  width: 100%;
+}
+
+/* Seventeen checkboxes need grouping to be read at all, so each namespace is its own
+   block and they wrap into as many columns as the width allows.
+
+   `max-width` undoes the panel's own `22rem`, which is the right width for a field to be
+   typed into and far too narrow for a grid: capped there, the namespaces stack into one
+   column instead of sitting side by side. `align-items` keeps each group as tall as its
+   own contents, so the one-item namespace can sit beside the three-item one rather than
+   being pushed below the thirteen-item one's line. */
+.permissions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 1.25rem 2.5rem;
+  width: 100%;
+  margin: 0.75rem 0;
+}
+
+/* Written as a child rule on purpose: `.panel > *` carries the same specificity and comes
+   later in this file, so a bare `.permissions { max-width: none }` loses to it. */
+.panel > .permissions {
+  max-width: none;
+}
+
+.permission-group h3 {
+  margin: 0 0 0.375rem;
+  color: var(--dim);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.permission-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+}
+
+.permission {
+  display: flex;
+  align-items: center;
+  gap: 0.4375rem;
+  font-size: 0.8125rem;
+}
+
+/* `.panel label` paints every label in the muted colour a field label wants and pushes it
+   down half a line. A permission is a line of a grid, not a field label: it takes the
+   page's own colour, so that dimming can mean the one thing it is meant to mean, and no
+   extra space, so thirteen of them do not drift apart. Written under `.panel` because
+   `.panel label` is more specific than `.permission` on its own. */
+.panel .permission {
+  margin-top: 0;
+  color: var(--fg);
+}
+
+/* A box that cannot be unticked is bitmagnet's own grant. Dimming it says so at a glance;
+   the notice under the grid says why. Keyed on the Role's own grant rather than on
+   `:disabled`, because every box is disabled while an act is in flight and dimming all
+   seventeen then would say something about the Role that is not true. */
+.permission input:disabled {
+  cursor: not-allowed;
+}
+
+.panel .permission-fixed span {
+  color: var(--dim);
+}
+
 /* Forms ------------------------------------------------------------------- */
 
 /* A form sits on the same column as everything else: centred in the window with the

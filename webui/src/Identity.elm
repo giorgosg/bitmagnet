@@ -1,4 +1,4 @@
-module Identity exposing (Identity(..), ObjectAction, User, can, fetch, graphql, userSelection)
+module Identity exposing (Identity(..), ObjectAction, User, can, fetch, graphql, objectActionSelection, userSelection)
 
 {-| The canonical browser Identity comes from `self.identity`; the browser credential is
 an implementation detail owned by bitmagnet and never appears in this module.
