@@ -2,14 +2,21 @@
 
 The real Elm bundle, in a real browser, against a real bitmagnet.
 
+There are two suites, because they need different things to exist.
+
 ```bash
-npm run test:e2e            # headless
-npm run test:e2e -- --ui    # pick through them interactively
+npm run test:e2e                 # credential-free: no password, no database
+npm run test:e2e:credentialed    # signed in, against a bitmagnet it brings itself
+npm run test:e2e -- --ui         # pick through them interactively
 ```
 
-Playwright starts `npm run dev` itself and reuses one already running. The upstream
-bitmagnet comes from the gitignored `.dev/env`, so no host is named in the repository —
-see `docs/serving-and-testing.md`.
+The **credential-free** suite is everything reachable while Anonymous. Playwright starts
+`npm run dev` itself and reuses one already running. The upstream bitmagnet comes from the
+gitignored `.dev/env`, so no host is named in the repository — see
+`docs/serving-and-testing.md`.
+
+The **credentialed** suite is everything past a successful sign-in. It needs no host and no
+password: it stands up its own bitmagnet per run and registers its own User. See below.
 
 ## Why these exist alongside elm-test
 
@@ -33,45 +40,64 @@ password exists in the repository, the environment, or CI. The refusals are real
 rejection message is bitmagnet's `INVALID_CREDENTIALS` mapped through `ApiError`, so the
 path from `extensions.code` to the rendered sentence is genuinely exercised.
 
-## What this cannot cover yet
+## The credentialed suite
 
-Everything past a successful sign-in: the redirect to `returnUrl`, sign-out, API-key
-management, and the administration workflows. Those need a User to exist, and pointing
-them at a shared instance would mean either a real password in CI or tests that mutate
-someone's live data.
+`npm run test:e2e:credentialed` runs `e2e/credentialed/` against a bitmagnet that exists
+only for that run. Nothing is asked of a person and nothing is left behind.
 
-The offer to the browser's credential store (ticket 17) is covered only on its refusal
-paths, where nothing should be offered. The call itself happens on success, so it needs
-the same harness.
+What happens, in order, from `e2e/harness/serve.js`:
 
-Registration is a case of its own. Every refusal is covered here, as is the live
-`self.passwordEntropy` round trip — bitmagnet answers it anonymously — but a *successful*
-registration would consume a real Invitation and leave a User behind, which is exactly
-what a disposable instance is for.
+1. **A fixture server starts.** `dev fixture serve`, built from the `../bitmagnet` checkout,
+   serving the real Gin, auth middleware and gqlgen stack over a clone of the `../btm-testdb`
+   seed template — so the index has ~100k real torrents in it, not three rows. It announces
+   its address and a freshly minted bootstrap Invitation as one line of JSON on stdout.
+2. **A throwaway administrator is registered** through that Invitation, with a password
+   generated for the run. The first registration through a bootstrap Invitation is always an
+   `admin`, which is what makes the administration screens reachable.
+3. **The credentials are written** to `.dev/e2e-credentials.json`, which is gitignored, and
+   read from there by the `credentials` fixture in `e2e/support/credentialed.js`.
+4. **`dev.js` starts** pointed at the fixture server. It is the same development proxy a
+   person uses: it terminates TLS and forwards `/graphql` with the browser's `Host` and
+   `Origin` intact, which is what lets bitmagnet issue its `Secure`, `SameSite=Strict`
+   cookie to a page on `localhost`. Playwright waits for this, so by the time any test runs
+   the credentials are already there.
+5. **Everything is dropped on the way out** — the cloned database, the credentials file, and
+   the built binary. That shutdown is driven from `e2e/harness/teardown.js` rather than left
+   to Playwright, which kills its web server faster than a `DROP DATABASE` finishes; without
+   it, every run left a `bitmagnet_test_*` database behind.
 
-The way through is a bitmagnet with a known state per run, which is more than a config
-flag. It has three parts, in two other places:
+### What it needs present
 
-- `../btm-testdb` — **built, as of 2026-08-29.** A local PostgreSQL holding ~100k torrents
-  sampled from a real crawl, a seed database to clone from, and a reset, driven by
-  `bin/testdb`. Its corpus is deliberately messy — about 87% of contents carry no content
-  type and four in five torrents have no file information — because that is what a real
-  index looks like and what the UI has to branch on.
-- `../bitmagnet` — a fixture-server command standing up the real Gin, auth middleware, and
-  gqlgen stack against a cloned database, printing a bootstrap invitation this harness can
-  register a throwaway admin through. It has to live there: those packages are under
-  `internal/`, which Go will not let another module import. **Built, as of 2026-09-03**:
-  `dev fixture serve`, from `.scratch/test-fixtures/issues/02-add-a-fixture-server-command.md`,
-  announcing its address and invitation as one line of JSON on stdout, with flags for
-  anonymous access, `invitation_required`, the JWT duration and the login throttle.
-- Here — a second Playwright project that consumes both, leaving this credential-free
-  suite runnable with no services present. **The remaining blocker, and the only one.**
+- `../bitmagnet` — a checkout, and a Go toolchain to build it. Overridable with
+  `MAGNES_E2E_BITMAGNET`.
+- `../btm-testdb` — up, with a seed template loaded (`bin/testdb status`). Overridable with
+  `MAGNES_E2E_TESTDB`, or bypassed entirely by setting `TEST_POSTGRES_TEMPLATE_DSN`.
 
-Tracked as `.scratch/identity-and-permissions/issues/16-build-credentialed-e2e-harness.md`.
+Neither is needed by `npm run test:e2e`, which is why the two suites do not run together.
+
+### Deliberate settings
+
+The login throttle is raised almost out of existence for this suite. bitmagnet buckets it by
+client address and every request arrives from the proxy, so the whole suite shares one
+bucket: at the shipped 30 a minute after a burst of 5, parallel tests that each sign in
+would start being refused for reasons none of them are about. `MAGNES_E2E_LOGIN_REQUEST_BURST`
+and `MAGNES_E2E_LOGIN_REQUESTS_PER_MINUTE` set it, so a project that wants to *provoke*
+throttling — the wait state ticket 09 could only assert against a stub — sets both to 1.
+`MAGNES_E2E_ANONYMOUS_ACCESS` and `MAGNES_E2E_INVITATION_REQUIRED` are passed through the
+same way.
+
+## What is still not covered
+
+API-key management, which is not built yet, and the administration workflows beyond
+reaching them: the User, Invitation and Role screens are driven only as far as arriving on
+each. Both are now a spec away rather than a harness away.
 
 ## Conventions
 
 - Address elements the way a person does — `getByLabel`, `getByRole` — so the tests assert
   the accessible names really exist rather than pinning CSS classes.
 - Assert on behaviour, not implementation. `toBeFocused()`, not "did a focus command run".
-- Keep them credential-free. If a test needs a password, it belongs in the harness above.
+- Keep the credential-free suite credential-free. If a test needs a password, it belongs in
+  `e2e/credentialed/`, which has one.
+- Shared helpers live in `e2e/support/`, not beside a spec: the credential-store recorder is
+  used by both suites, because the refusal paths need no credential and the success paths do.

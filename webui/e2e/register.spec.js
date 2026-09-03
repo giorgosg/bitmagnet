@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { recordCredentialStores, storedCredentials } from "./support/credential-store.js";
+
 // A username that cannot exist, and a code that is nobody's invitation. Every assertion
 // here is about being refused or about the form itself, so the suite stays unattended and
 // no real invitation is spent.
@@ -93,31 +95,6 @@ test.describe("the password-entropy meter", () => {
 });
 
 test.describe("the password manager", () => {
-  // Elm's onSubmit prevents the default, so the browser never sees a submission and no
-  // manager offers to save. Magnes asks the credential store explicitly instead. The
-  // real API is Chromium-only and prompts, so the test installs its own recorder before
-  // the app loads rather than asserting against the browser's own store.
-  async function recordCredentialStores(page) {
-    await page.addInitScript(() => {
-      window.__stored = [];
-      window.PasswordCredential = class {
-        constructor({ id, password }) {
-          this.id = id;
-          this.password = password;
-        }
-      };
-      Object.defineProperty(navigator, "credentials", {
-        configurable: true,
-        value: {
-          store: (credential) => {
-            window.__stored.push({ id: credential.id, password: credential.password });
-            return Promise.resolve(credential);
-          },
-        },
-      });
-    });
-  }
-
   test("is offered nothing by a registration that was refused", async ({ page }) => {
     // Only a User that exists is worth saving a password for. The success path needs a
     // real Invitation and belongs to the credentialed harness — see e2e/README.md.
@@ -129,7 +106,7 @@ test.describe("the password manager", () => {
     await page.getByRole("button", { name: "Register" }).click();
     await expect(page.getByRole("alert")).toBeVisible();
 
-    expect(await page.evaluate(() => window.__stored)).toEqual([]);
+    expect(await storedCredentials(page)).toEqual([]);
   });
 
   test("is offered nothing by a refused sign-in", async ({ page }) => {
@@ -141,7 +118,7 @@ test.describe("the password manager", () => {
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page.getByRole("alert")).toBeVisible();
 
-    expect(await page.evaluate(() => window.__stored)).toEqual([]);
+    expect(await storedCredentials(page)).toEqual([]);
   });
 
   test("survives a browser that implements none of it", async ({ page }) => {

@@ -207,6 +207,19 @@ proxy's CIDR — otherwise every request is attributed to the proxy and shares o
 throttle bucket. Empty (the default) means believe nobody and use the real peer, which is
 correct for a directly reachable dev instance.
 
+## A fourth arrangement: the one the tests bring themselves
+
+The three ways above all point Magnes at an instance someone maintains. The credentialed
+end-to-end suite does not: `npm run test:e2e:credentialed` starts a bitmagnet of its own, on
+a clone of the `../btm-testdb` seed template, registers a throwaway administrator through
+the bootstrap Invitation that instance prints, and drops all of it afterwards. It is way 1
+underneath — the same `dev.js` proxy, for the same reason, since the cookie is `Secure` and
+the origin has to be — with the upstream chosen per run instead of read from `.dev/env`.
+
+That is the only supported way to exercise a signed-in Magnes automatically, and the reason
+it exists is the paragraph above about turning authentication on: doing it to a shared
+instance changes what every other client of that instance can do. See `e2e/README.md`.
+
 ## Regenerating the client
 
 ```bash
