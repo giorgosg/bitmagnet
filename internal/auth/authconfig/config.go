@@ -88,15 +88,11 @@ func (c Config) UserValues() UserConfigValues {
 	}
 }
 
-type UserConfigValues struct {
-	InvitationRequired     *atomic.Value[user.InvitationRequired]
-	EmailRequired          *atomic.Value[user.EmailRequired]
-	EmailVerification      *atomic.Value[user.EmailVerification]
-	PasswordMinEntropy     *atomic.Value[user.PasswordMinEntropy]
-	PasswordHashingCost    *atomic.Value[user.PasswordHashingCost]
-	LoginRequestsPerMinute *atomic.Value[user.LoginRequestsPerMinute]
-	LoginRequestBurst      *atomic.Value[user.LoginRequestBurst]
-}
+// UserConfigValues is user.ConfigValues, aliased so existing callers keep the
+// name they already use. The struct belongs to package user, which is what
+// consumes it; declaring it there is what lets user.NewService take the group
+// whole rather than seven separate arguments.
+type UserConfigValues = user.ConfigValues
 
 // authObject is the GraphQL object guarding user, role and invitation
 // administration.

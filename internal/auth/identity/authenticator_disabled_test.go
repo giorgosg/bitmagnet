@@ -49,13 +49,7 @@ func newTestStack(t *testing.T) testStack {
 	userService := user.NewService(
 		provider,
 		jwtService,
-		values.InvitationRequired,
-		values.EmailRequired,
-		values.EmailVerification,
-		values.PasswordMinEntropy,
-		values.PasswordHashingCost,
-		values.LoginRequestsPerMinute,
-		values.LoginRequestBurst,
+		values,
 	)
 	objectActions := func() []rbac.ObjectAction {
 		return []rbac.ObjectAction{rbac.NewObjectAction("test", "test", "query")}
@@ -241,12 +235,7 @@ func TestExpiredTokenFallsBackToAnonymous(t *testing.T) {
 	values.PasswordHashingCost.Set(user.PasswordHashingCost(bcrypt.MinCost))
 	// A lifetime already in the past, so the token is born expired.
 	jwtService := jwt.NewService(jwt.Secret("test-secret"), jwt.Duration(-time.Hour))
-	userService := user.NewService(
-		provider, jwtService,
-		values.InvitationRequired, values.EmailRequired, values.EmailVerification,
-		values.PasswordMinEntropy, values.PasswordHashingCost,
-		values.LoginRequestsPerMinute, values.LoginRequestBurst,
-	)
+	userService := user.NewService(provider, jwtService, values)
 	objectActions := func() []rbac.ObjectAction {
 		return []rbac.ObjectAction{rbac.NewObjectAction("test", "test", "query")}
 	}

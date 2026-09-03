@@ -40,112 +40,54 @@ type errorPresentation struct {
 }
 
 type errorClassification struct {
-	target       error
-	presentation errorPresentation
+	target error
+	code   string
+	// message overrides the sentinel's own text. Leave it empty -- which all but
+	// one of these do -- and target.Error() is presented, so the public wording
+	// cannot drift away from the error it describes. Set it only where the two
+	// must differ, and say why.
+	message string
+}
+
+// presentation resolves the classification into what the client is told.
+func (c errorClassification) presentation() errorPresentation {
+	message := c.message
+	if message == "" {
+		message = c.target.Error()
+	}
+
+	return errorPresentation{
+		code:    c.code,
+		message: message,
+	}
 }
 
 // serviceErrorPresentations maps the auth services' sentinel errors to their
 // public code. It covers more than package user since createAPIKey started
 // refusing unregistered object actions.
 var serviceErrorPresentations = []errorClassification{
-	{
-		target: user.ErrCredentialsInvalid,
-		presentation: errorPresentation{
-			code:    ErrorCodeInvalidCredentials,
-			message: "invalid username or password",
-		},
-	},
-	{
-		target: user.ErrDisabled,
-		presentation: errorPresentation{
-			code:    ErrorCodeUserDisabled,
-			message: "account is disabled",
-		},
-	},
-	{
-		target: user.ErrLoginRequestLimiter,
-		presentation: errorPresentation{
-			code:    ErrorCodeLoginThrottled,
-			message: "too many login requests",
-		},
-	},
-	{
-		target: user.ErrAlreadyExists,
-		presentation: errorPresentation{
-			code:    ErrorCodeUserAlreadyExists,
-			message: "user already exists",
-		},
-	},
-	{
-		target: user.ErrUsernameInvalid,
-		presentation: errorPresentation{
-			code:    ErrorCodeUsernameInvalid,
-			message: "invalid username",
-		},
-	},
-	{
-		target: user.ErrInvitationCodeMissing,
-		presentation: errorPresentation{
-			code:    ErrorCodeInvitationRequired,
-			message: "invitation code is required",
-		},
-	},
+	{target: user.ErrCredentialsInvalid, code: ErrorCodeInvalidCredentials},
+	{target: user.ErrDisabled, code: ErrorCodeUserDisabled},
+	{target: user.ErrLoginRequestLimiter, code: ErrorCodeLoginThrottled},
+	{target: user.ErrAlreadyExists, code: ErrorCodeUserAlreadyExists},
+	{target: user.ErrUsernameInvalid, code: ErrorCodeUsernameInvalid},
+	{target: user.ErrInvitationCodeMissing, code: ErrorCodeInvitationRequired},
 	{
 		target: user.ErrInvitationNotFound,
-		presentation: errorPresentation{
-			code:    ErrorCodeInvitationInvalid,
-			message: "invitation is invalid",
-		},
+		code:   ErrorCodeInvitationInvalid,
+		// The one deliberate divergence. The sentinel reads "invitation not
+		// found"; the public wording must not distinguish a code that does not
+		// exist from one that does but cannot be used, or registration becomes an
+		// oracle for guessing invitation codes.
+		message: "invitation is invalid",
 	},
-	{
-		target: user.ErrInvitationExpired,
-		presentation: errorPresentation{
-			code:    ErrorCodeInvitationExpired,
-			message: "invitation expired",
-		},
-	},
-	{
-		target: user.ErrInvitationClaimed,
-		presentation: errorPresentation{
-			code:    ErrorCodeInvitationClaimed,
-			message: "invitation already claimed",
-		},
-	},
-	{
-		target: user.ErrEmailMissing,
-		presentation: errorPresentation{
-			code:    ErrorCodeEmailRequired,
-			message: "email is required",
-		},
-	},
-	{
-		target: user.ErrEmailInvalid,
-		presentation: errorPresentation{
-			code:    ErrorCodeEmailInvalid,
-			message: "invalid email",
-		},
-	},
-	{
-		target: user.ErrPasswordInsufficientEntropy,
-		presentation: errorPresentation{
-			code:    ErrorCodePasswordInsufficientEntropy,
-			message: "password has insufficient entropy",
-		},
-	},
-	{
-		target: user.ErrRoleNotFound,
-		presentation: errorPresentation{
-			code:    ErrorCodeRoleNotFound,
-			message: "role not found",
-		},
-	},
-	{
-		target: api_key.ErrPermissionInvalid,
-		presentation: errorPresentation{
-			code:    ErrorCodePermissionInvalid,
-			message: "invalid api key permission",
-		},
-	},
+	{target: user.ErrInvitationExpired, code: ErrorCodeInvitationExpired},
+	{target: user.ErrInvitationClaimed, code: ErrorCodeInvitationClaimed},
+	{target: user.ErrEmailMissing, code: ErrorCodeEmailRequired},
+	{target: user.ErrEmailInvalid, code: ErrorCodeEmailInvalid},
+	{target: user.ErrPasswordInsufficientEntropy, code: ErrorCodePasswordInsufficientEntropy},
+	{target: user.ErrRoleNotFound, code: ErrorCodeRoleNotFound},
+	{target: api_key.ErrPermissionInvalid, code: ErrorCodePermissionInvalid},
 }
 
 func errorPresenter(ctx context.Context, err error) *gqlerror.Error {
@@ -220,7 +162,7 @@ func classifyError(err error) (errorPresentation, bool) {
 
 	for _, candidate := range serviceErrorPresentations {
 		if errors.Is(err, candidate.target) {
-			return candidate.presentation, true
+			return candidate.presentation(), true
 		}
 	}
 

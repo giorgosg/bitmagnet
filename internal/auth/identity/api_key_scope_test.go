@@ -37,12 +37,7 @@ func newScopeStack(t *testing.T) scopeStack {
 	values.PasswordHashingCost.Set(user.PasswordHashingCost(bcrypt.MinCost))
 
 	jwtService := jwt.NewService(jwt.Secret("test-secret"), jwt.Duration(time.Hour))
-	userService := user.NewService(
-		provider, jwtService,
-		values.InvitationRequired, values.EmailRequired, values.EmailVerification,
-		values.PasswordMinEntropy, values.PasswordHashingCost,
-		values.LoginRequestsPerMinute, values.LoginRequestBurst,
-	)
+	userService := user.NewService(provider, jwtService, values)
 	objectActions := func() []rbac.ObjectAction {
 		return []rbac.ObjectAction{scopeTestObjectAction}
 	}

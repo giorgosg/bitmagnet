@@ -38,7 +38,7 @@ func (a APIKey) EffectivePermissions(ctx context.Context) ([]rbac.ObjectAction, 
 	// Candidates are what the second gate accepts: the key's own selection, or
 	// the anonymous role's permissions.
 	candidates := append(
-		rbac.ObjectActionsFromAPIKeyPermissions(a.Permissions),
+		a.selectedObjectActions(),
 		slice.Map(a.anon.Permissions, func(perm rbac.Permission) rbac.ObjectAction {
 			return perm.ObjectAction()
 		})...,
@@ -52,7 +52,7 @@ func (a APIKey) EffectivePermissions(ctx context.Context) ([]rbac.ObjectAction, 
 	// "**::**::**" - so equality would report that an admin's key holds nothing.
 	return a.enforcer.FilterAllowed(
 		ctx,
-		[]rbac.Subject{rbac.SubjectRole{Role: rbac.Role(a.User.RoleName)}},
+		[]rbac.Subject{a.roleSubject()},
 		candidates,
 	)
 }
@@ -69,9 +69,9 @@ func (a APIKey) Enforce(ctx context.Context, objectAction rbac.ObjectAction) (bo
 	return a.enforcer.EnforceEvery(
 		ctx,
 		[][]rbac.Subject{
-			{rbac.SubjectRole{Role: rbac.Role(a.User.RoleName)}},
+			{a.roleSubject()},
 			append(slice.Map(
-				rbac.ObjectActionsFromAPIKeyPermissions(a.Permissions),
+				a.selectedObjectActions(),
 				func(objectAction rbac.ObjectAction) rbac.Subject {
 					return rbac.SubjectPermission{ObjectAction: objectAction}
 				},
@@ -79,4 +79,19 @@ func (a APIKey) Enforce(ctx context.Context, objectAction rbac.ObjectAction) (bo
 		},
 		objectAction,
 	)
+}
+
+// roleSubject names the first gate's subject: the role of the user who owns the
+// key. Enforce and EffectivePermissions must derive it identically or the report
+// and the decision disagree, which is exactly the defect this method exists to
+// make impossible to reintroduce.
+func (a APIKey) roleSubject() rbac.Subject {
+	return rbac.SubjectRole{Role: rbac.Role(a.User.RoleName)}
+}
+
+// selectedObjectActions is the key's own permission selection, as object
+// actions. Both gates read the same stored rows, so they convert them the same
+// way.
+func (a APIKey) selectedObjectActions() []rbac.ObjectAction {
+	return rbac.ObjectActionsFromAPIKeyPermissions(a.Permissions)
 }
