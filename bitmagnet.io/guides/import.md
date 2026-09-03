@@ -120,6 +120,7 @@ So what's happening here?
   - Delete the `imdb` field which won't be recognised by **bitmagnet**
   - Delete any `null` values to reduce the payload size
 - Next we'll pipe the final result to **bitmagnet**'s `/import` endpoint; you'll see feedback as the import progresses; watch out for any errors in the logs!
+  - The `Content-Type: application/json` header is required: the endpoint answers `415 Unsupported Media Type` without it. This stops a web page you happen to visit from posting to the endpoint without the browser first asking your instance whether that origin is allowed.
 
 Total time for the import will depend on the number of imported records and on your hardware. For me it took about 10 minutes to import 1.5 million records on M2 MacBook Air.
 
