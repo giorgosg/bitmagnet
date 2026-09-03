@@ -103,3 +103,13 @@ read before any of this.
 
 A validation tag is therefore load-bearing, not decorative — see the comments on
 `authconfig.Config`, where a missing `gt=0` was a division by zero at startup.
+
+**`internal/config/param` is not that path.** It builds `Param*` values describing a
+setting — description, type, default, whether it is dynamic — and nothing collects them:
+there is no `init`, no registry, and no resolver that reads one. A `Param*` declaration
+therefore configures nothing, and the `Spec` above is the only way a setting reaches the
+running server. This matters when reading a subsystem's `config.go`, because the two can
+sit side by side: `rbac` carried a `ParamAnonymousAccess` and an `AnonymousAccess` type
+next to the live `authconfig.Config.AnonymousAccess`, two identically named settings of
+which one did nothing. The dead pair is gone; whether the rest of the machinery should be
+wired up or removed is still open.

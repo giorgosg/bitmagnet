@@ -84,6 +84,7 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#68](https://github.com/giorgosg/bitmagnet/pull/68) | Validate the auth mutations' input, and report effective permissions        | local — review finding 17                                            | Nine regressions observed red; one claim in 17 disproved       |
 | [#69](https://github.com/giorgosg/bitmagnet/pull/69) | Require `application/json` on `POST /import`                                | local — review finding 02                                            | text/plain write observed landing with 200                     |
 | [#70](https://github.com/giorgosg/bitmagnet/pull/70) | Collapse the duplication and shadowing in the auth packages                 | local — review finding 15                                            | Refactor; presenter wording pinned first, then held            |
+| [#71](https://github.com/giorgosg/bitmagnet/pull/71) | Delete the dead duplicate `rbac.AnonymousAccess`                            | local — review finding 14, narrow half                               | Dead-code deletion; suite and lint unchanged                   |
 
 ## In flight
 
