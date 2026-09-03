@@ -217,11 +217,16 @@ suite =
                         |> Query.hasNot [ Selector.text "mints another at startup" ]
             ]
         , describe "the expiry"
-            [ test "offers bitmagnet's Go duration strings, not seconds" <|
+            [ test "offers ISO 8601 durations, which is what the Duration scalar parses" <|
                 \_ ->
+                    -- Verified against a running bitmagnet on 2026-09-03: a Go duration
+                    -- string such as `24h0m0s` answers INTERNAL_SERVER_ERROR, because
+                    -- gqlgen's Duration scalar is ISO 8601 and never was time.ParseDuration.
+                    -- This test previously pinned the Go form, so every expiry Magnes sent
+                    -- failed while the suite stayed green.
                     Invitations.expiries
                         |> List.map Tuple.second
-                        |> Expect.equal [ "", "24h0m0s", "168h0m0s", "720h0m0s" ]
+                        |> Expect.equal [ "", "PT24H", "P7D", "P30D" ]
             , test "defaults to one that does not expire, which is what the API defaults to" <|
                 \_ ->
                     Invitations.empty.expiry

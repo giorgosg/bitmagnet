@@ -41,6 +41,17 @@ user object____ =
     Object.selectionForCompositeField "user" [] object____ Basics.identity
 
 
+{-| This key's selected object actions: the ones named when it was created. A
+property of the key, so it does not change when the owning user's role does.
+What the key may exercise right now is `Self.permissions`.
+-}
+permissions :
+    SelectionSet decodesTo Magnes.Api.Object.AuthObjectAction
+    -> SelectionSet (List decodesTo) Magnes.Api.Object.APIKey
+permissions object____ =
+    Object.selectionForCompositeField "permissions" [] object____ (Basics.identity >> Decode.list)
+
+
 expiresAt : SelectionSet (Maybe Magnes.Api.ScalarCodecs.DateTime) Magnes.Api.Object.APIKey
 expiresAt =
     Object.selectionForField "(Maybe ScalarCodecs.DateTime)" "expiresAt" [] (Magnes.Api.ScalarCodecs.codecs |> Magnes.Api.Scalar.unwrapCodecs |> .codecDateTime |> .decoder |> Decode.nullable)

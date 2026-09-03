@@ -33,6 +33,11 @@ apiKey object____ =
     Object.selectionForCompositeField "apiKey" [] object____ (Basics.identity >> Decode.nullable)
 
 
+{-| The object actions this identity may exercise right now. For an API key that is
+its selected object actions, or the anonymous role's, narrowed by the owning
+user's role — because enforcement requires both, so this narrows when the role
+does. The selection itself stays visible on `apiKey.permissions`.
+-}
 permissions :
     SelectionSet decodesTo Magnes.Api.Object.AuthObjectAction
     -> SelectionSet (List decodesTo) Magnes.Api.Object.Self

@@ -144,19 +144,24 @@ withWithdrawal failure state =
     { state | withdrawal = failure }
 
 
-{-| What an Invitation may be given for, as labels and the Go duration strings bitmagnet
-parses with `time.ParseDuration` — not seconds, and not ISO 8601.
+{-| What an Invitation may be given for, as labels and **ISO 8601** durations.
 
-A fixed set rather than a free-text field. Every value here is one `time.ParseDuration`
-accepts, which a typed one need not be, and these are the spans anyone actually wants.
+Not Go duration strings. bitmagnet's `Duration` is gqlgen's built-in scalar, whose
+`UnmarshalDuration` parses ISO 8601 — `PT24H`, `P7D` — and rejects everything else. A Go
+duration such as `24h0m0s` does not fail politely: it answers `INTERNAL_SERVER_ERROR` with
+the path `["auth","invite","input","expiry"]`. Verified against a running bitmagnet on
+2026-09-03, after every value here had been a Go duration since this screen was built.
+
+A fixed set rather than a free-text field. Every value here is one the scalar accepts,
+which a typed one need not be, and these are the spans anyone actually wants.
 
 -}
 expiries : List ( String, String )
 expiries =
     [ ( "Never", "" )
-    , ( "24 hours", "24h0m0s" )
-    , ( "7 days", "168h0m0s" )
-    , ( "30 days", "720h0m0s" )
+    , ( "24 hours", "PT24H" )
+    , ( "7 days", "P7D" )
+    , ( "30 days", "P30D" )
     ]
 
 

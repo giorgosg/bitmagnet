@@ -160,8 +160,11 @@ silently. The cascade draws no claimed/unclaimed distinction — `invitations.cl
 just another column — so the record of invitations already used goes as well. `deleteRole` additionally refuses the four core role names before touching the
 database at all (`rbac.service.DeleteRole`).
 
-`Duration` is gqlgen's `graphql.Duration` — a Go duration string, `"24h0m0s"`, parsed with
-`time.ParseDuration`. Not seconds, not ISO 8601.
+`Duration` is gqlgen's `graphql.Duration` — an **ISO 8601** duration, `"PT24H"` or `"P7D"`,
+parsed by `graphql.UnmarshalDuration` through `sosodev/duration`. Not seconds, and **not** a
+Go duration string: `"24h0m0s"` is refused, and not politely — the response is
+`INTERNAL_SERVER_ERROR` with the offending input in the error path. **[verified]** against a
+running instance on 2026-09-03, for both `self.createAPIKey` and `auth.invite`.
 
 ## Two shapes for the same idea
 

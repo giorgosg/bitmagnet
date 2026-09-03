@@ -7,8 +7,10 @@ Mapped away from the default `String`-backed wrappers:
   - `DateTime` and `Date` become `Time.Posix`. bitmagnet sends RFC-3339 with microsecond
     precision (`2026-08-06T04:42:29.862002Z`); `Iso8601` accepts up to nine fractional
     digits, and a bare `2019-09-05` parses as midnight UTC.
-  - `Duration` becomes `String`. bitmagnet accepts Go duration strings such as
-    `24h0m0s`, not a number of seconds or an ISO 8601 duration.
+  - `Duration` becomes `String`. bitmagnet's is gqlgen's built-in scalar, so the wire form
+    is an **ISO 8601** duration such as `PT24H` or `P7D` — not a number of seconds, and not
+    the Go `24h0m0s` this comment claimed until 2026-09-03. Sending the Go form answers
+    `INTERNAL_SERVER_ERROR` naming the input path.
   - `Year` becomes `Int` — it arrives as a JSON number, not a string.
 
 `Hash20` stays opaque: it is an info hash, only ever passed through to a URL or back to
