@@ -60,11 +60,12 @@ flag. It has three parts, in two other places:
 - `../bitmagnet` — a fixture-server command standing up the real Gin, auth middleware, and
   gqlgen stack against a cloned database, printing a bootstrap invitation this harness can
   register a throwaway admin through. It has to live there: those packages are under
-  `internal/`, which Go will not let another module import. Tracked as
-  `.scratch/test-fixtures/issues/02-add-a-fixture-server-command.md`; **not built yet**,
-  and the remaining blocker.
+  `internal/`, which Go will not let another module import. **Built, as of 2026-09-03**:
+  `dev fixture serve`, from `.scratch/test-fixtures/issues/02-add-a-fixture-server-command.md`,
+  announcing its address and invitation as one line of JSON on stdout, with flags for
+  anonymous access, `invitation_required`, the JWT duration and the login throttle.
 - Here — a second Playwright project that consumes both, leaving this credential-free
-  suite runnable with no services present.
+  suite runnable with no services present. **The remaining blocker, and the only one.**
 
 Tracked as `.scratch/identity-and-permissions/issues/16-build-credentialed-e2e-harness.md`.
 

@@ -241,12 +241,18 @@ authenticates with one.
 
 The current API-key enforcement first requires the owning User's Role to permit an Object
 action, then requires either the key's stored action list or the Anonymous identity to
-permit it. Disabling the owning User makes the key unusable. Two current contract gaps are
-being corrected as part of the Magnes work: creation accepts unregistered and wildcard
-action strings without validation, and `Self.permissions` concatenates the stored and
-Anonymous actions without intersecting them with the owning User's Role, so it can report
-an action that enforcement denies. The `APIKey` GraphQL type also does not yet expose its
-stored or effective actions.
+permit it. Disabling the owning User makes the key unusable.
+
+The two contract gaps recorded here were corrected in trunk on 2026-09-02, in PR #68, and
+are live on the homeserver (`v0.10.1-beta.1-261-ga3c59b428`). `createAPIKey` now validates
+its permissions against the registered Object actions by exact membership, so an
+unregistered or wildcard string is refused rather than stored. `Self.permissions` is now
+the key's selection intersected with the owning User's Role, computed through casbin
+rather than by comparing lists in Go, so what it reports is what enforcement allows. The
+`APIKey` type gained `permissions`: the actions the key was scoped to, a property of the
+key that does not change when its owner's Role does. **A client reads both** — scoped-to
+from `apiKey.permissions`, currently-reachable from `self.identity.permissions` — and they
+legitimately differ once a Role narrows.
 
 **Invitation**: a single-use 128-bit code. `auth.invitation_required` defaults to `true`,
 so registration normally needs one. The first administrator's invitation is minted by a
