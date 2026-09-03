@@ -109,13 +109,7 @@ func newAuthTestServerWithConfigAndAuthenticator(
 	userService := user.NewService(
 		provider,
 		jwtService,
-		values.InvitationRequired,
-		values.EmailRequired,
-		values.EmailVerification,
-		values.PasswordMinEntropy,
-		values.PasswordHashingCost,
-		values.LoginRequestsPerMinute,
-		values.LoginRequestBurst,
+		values,
 	)
 	// Built exactly as production does, directive and all: without it the
 	// schema resolves an identity and then ignores it.

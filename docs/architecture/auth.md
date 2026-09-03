@@ -147,6 +147,13 @@ every call through a one-slot semaphore and caches the compiled policy for
 authorization check in the process is serialised. Both properties are written up in the
 issue notes below.
 
+The acquisition protocol lives in one place, `withSem` and its two wrappers `withSemErr`
+and `withCasbin`, rather than being written out at each method. How often that semaphore
+is taken is a property of the whole server, so it has to be countable at a glance; the
+wrappers also mean a caller cannot forget to release it. `withCasbin` is the one to use
+for anything that talks to casbin, because `acquireCasbin` initialises the enforcer on
+first use and so must run inside the semaphore, not before it.
+
 **Roles are cached on the same TTL**, behind their own `RWMutex` rather than the semaphore.
 Every authentication resolves a role, and the repository preloads its permissions, so the
 lookup was two statements straight to the database on every request — the steady-state

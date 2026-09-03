@@ -12,12 +12,15 @@ type (
 func ExtractAuthDirectives(directives SchemaDirectives) AuthDirectives {
 	result := make(AuthDirectives)
 
-	for _, mp := range directives {
-		for _, mp := range mp {
-			for _, mp := range mp {
+	// SchemaDirectives nests type -> field -> directives, so name each level for
+	// what it holds. Shadowing one identifier three deep made the innermost value
+	// -- the only one actually read -- indistinguishable from the map it came from.
+	for _, fields := range directives {
+		for _, fieldDirectives := range fields {
+			for _, args := range fieldDirectives {
 				result[AuthDirective{
-					Action: mp["action"],
-					Object: mp["object"],
+					Action: args["action"],
+					Object: args["object"],
 				}] = struct{}{}
 			}
 		}

@@ -87,39 +87,17 @@ type casbinDeps struct {
 }
 
 func (s *service) Enforce(ctx context.Context, subject Subject, objectAction ObjectAction) (bool, error) {
-	select {
-	case <-ctx.Done():
-		return false, ctx.Err()
-	case s.sem <- struct{}{}:
-	}
-
-	defer func() { <-s.sem }()
-
-	casbin, err := s.acquireCasbin(ctx)
-	if err != nil {
-		return false, err
-	}
-
-	return casbin.Enforce(subjectString(subject), objectString(objectAction), objectAction.Action)
+	return withCasbin(ctx, s, func(deps *casbinDeps) (bool, error) {
+		return deps.Enforce(subjectString(subject), objectString(objectAction), objectAction.Action)
+	})
 }
 
 func (s *service) EnforceAny(ctx context.Context, subjects []Subject, objectAction ObjectAction) (bool, error) {
-	select {
-	case <-ctx.Done():
-		return false, ctx.Err()
-	case s.sem <- struct{}{}:
-	}
+	return withCasbin(ctx, s, func(deps *casbinDeps) (bool, error) {
+		result, err := deps.BatchEnforce(batchRequests(subjects, objectAction))
 
-	defer func() { <-s.sem }()
-
-	casbin, err := s.acquireCasbin(ctx)
-	if err != nil {
-		return false, err
-	}
-
-	result, err := casbin.BatchEnforce(batchRequests(subjects, objectAction))
-
-	return slices.Contains(result, true), err
+		return slices.Contains(result, true), err
+	})
 }
 
 func (s *service) EnforceEvery(
@@ -131,52 +109,41 @@ func (s *service) EnforceEvery(
 		return false, nil
 	}
 
-	select {
-	case <-ctx.Done():
-		return false, ctx.Err()
-	case s.sem <- struct{}{}:
-	}
+	return withCasbin(ctx, s, func(deps *casbinDeps) (bool, error) {
+		// One batch for every group, then split the answers back out by group. casbin
+		// evaluation is pure, so asking all of them is the same decision as asking
+		// each in turn - it just costs one acquisition instead of one per group.
+		var requests [][]any
 
-	defer func() { <-s.sem }()
+		for _, subjects := range groups {
+			if len(subjects) == 0 {
+				// A group nothing can satisfy denies the whole decision.
+				return false, nil
+			}
 
-	casbin, err := s.acquireCasbin(ctx)
-	if err != nil {
-		return false, err
-	}
-
-	// One batch for every group, then split the answers back out by group. casbin
-	// evaluation is pure, so asking all of them is the same decision as asking
-	// each in turn - it just costs one acquisition instead of one per group.
-	var requests [][]any
-
-	for _, subjects := range groups {
-		if len(subjects) == 0 {
-			// A group nothing can satisfy denies the whole decision.
-			return false, nil
+			requests = append(requests, batchRequests(subjects, objectAction)...)
 		}
 
-		requests = append(requests, batchRequests(subjects, objectAction)...)
-	}
-
-	results, err := casbin.BatchEnforce(requests)
-	if err != nil {
-		return false, err
-	}
-
-	blocks, err := splitBatchResults(results, slice.Map(groups, func(subjects []Subject) int {
-		return len(subjects)
-	}))
-	if err != nil {
-		return false, err
-	}
-
-	for _, block := range blocks {
-		if !slices.Contains(block, true) {
-			return false, nil
+		results, err := deps.BatchEnforce(requests)
+		if err != nil {
+			return false, err
 		}
-	}
 
-	return true, nil
+		blocks, err := splitBatchResults(results, slice.Map(groups, func(subjects []Subject) int {
+			return len(subjects)
+		}))
+		if err != nil {
+			return false, err
+		}
+
+		for _, block := range blocks {
+			if !slices.Contains(block, true) {
+				return false, nil
+			}
+		}
+
+		return true, nil
+	})
 }
 
 func (s *service) FilterAllowed(
@@ -188,47 +155,36 @@ func (s *service) FilterAllowed(
 		return nil, nil
 	}
 
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case s.sem <- struct{}{}:
-	}
+	return withCasbin(ctx, s, func(deps *casbinDeps) ([]ObjectAction, error) {
+		// One block of answers per object action, each block asking every subject.
+		requests := make([][]any, 0, len(objectActions)*len(subjects))
+		widths := make([]int, 0, len(objectActions))
 
-	defer func() { <-s.sem }()
-
-	casbin, err := s.acquireCasbin(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// One block of answers per object action, each block asking every subject.
-	requests := make([][]any, 0, len(objectActions)*len(subjects))
-	widths := make([]int, 0, len(objectActions))
-
-	for _, objectAction := range objectActions {
-		requests = append(requests, batchRequests(subjects, objectAction)...)
-		widths = append(widths, len(subjects))
-	}
-
-	results, err := casbin.BatchEnforce(requests)
-	if err != nil {
-		return nil, err
-	}
-
-	blocks, err := splitBatchResults(results, widths)
-	if err != nil {
-		return nil, err
-	}
-
-	allowed := make([]ObjectAction, 0, len(objectActions))
-
-	for i, block := range blocks {
-		if slices.Contains(block, true) {
-			allowed = append(allowed, objectActions[i])
+		for _, objectAction := range objectActions {
+			requests = append(requests, batchRequests(subjects, objectAction)...)
+			widths = append(widths, len(subjects))
 		}
-	}
 
-	return allowed, nil
+		results, err := deps.BatchEnforce(requests)
+		if err != nil {
+			return nil, err
+		}
+
+		blocks, err := splitBatchResults(results, widths)
+		if err != nil {
+			return nil, err
+		}
+
+		allowed := make([]ObjectAction, 0, len(objectActions))
+
+		for i, block := range blocks {
+			if slices.Contains(block, true) {
+				allowed = append(allowed, objectActions[i])
+			}
+		}
+
+		return allowed, nil
+	})
 }
 
 func (s *service) GetAllRoles(ctx context.Context) ([]RoleInfo, error) {
@@ -368,20 +324,9 @@ func (s *service) invalidateRoleCache() {
 }
 
 func (s *service) GetPermissions(ctx context.Context) ([]Permission, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case s.sem <- struct{}{}:
-	}
-
-	defer func() { <-s.sem }()
-
-	casin, err := s.acquireCasbin(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	return casin.permissions, nil
+	return withCasbin(ctx, s, func(deps *casbinDeps) ([]Permission, error) {
+		return deps.permissions, nil
+	})
 }
 
 func (s *service) PutRole(ctx context.Context, role Role, objectActions []ObjectAction) (RoleInfo, error) {
@@ -391,29 +336,22 @@ func (s *service) PutRole(ctx context.Context, role Role, objectActions []Object
 		return RoleInfo{}, err
 	}
 
-	select {
-	case <-ctx.Done():
-		return RoleInfo{}, ctx.Err()
-	case s.sem <- struct{}{}:
-	}
-
-	defer func() { <-s.sem }()
-
-	roleInfo, err := s.repository.PutRole(ctx, role, objectActions)
-	if err != nil {
-		return RoleInfo{}, err
-	}
-
-	s.invalidateRoleCache()
-
-	if !s.lastUpdate.IsZero() {
-		err = s.updatePermissions(ctx)
+	return withSem(ctx, s, func() (RoleInfo, error) {
+		roleInfo, err := s.repository.PutRole(ctx, role, objectActions)
 		if err != nil {
 			return RoleInfo{}, err
 		}
-	}
 
-	return s.mergeCoreRolePermissions(roleInfo), nil
+		s.invalidateRoleCache()
+
+		if !s.lastUpdate.IsZero() {
+			if err = s.updatePermissions(ctx); err != nil {
+				return RoleInfo{}, err
+			}
+		}
+
+		return s.mergeCoreRolePermissions(roleInfo), nil
+	})
 }
 
 func (s *service) DeleteRole(ctx context.Context, role Role) error {
@@ -421,29 +359,74 @@ func (s *service) DeleteRole(ctx context.Context, role Role) error {
 		return errors.New("core roles cannot be deleted")
 	}
 
+	return withSemErr(ctx, s, func() error {
+		if err := s.repository.DeleteRole(ctx, role); err != nil {
+			return err
+		}
+
+		s.invalidateRoleCache()
+
+		if !s.lastUpdate.IsZero() {
+			return s.updatePermissions(ctx)
+		}
+
+		return nil
+	})
+}
+
+func (s *service) GetObjectActions() []ObjectAction {
+	return s.objectActionProvider()
+}
+
+// withSem runs fn while holding the service's one-slot semaphore.
+//
+// casbin has no context support, so every interaction with it is serialised
+// behind this one channel. That makes *how often* the semaphore is taken a
+// property of the whole server rather than of any one method, and seven
+// hand-written copies of the select-and-defer pair made it impossible to count
+// at a glance -- which is the question the outstanding scalability work has to
+// answer. Keeping the protocol in one place also removes the way to get it
+// wrong: a caller cannot forget the release, because it is not theirs to write.
+//
+// A free function rather than a method because Go does not allow methods to
+// take type parameters.
+func withSem[T any](ctx context.Context, s *service, fn func() (T, error)) (T, error) {
+	var zero T
+
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return zero, ctx.Err()
 	case s.sem <- struct{}{}:
 	}
 
 	defer func() { <-s.sem }()
 
-	if err := s.repository.DeleteRole(ctx, role); err != nil {
-		return err
-	}
-
-	s.invalidateRoleCache()
-
-	if !s.lastUpdate.IsZero() {
-		return s.updatePermissions(ctx)
-	}
-
-	return nil
+	return fn()
 }
 
-func (s *service) GetObjectActions() []ObjectAction {
-	return s.objectActionProvider()
+// withSemErr is withSem for a call that reports only an error.
+func withSemErr(ctx context.Context, s *service, fn func() error) error {
+	_, err := withSem(ctx, s, func() (struct{}, error) {
+		return struct{}{}, fn()
+	})
+
+	return err
+}
+
+// withCasbin is withSem for the calls that go on to talk to casbin. acquireCasbin
+// initialises s.casbinDeps on first use, so it has to run inside the semaphore
+// too, not before it.
+func withCasbin[T any](ctx context.Context, s *service, fn func(*casbinDeps) (T, error)) (T, error) {
+	return withSem(ctx, s, func() (T, error) {
+		deps, err := s.acquireCasbin(ctx)
+		if err != nil {
+			var zero T
+
+			return zero, err
+		}
+
+		return fn(deps)
+	})
 }
 
 // acquireCasbin returns the casbin enforcer instance, initializing it if necessary.

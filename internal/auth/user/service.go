@@ -43,29 +43,39 @@ type service struct {
 	loginLimiter        *loginLimiter
 }
 
-// revive:disable:argument-limit
+// ConfigValues is the service's live configuration. The seven settings always
+// travel together -- every caller built them from one authconfig.Config and then
+// exploded them across an argument list long enough to need
+// revive:disable:argument-limit -- so they are passed as the group they are.
+//
+// It lives here rather than in authconfig because authconfig imports this
+// package; authconfig.UserConfigValues is an alias for it.
+type ConfigValues struct {
+	InvitationRequired     *atomic.Value[InvitationRequired]
+	EmailRequired          *atomic.Value[EmailRequired]
+	EmailVerification      *atomic.Value[EmailVerification]
+	PasswordMinEntropy     *atomic.Value[PasswordMinEntropy]
+	PasswordHashingCost    *atomic.Value[PasswordHashingCost]
+	LoginRequestsPerMinute *atomic.Value[LoginRequestsPerMinute]
+	LoginRequestBurst      *atomic.Value[LoginRequestBurst]
+}
+
 func NewService(
 	daoProvider database.DaoTransactionProvider,
 	jwtService jwt.Service,
-	invitationRequired *atomic.Value[InvitationRequired],
-	emailRequired *atomic.Value[EmailRequired],
-	emailVerification *atomic.Value[EmailVerification],
-	passwordMinEntropy *atomic.Value[PasswordMinEntropy],
-	passwordHashingCost *atomic.Value[PasswordHashingCost],
-	loginRequestsPerMinute *atomic.Value[LoginRequestsPerMinute],
-	loginRequestBurst *atomic.Value[LoginRequestBurst],
+	values ConfigValues,
 ) Service {
 	return &service{
 		DaoTransactionProvider: daoProvider,
 		jwtService:             jwtService,
-		invitationRequired:     invitationRequired,
-		emailRequired:          emailRequired,
-		emailVerification:      emailVerification,
-		passwordMinEntropy:     passwordMinEntropy,
-		passwordHashingCost:    passwordHashingCost,
+		invitationRequired:     values.InvitationRequired,
+		emailRequired:          values.EmailRequired,
+		emailVerification:      values.EmailVerification,
+		passwordMinEntropy:     values.PasswordMinEntropy,
+		passwordHashingCost:    values.PasswordHashingCost,
 		loginLimiter: newLoginLimiter(
-			loginRequestsPerMinute,
-			loginRequestBurst,
+			values.LoginRequestsPerMinute,
+			values.LoginRequestBurst,
 		),
 	}
 }

@@ -119,17 +119,5 @@ func newUserService(
 	jwtService jwt.Service,
 	c authconfig.Config,
 ) user.Service {
-	v := c.UserValues()
-
-	return user.NewService(
-		dao,
-		jwtService,
-		v.InvitationRequired,
-		v.EmailRequired,
-		v.EmailVerification,
-		v.PasswordMinEntropy,
-		v.PasswordHashingCost,
-		v.LoginRequestsPerMinute,
-		v.LoginRequestBurst,
-	)
+	return user.NewService(dao, jwtService, c.UserValues())
 }
