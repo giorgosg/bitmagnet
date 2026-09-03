@@ -501,7 +501,7 @@ type Msg
     | ApiKeyExpiryChosen String
     | ApiKeyActionToggled Identity.ObjectAction
     | ApiKeyCreateSubmitted
-    | ApiKeySecretDismissed
+    | ApiKeyRevealDismissed
     | ApiKeyRevokeRequested Int
     | ApiKeyRevokeConfirmed Int
     | ApiKeyRevokeCancelled
@@ -1174,12 +1174,12 @@ update msg model =
 
             else
                 ( { model | apiKeys = ApiKeys.withCreation ApiKeys.Creating model.apiKeys }
-                , ApiKeys.create model.apiUrl model.apiKeys.draft GotApiKeyCreated
+                , ApiKeys.create model.apiUrl (ApiKeys.offerable model.identity model.apiKeys.registry) model.apiKeys.draft GotApiKeyCreated
                 )
 
-        ApiKeySecretDismissed ->
-            -- The secret leaves the model with the panel. It was only ever here to be
-            -- read once, and a dismissed panel that still held it would be a copy nobody
+        ApiKeyRevealDismissed ->
+            -- The key's value leaves the model with the panel. It was only ever here to
+            -- be read once, and a dismissed panel that still held it would be a copy nobody
             -- asked to keep.
             ( { model
                 | apiKeys =
@@ -1244,8 +1244,8 @@ update msg model =
             ( model, Cmd.none )
 
         GotApiKeyCreated (Ok revealed) ->
-            -- The secret is put on screen before the listing is refetched: the refetch
-            -- cannot return it, and a reader who navigates away has lost it.
+            -- The key's value is put on screen before the listing is refetched: the
+            -- refetch cannot return it, and a reader who navigates away has lost it.
             let
                 ( refetched, cmd ) =
                     fetchApiKeys model
@@ -1661,7 +1661,7 @@ apiKeysMessages =
     , expiryChosen = ApiKeyExpiryChosen
     , actionToggled = ApiKeyActionToggled
     , submitted = ApiKeyCreateSubmitted
-    , secretDismissed = ApiKeySecretDismissed
+    , revealDismissed = ApiKeyRevealDismissed
     , revokeRequested = ApiKeyRevokeRequested
     , revokeConfirmed = ApiKeyRevokeConfirmed
     , revokeCancelled = ApiKeyRevokeCancelled

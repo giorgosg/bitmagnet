@@ -1,4 +1,4 @@
-module Invitations exposing (Invitation, Listing(..), Messages, Page, State, Submission(..), create, empty, expiries, fetch, nextOffset, pageSize, previousOffset, registrationLink, view, withConfirming, withExpiry, withListing, withOffset, withRole, withSubmission, withWithdrawal, withdraw)
+module Invitations exposing (Invitation, Listing(..), Messages, Page, State, Submission(..), create, empty, fetch, nextOffset, pageSize, previousOffset, registrationLink, view, withConfirming, withExpiry, withListing, withOffset, withRole, withSubmission, withWithdrawal, withdraw)
 
 {-| Administering Invitations: what exists, making one, and withdrawing one.
 
@@ -18,6 +18,7 @@ verification is inert, so an address here would imply a verification nothing per
 
 import ApiError
 import Bitmagnet
+import Expiry
 import Format
 import Graphql.Http
 import Graphql.Operation exposing (RootMutation, RootQuery)
@@ -142,27 +143,6 @@ withConfirming code state =
 withWithdrawal : Maybe ApiError.Failure -> State -> State
 withWithdrawal failure state =
     { state | withdrawal = failure }
-
-
-{-| What an Invitation may be given for, as labels and **ISO 8601** durations.
-
-Not Go duration strings. bitmagnet's `Duration` is gqlgen's built-in scalar, whose
-`UnmarshalDuration` parses ISO 8601 — `PT24H`, `P7D` — and rejects everything else. A Go
-duration such as `24h0m0s` does not fail politely: it answers `INTERNAL_SERVER_ERROR` with
-the path `["auth","invite","input","expiry"]`. Verified against a running bitmagnet on
-2026-09-03, after every value here had been a Go duration since this screen was built.
-
-A fixed set rather than a free-text field. Every value here is one the scalar accepts,
-which a typed one need not be, and these are the spans anyone actually wants.
-
--}
-expiries : List ( String, String )
-expiries =
-    [ ( "Never", "" )
-    , ( "24 hours", "PT24H" )
-    , ( "7 days", "P7D" )
-    , ( "30 days", "P30D" )
-    ]
 
 
 pageSize : Int
@@ -363,7 +343,7 @@ createForm mount messages state roles =
                 (\( label_, duration ) ->
                     option [ value duration, selected (duration == state.expiry) ] [ text label_ ]
                 )
-                expiries
+                Expiry.options
             )
         , creationOutcome mount state.creation
         , button

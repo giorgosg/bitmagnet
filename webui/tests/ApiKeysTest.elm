@@ -65,7 +65,7 @@ messages =
     , expiryChosen = always ()
     , actionToggled = always ()
     , submitted = ()
-    , secretDismissed = ()
+    , revealDismissed = ()
     , revokeRequested = always ()
     , revokeConfirmed = always ()
     , revokeCancelled = ()
@@ -153,25 +153,16 @@ suite =
                         |> ApiKeys.needsRegistry
                         |> Expect.equal False
             ]
-        , describe "a key's suspended actions"
-            [ test "names the scoped actions the owner can no longer exercise" <|
+        , describe "a key's suspended Object actions"
+            [ test "names the selected Object actions the owner can no longer exercise" <|
                 \_ ->
-                    -- The key names two actions; the owner now holds only one of them.
+                    -- The key was selected for two actions; the owner now holds only one of them.
                     ApiKeys.suspended ordinary aKey
                         |> Expect.equal [ Identity.graphql "auth" "query" ]
-            , test "is empty when every scoped action is still held" <|
+            , test "is empty when every selected Object action is still held" <|
                 \_ ->
                     ApiKeys.suspended administrator aKey
                         |> Expect.equal []
-            ]
-        , describe "the expiry options"
-            [ test "offers ISO 8601 durations, the form the Duration scalar parses" <|
-                \_ ->
-                    -- The same scalar as an Invitation's expiry: a Go duration answers
-                    -- INTERNAL_SERVER_ERROR. Verified against a running bitmagnet 2026-09-03.
-                    ApiKeys.expiries
-                        |> List.map Tuple.second
-                        |> Expect.equal [ "", "PT24H", "P7D", "P30D" ]
             ]
         , describe "ticking an Object action"
             [ test "adds one that was not chosen" <|
@@ -218,21 +209,21 @@ suite =
                         |> rendered emptyHanded
                         |> Query.has [ Selector.text "nothing a key of yours could be given" ]
             ]
-        , describe "the secret"
+        , describe "the created key's value"
             [ test "is shown once, with a warning that it will not be shown again" <|
                 \_ ->
                     loadedFor (Just registry)
-                        |> ApiKeys.withCreation (ApiKeys.Created { name = "ci-runner", secret = "sk-abcdef" })
+                        |> ApiKeys.withCreation (ApiKeys.Created { name = "ci-runner", value = "sk-abcdef" })
                         |> rendered administrator
                         |> Query.has [ Selector.text "sk-abcdef", Selector.text "only time it is shown" ]
             , test "is absent when no key has just been created" <|
                 \_ ->
                     loadedFor (Just registry)
                         |> rendered administrator
-                        |> Query.hasNot [ Selector.class "api-key-secret" ]
+                        |> Query.hasNot [ Selector.class "api-key-reveal" ]
             ]
         , describe "the listing"
-            [ test "names each key and what it was scoped to" <|
+            [ test "names each key and what it was selected for" <|
                 \_ ->
                     loadedWith [ aKey ]
                         |> rendered administrator
@@ -240,7 +231,7 @@ suite =
                             [ Selector.text "ci-runner"
                             , Selector.text "graphql::torrentContent::query"
                             ]
-            , test "marks a scoped action the owner's Role no longer grants" <|
+            , test "marks a selected Object action the owner's Role no longer grants" <|
                 \_ ->
                     loadedWith [ aKey ]
                         |> rendered ordinary

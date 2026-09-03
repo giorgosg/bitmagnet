@@ -1194,17 +1194,17 @@ main {
   max-width: 22rem;
 }
 
-/* The secret, in the one render it exists in. It is deliberately the loudest thing on the
-   page: this is the only moment it can be copied, and a reader who scrolls past it has
+/* The key's value, in the one render it exists in. It is deliberately the loudest thing on
+   the page: this is the only moment it can be copied, and a reader who scrolls past it has
    lost it for good. */
-.panel.api-key-secret {
+.panel.api-key-reveal {
   padding: 0.875rem 1rem 1.25rem;
   border: 1px solid var(--accent);
   border-radius: 6px;
   background: var(--accent-soft);
 }
 
-.panel.api-key-secret > * {
+.panel.api-key-reveal > * {
   max-width: none;
 }
 
@@ -1213,9 +1213,9 @@ main {
   max-width: 48rem;
 }
 
-/* Wrapping rather than scrolling: a secret half out of view reads as fully copied when it
+/* Wrapping rather than scrolling: a value half out of view reads as fully copied when it
    is not. `user-select: all` makes one click take the whole thing. */
-.api-key-secret-value code {
+.api-key-reveal-value code {
   display: block;
   padding: 0.625rem 0.75rem;
   border: 1px solid var(--faint);
@@ -1273,7 +1273,7 @@ main {
   font-size: 0.75rem;
 }
 
-/* A scoped action the owner's Role no longer grants. Struck through rather than hidden:
+/* An Object action the owner's Role no longer grants. Struck through rather than hidden:
    it is still part of the key and comes back when the Role does, but it is not authority
    the key has now. */
 .api-key-action-suspended {

@@ -9,7 +9,6 @@ module ApiKeys exposing
     , create
     , delete
     , empty
-    , expiries
     , fetch
     , fetchRegistry
     , needsRegistry
@@ -33,14 +32,18 @@ module ApiKeys exposing
 Three things about bitmagnet shape this screen, and none of them are obvious from the
 schema alone.
 
-**The secret exists once.** `createAPIKey` returns it in its response and nothing ever
-returns it again — `self.apiKeys` has no field for it, by design. So the reveal is not a
-detail of the create form, it is the only moment the thing the User came for exists, and
+**The key's value exists once.** `createAPIKey` returns it in its response and nothing
+ever returns it again — `self.apiKeys` has no field for it, by design. So the reveal is not
+a detail of the create form, it is the only moment the thing the User came for exists, and
 losing it means making another key. It is modelled as its own state rather than as a
 message beside the form.
 
+(The one-time value has no canonical term in `CONTEXT.md`: both it and the record are
+"API key". It is called `value` here rather than a term the glossary tells us to avoid; the
+gap is worth a glossary entry, noted for a domain-modeling pass.)
+
 **A key's Permissions are fixed, but its authority is not.** `apiKey.permissions` is what
-the key was scoped to when it was made, and it never moves. What the key can actually do is
+the key was selected for when it was made, and it never moves. What the key can actually do is
 that selection narrowed by its owner's Role, right now — so a Role that loses an action
 suspends the matching half of every key that named it, and regaining the action restores
 it. Both halves are shown, because a key that lists an action it cannot exercise is
@@ -56,6 +59,7 @@ registry is itself permissioned. See `offerable`.
 
 import ApiError
 import Bitmagnet
+import Expiry
 import Format
 import Graphql.Http
 import Graphql.Operation exposing (RootMutation)
@@ -78,8 +82,8 @@ import Set exposing (Set)
 import Time
 
 
-{-| A key as it can be read back. There is deliberately no secret here: the API does not
-return one, and a field that could only ever be empty would invite a screen that implies
+{-| A key as it can be read back. There is deliberately no value field here: the API does
+not return one, and a field that could only ever be empty would invite a screen that implies
 otherwise.
 -}
 type alias Key =
@@ -97,15 +101,15 @@ type Listing
     | Loaded (List Key)
 
 
-{-| The secret, and the name it belongs to, for the one render in which it exists.
+{-| The key's one-time value, and the name it belongs to, for the render in which it exists.
 -}
 type alias Revealed =
     { name : String
-    , secret : String
+    , value : String
     }
 
 
-{-| How making a key is going. `Created` is not a success message — it is the secret
+{-| How making a key is going. `Created` is not a success message — it is the key's value
 itself, held until the User dismisses it.
 -}
 type Creation
@@ -234,22 +238,6 @@ withRevocation revocation state =
     { state | revocation = revocation }
 
 
-{-| How long a key may last, as labels and **ISO 8601** durations.
-
-The same scalar as an Invitation's expiry, and the same trap: bitmagnet's `Duration` is
-gqlgen's built-in, which parses ISO 8601 and answers `INTERNAL_SERVER_ERROR` for the Go
-form. See `Invitations.expiries`.
-
--}
-expiries : List ( String, String )
-expiries =
-    [ ( "Never", "" )
-    , ( "24 hours", "PT24H" )
-    , ( "7 days", "P7D" )
-    , ( "30 days", "P30D" )
-    ]
-
-
 
 -- WHAT MAY BE OFFERED
 
@@ -287,6 +275,13 @@ registry means `graphql::auth::query`, and a wildcard broad enough to need expan
 normally broad enough to grant it — `admin`'s `**::**::**` is both. Where it is not, the
 concrete half is still offered rather than the screen failing.
 
+One case this does not cover: an Identity whose only broad grant is a wildcard that does
+_not_ reach `auth::query` — say `graphql::torrentContent::**`. It cannot fetch the registry
+and cannot be expanded from it, so it falls to the concrete branch, where the wildcard is
+filtered out and the grid may come up empty. It is unreachable today: `admin`'s is the only
+wildcard Role, and it grants `auth::query`, while the Role editor stores only concrete
+Object actions. If a partial wildcard ever becomes assignable, this is where it is handled.
+
 -}
 needsRegistry : Identity.Identity -> Bool
 needsRegistry identity =
@@ -298,8 +293,14 @@ needsRegistry identity =
 
 Enforcement needs both the key's selection and the owner's Role, so losing a Role action
 suspends the key's matching half without changing the key. Naming those is what keeps a
-listed Permission honest; it is the compact form of the distinction, with the full
+listed Object action honest; it is the compact form of the distinction, with the full
 comparison left to a troubleshooting view that does not exist yet.
+
+This asks `Identity.can` of the owning User's own effective Object actions, which is what
+`self.identity.permissions` reports. Effective authority also folds in the Anonymous
+identity's actions, so an action granted _only_ to Anonymous and not the User's Role could
+in principle be marked suspended here; a User's Role effectively covers the Anonymous
+actions, so it does not misfire in practice.
 
 -}
 suspended : Identity.Identity -> Key -> List Identity.ObjectAction
@@ -347,9 +348,14 @@ keySelection =
         ApiKey.createdAt
 
 
-create : String -> Draft -> (Result (Graphql.Http.Error Revealed) Revealed -> msg) -> Cmd msg
-create apiUrl draft toMsg =
-    createSelection draft
+create :
+    String
+    -> List Identity.ObjectAction
+    -> Draft
+    -> (Result (Graphql.Http.Error Revealed) Revealed -> msg)
+    -> Cmd msg
+create apiUrl offered draft toMsg =
+    createSelection offered draft
         |> Bitmagnet.mutationRequest apiUrl
         |> Graphql.Http.send toMsg
 
@@ -357,13 +363,13 @@ create apiUrl draft toMsg =
 {-| An empty expiry is `Absent`, not an empty Duration: bitmagnet reads a missing expiry as
 "never", and an empty string is not a duration it can parse.
 -}
-createSelection : Draft -> SelectionSet Revealed RootMutation
-createSelection draft =
+createSelection : List Identity.ObjectAction -> Draft -> SelectionSet Revealed RootMutation
+createSelection offered draft =
     SelfMutation.createAPIKey
         { input =
             InputObject.buildCreateAPIKeyInput
                 { name = String.trim draft.name
-                , permissions = List.map inputFor (chosenActions draft)
+                , permissions = List.map inputFor (chosenActions offered draft)
                 }
                 (\optional ->
                     { optional
@@ -380,23 +386,14 @@ createSelection draft =
         |> Mutation.self
 
 
-{-| The ticked keys back into triples. Parsed from the key rather than carried alongside it,
-so the set stays the single record of what is ticked.
+{-| The offered Object actions that are ticked. Filtered from `offered` rather than parsed
+back out of the key strings — the same shape as `Roles.desiredActions` — so a ticked key
+whose action is no longer offered (the registry narrowed the choice after it was ticked) is
+never sent, and there is no split that has to stay the inverse of `Identity.actionKey`.
 -}
-chosenActions : Draft -> List Identity.ObjectAction
-chosenActions draft =
-    Set.toList draft.chosen
-        |> List.filterMap fromKey
-
-
-fromKey : String -> Maybe Identity.ObjectAction
-fromKey key =
-    case String.split "::" key of
-        [ namespace, object, action ] ->
-            Just { namespace = namespace, object = object, action = action }
-
-        _ ->
-            Nothing
+chosenActions : List Identity.ObjectAction -> Draft -> List Identity.ObjectAction
+chosenActions offered draft =
+    List.filter (\action -> Set.member (Identity.actionKey action) draft.chosen) offered
 
 
 inputFor : Identity.ObjectAction -> InputObject.AuthObjectActionInput
@@ -422,7 +419,7 @@ type alias Messages msg =
     , expiryChosen : String -> msg
     , actionToggled : Identity.ObjectAction -> msg
     , submitted : msg
-    , secretDismissed : msg
+    , revealDismissed : msg
     , revokeRequested : Int -> msg
     , revokeConfirmed : Int -> msg
     , revokeCancelled : msg
@@ -435,31 +432,31 @@ view zone messages identity state =
         [ h1 [] [ text "API keys" ]
         , p [ class "notice" ]
             [ text "An API key signs in for a program rather than a person. It can do only what you can, and only what you name here." ]
-        , secretPanel messages state.creation
+        , revealPanel messages state.creation
         , createForm messages identity state
         , h2 [] [ text "Your keys" ]
         , listingView zone messages identity state
         ]
 
 
-{-| The one render in which the secret exists.
+{-| The one render in which the key's value exists.
 
 It stands above the form rather than inside it, and it is dismissed deliberately, because
 navigating away is the failure this screen exists to prevent.
 
 -}
-secretPanel : Messages msg -> Creation -> Html msg
-secretPanel messages creation =
+revealPanel : Messages msg -> Creation -> Html msg
+revealPanel messages creation =
     case creation of
         Created revealed ->
-            div [ class "panel api-key-secret", attribute "role" "alert" ]
+            div [ class "panel api-key-reveal", attribute "role" "alert" ]
                 [ h2 [] [ text ("Your new key: " ++ revealed.name) ]
                 , p [ class "api-key-warning" ]
                     [ text "Copy it now. This is the only time it is shown — bitmagnet stores no copy it can give back, so if it is lost the key has to be replaced." ]
-                , div [ class "api-key-secret-value" ]
-                    [ Html.code [] [ text revealed.secret ] ]
+                , div [ class "api-key-reveal-value" ]
+                    [ Html.code [] [ text revealed.value ] ]
                 , button
-                    [ type_ "button", onClick messages.secretDismissed ]
+                    [ type_ "button", onClick messages.revealDismissed ]
                     [ text "I have stored it" ]
                 ]
 
@@ -495,7 +492,7 @@ createForm messages identity state =
                 (\( label_, duration ) ->
                     option [ value duration, selected (duration == state.draft.expiry) ] [ text label_ ]
                 )
-                expiries
+                Expiry.options
             )
         , permissionGrid messages busy offered state.draft
         , offerNotice offered
@@ -619,7 +616,7 @@ keyRow zone messages identity state key =
             [ span [] [ text ("Created: " ++ Format.date zone key.createdAt) ]
             , span [] [ text (expiryOf zone key) ]
             ]
-        , scopeOf identity key
+        , permissionsOf identity key
         , revokeControl messages state key
         ]
 
@@ -636,22 +633,22 @@ expiryOf zone key =
             "Never expires"
 
 
-{-| What the key was scoped to, and which of it is not currently reachable.
+{-| The Object actions the key was selected for, and which of them are not currently reachable.
 
 The suspended ones are still listed — they are part of the key and come back when the
 owner's Role does — but they are marked, because a Permission that reads as working and
 does not is worse than one that is absent.
 
 -}
-scopeOf : Identity.Identity -> Key -> Html msg
-scopeOf identity key =
+permissionsOf : Identity.Identity -> Key -> Html msg
+permissionsOf identity key =
     let
         withheld =
             suspended identity key
     in
-    div [ class "api-key-scope" ]
+    div [ class "api-key-permissions" ]
         [ ul [ class "api-key-actions" ]
-            (List.map (scopeItem withheld) key.permissions)
+            (List.map (actionItem withheld) key.permissions)
         , if List.isEmpty withheld then
             text ""
 
@@ -669,8 +666,8 @@ scopeOf identity key =
         ]
 
 
-scopeItem : List Identity.ObjectAction -> Identity.ObjectAction -> Html msg
-scopeItem withheld action =
+actionItem : List Identity.ObjectAction -> Identity.ObjectAction -> Html msg
+actionItem withheld action =
     li
         [ classList
             [ ( "api-key-action", True )
