@@ -15,6 +15,7 @@
 const childProcess = require("child_process");
 const crypto = require("crypto");
 const fs = require("fs");
+const net = require("net");
 const os = require("os");
 const path = require("path");
 
@@ -52,6 +53,8 @@ async function main() {
   buildBundle();
 
   const templateDSN = seedTemplateDSN();
+  await requireReachable(templateDSN);
+
   const binary = buildFixtureServer();
   const announcement = await startFixtureServer(binary, templateDSN);
   const credentials = await registerAdministrator(announcement);
@@ -104,6 +107,42 @@ function seedTemplateDSN() {
     throw new Error(
       `could not ask btm-testdb for its connection string (${error.message}). ` +
         "Is the instance up? `bin/testdb status`.",
+    );
+  }
+}
+
+// Fails on a stopped database before a minute of `go build` and a Go panic have gone by.
+// Without this the first sign of trouble is a stack trace from the fixture server, with
+// "connection refused" somewhere inside it — true, and a poor way to learn that a container
+// is not running. A TCP connect is enough to tell "not running" from anything subtler, and
+// needs no PostgreSQL client here.
+async function requireReachable(dsn) {
+  let target;
+  try {
+    const parsed = new URL(dsn);
+    target = { host: parsed.hostname, port: Number(parsed.port) || 5432 };
+  } catch {
+    // An unparseable DSN is not this check's business to report; let the server say so.
+    return;
+  }
+
+  const reachable = await new Promise((resolve) => {
+    const socket = net.connect(target);
+    const settle = (answer) => {
+      socket.destroy();
+      resolve(answer);
+    };
+
+    socket.setTimeout(5_000);
+    socket.on("connect", () => settle(true));
+    socket.on("timeout", () => settle(false));
+    socket.on("error", () => settle(false));
+  });
+
+  if (!reachable) {
+    throw new Error(
+      `nothing is listening at ${target.host}:${target.port}, where the seed template ` +
+        "should be. Is the test database up? `cd ../btm-testdb && bin/testdb status`.",
     );
   }
 }

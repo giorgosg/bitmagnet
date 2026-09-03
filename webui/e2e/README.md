@@ -71,6 +71,11 @@ What happens, in order, from `e2e/harness/serve.js`:
 
 ### What it needs present
 
+If the database is not up, the harness says so and stops before building anything —
+`nothing is listening at 127.0.0.1:5434 … Is the test database up?` — rather than letting
+the fixture server panic with a connection error buried in a stack trace.
+
+
 - `../bitmagnet` — a checkout, and a Go toolchain to build it. Overridable with
   `MAGNES_E2E_BITMAGNET`.
 - `../btm-testdb` — up, with a seed template loaded (`bin/testdb status`). Overridable with
