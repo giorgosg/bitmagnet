@@ -82,6 +82,7 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#66](https://github.com/giorgosg/bitmagnet/pull/66) | Cache role lookups under the existing RBAC cache TTL                        | local                                                                | Uncached-lookup regressions observed red                       |
 | [#67](https://github.com/giorgosg/bitmagnet/pull/67) | Clone seeded test databases from a btm-testdb template                      | local                                                                | Fingerprint and skip tests observed red; clone measured ~0.9s  |
 | [#68](https://github.com/giorgosg/bitmagnet/pull/68) | Validate the auth mutations' input, and report effective permissions        | local — review finding 17                                            | Nine regressions observed red; one claim in 17 disproved       |
+| [#69](https://github.com/giorgosg/bitmagnet/pull/69) | Require `application/json` on `POST /import`                                | local — review finding 02                                            | text/plain write observed landing with 200                     |
 
 ## In flight
 

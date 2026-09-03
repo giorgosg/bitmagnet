@@ -75,6 +75,13 @@ is in the file's comments and is worth reading before touching it.
 torrents, so it is guarded by `http_auth.Guard` against an `import` object action. `X-Import-Id`
 names the import batch, which lands in `torrents_torrent_sources.import_id`.
 
+It also requires `Content-Type: application/json`, answering anything else with 415 before
+reading a byte of the body. That is a CORS property rather than a parsing one: `text/plain`,
+`multipart/form-data` and `application/x-www-form-urlencoded` are the media types that make
+a cross-origin POST a _simple request_, sent with no preflight, so a page the operator
+visits could write to this endpoint without the browser ever consulting `allowed_origins`.
+Refusing them forces the preflight that the origin policy gets to answer.
+
 ## Telemetry and health
 
 - `/metrics` — Prometheus. Collectors are contributed to the `prometheus_collectors` group

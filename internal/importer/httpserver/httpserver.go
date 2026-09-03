@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"mime"
 	"net/http"
 	"strconv"
 	"time"
@@ -41,6 +42,11 @@ func New(p Params) Result {
 
 const ImportIDHeader = "X-Import-Id"
 
+// ImportMediaType is the only media type POST /import accepts. The body is
+// newline-delimited JSON, which is what the importing guide has always told
+// clients to send, so requiring it breaks no documented usage.
+const ImportMediaType = "application/json"
+
 type builder struct {
 	importer lazy.Lazy[importer.Importer]
 	guard    http_auth.Guard
@@ -66,10 +72,36 @@ func (b builder) Apply(e *gin.Engine) error {
 			return
 		}
 
+		// Reject anything but JSON before touching the body. text/plain,
+		// multipart/form-data and application/x-www-form-urlencoded are the three
+		// media types that make a cross-origin POST a CORS *simple request*: the
+		// browser sends it with no preflight, so no CORS response header is needed
+		// for this write to land. Refusing them forces a preflight, which the
+		// origin policy then gets to answer.
+		if !hasImportMediaType(ctx.Request) {
+			ctx.AbortWithStatus(http.StatusUnsupportedMediaType)
+
+			return
+		}
+
 		b.handle(ctx, i)
 	})
 
 	return nil
+}
+
+// hasImportMediaType reports whether the request body is declared as JSON.
+// Parameters such as charset are allowed; a missing or unparseable header is
+// not, because a request that declares nothing is exactly the simple request
+// this is here to refuse. ParseMediaType lowercases what it returns, so the
+// comparison is already case-insensitive as RFC 9110 requires.
+func hasImportMediaType(req *http.Request) bool {
+	mediaType, _, err := mime.ParseMediaType(req.Header.Get("Content-Type"))
+	if err != nil {
+		return false
+	}
+
+	return mediaType == ImportMediaType
 }
 
 func (b builder) handle(ctx *gin.Context, i importer.Importer) {

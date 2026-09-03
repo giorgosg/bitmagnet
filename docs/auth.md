@@ -218,6 +218,12 @@ object actions, so a key handed to Prowlarr can be allowed Torznab and nothing e
 namespace, so disabling anonymous access closes them — including the data-mutating
 importer and `/debug/pprof/cmdline`, which discloses the process command line.
 
+`/import` additionally requires `Content-Type: application/json` and answers 415 otherwise.
+This is defence against the browser rather than against the operator: without it, a
+cross-origin `POST` of `text/plain` is a CORS simple request and lands with no preflight,
+whatever `allowed_origins` says. Command-line clients already send the header — the
+importing guide has always shown it — so nothing that worked before stops working.
+
 `/status` is deliberately public, matching the `health::query` grant in the GraphQL
 baseline: orchestrators poll it, and it reports liveness only.
 
