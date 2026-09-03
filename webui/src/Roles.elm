@@ -212,18 +212,18 @@ draftFor : List Identity.ObjectAction -> Role -> Draft
 draftFor offered role =
     let
         offeredKeys =
-            Set.fromList (List.map key offered)
+            Set.fromList (List.map Identity.actionKey offered)
 
         ( held, stored ) =
             List.partition .core role.permissions
 
         ( shown, unshown ) =
-            List.partition (\permission -> Set.member (key permission.objectAction) offeredKeys) stored
+            List.partition (\permission -> Set.member (Identity.actionKey permission.objectAction) offeredKeys) stored
     in
     { name = role.name
     , naming = Named
     , writing = writingFor role
-    , chosen = Set.fromList (List.map (.objectAction >> key) shown)
+    , chosen = Set.fromList (List.map (.objectAction >> Identity.actionKey) shown)
     , locked = List.map .objectAction held
     , carried = List.map .objectAction unshown
     }
@@ -252,11 +252,11 @@ writingFor role =
 
 toggle : Identity.ObjectAction -> Draft -> Draft
 toggle action draft =
-    if Set.member (key action) draft.chosen then
-        { draft | chosen = Set.remove (key action) draft.chosen }
+    if Set.member (Identity.actionKey action) draft.chosen then
+        { draft | chosen = Set.remove (Identity.actionKey action) draft.chosen }
 
     else
-        { draft | chosen = Set.insert (key action) draft.chosen }
+        { draft | chosen = Set.insert (Identity.actionKey action) draft.chosen }
 
 
 {-| Everything `putRole` will store, which is everything the Role will hold: the ticked
@@ -275,14 +275,7 @@ Role can do changes, because the core grant is what was answering anyway.
 -}
 desiredActions : List Identity.ObjectAction -> Draft -> List Identity.ObjectAction
 desiredActions offered draft =
-    List.filter (\action -> Set.member (key action) draft.chosen) offered ++ draft.carried
-
-
-{-| An Object action as one string, for comparing and for saying out loud.
--}
-key : Identity.ObjectAction -> String
-key action =
-    action.namespace ++ "::" ++ action.object ++ "::" ++ action.action
+    List.filter (\action -> Set.member (Identity.actionKey action) draft.chosen) offered ++ draft.carried
 
 
 
@@ -476,7 +469,7 @@ ownSaveAsk messages busy draft =
 
 ownSaveWarning : Draft -> String
 ownSaveWarning draft =
-    if Set.member (key (Identity.graphql "auth" "mutate")) draft.chosen then
+    if Set.member (Identity.actionKey (Identity.graphql "auth" "mutate")) draft.chosen then
         "Save your own Role, " ++ draft.name ++ "? It is the Role you are holding this screen with, so what you have ticked takes effect on you."
 
     else
@@ -565,7 +558,7 @@ naming messages busy draft =
 permissionGrid : Messages msg -> Bool -> List Identity.ObjectAction -> Draft -> Html msg
 permissionGrid messages busy offered draft =
     div [ class "permissions" ]
-        (List.map (namespaceGroup messages busy draft) (namespaces offered))
+        (List.map (namespaceGroup messages busy draft) (Identity.byNamespace offered))
 
 
 {-| Grouped by namespace, in the order bitmagnet listed them. Only `graphql` is reachable
@@ -610,7 +603,7 @@ holding draft action =
     if List.member action draft.locked then
         Core
 
-    else if Set.member (key action) draft.chosen then
+    else if Set.member (Identity.actionKey action) draft.chosen then
         Held
 
     else
@@ -633,7 +626,7 @@ lockedNotice draft =
                     ++ Format.forCount (List.length draft.locked)
                         { one = "this Permission", many = "these Permissions" }
                     ++ " to the Role itself, and they cannot be revoked here — "
-                    ++ String.join ", " (List.map key draft.locked)
+                    ++ String.join ", " (List.map Identity.actionKey draft.locked)
                     ++ ". "
                     ++ Format.forCount (List.length draft.locked)
                         { one = "It is ticked above unless bitmagnet does not name it as an Object action, in which case no box can show it."
@@ -661,7 +654,7 @@ carriedNotice draft =
                     ++ " bitmagnet does not list as an Object action, so no box above can show "
                     ++ Format.forCount (List.length draft.carried) { one = "it", many = "them" }
                     ++ " — "
-                    ++ String.join ", " (List.map key draft.carried)
+                    ++ String.join ", " (List.map Identity.actionKey draft.carried)
                     ++ ". Saving leaves "
                     ++ Format.forCount (List.length draft.carried) { one = "it", many = "them" }
                     ++ " in place."
@@ -801,27 +794,3 @@ warning role =
     "Delete the Role "
         ++ role.name
         ++ "? It will be refused while any User still holds it, and every Invitation issued for it, claimed or not, is deleted with it."
-
-
-{-| Namespaces in the order bitmagnet listed their actions, each with its own.
--}
-namespaces : List Identity.ObjectAction -> List ( String, List Identity.ObjectAction )
-namespaces offered =
-    List.foldl
-        (\action groups ->
-            if List.any (\( namespace, _ ) -> namespace == action.namespace) groups then
-                List.map
-                    (\( namespace, actions ) ->
-                        if namespace == action.namespace then
-                            ( namespace, actions ++ [ action ] )
-
-                        else
-                            ( namespace, actions )
-                    )
-                    groups
-
-            else
-                groups ++ [ ( action.namespace, [ action ] ) ]
-        )
-        []
-        offered

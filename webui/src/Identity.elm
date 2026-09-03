@@ -1,4 +1,4 @@
-module Identity exposing (Identity(..), ObjectAction, User, can, fetch, graphql, objectActionSelection, userSelection)
+module Identity exposing (Identity(..), ObjectAction, User, actionKey, byNamespace, can, concrete, fetch, graphql, objectActionSelection, permissions, userSelection)
 
 {-| The canonical browser Identity comes from `self.identity`; the browser credential is
 an implementation detail owned by bitmagnet and never appears in this module.
@@ -154,3 +154,53 @@ can requested identity =
 componentMatches : String -> String -> Bool
 componentMatches granted requested =
     granted == "**" || granted == requested
+
+
+{-| An Object action as one string, for comparing and for saying out loud.
+-}
+actionKey : ObjectAction -> String
+actionKey action =
+    action.namespace ++ "::" ++ action.object ++ "::" ++ action.action
+
+
+{-| Whether every component names something rather than standing for anything.
+
+The distinction is not cosmetic. A concrete triple is one bitmagnet has registered and will
+accept where an Object action is stored; a wildcard is a grant that _matches_ those, and
+`createAPIKey` refuses it. So a screen that turns Permissions into a choice has to know
+which kind it is holding.
+
+-}
+concrete : ObjectAction -> Bool
+concrete action =
+    action.namespace /= "**" && action.object /= "**" && action.action /= "**"
+
+
+{-| Object actions grouped by namespace, each group keeping the order it arrived in.
+
+Namespaces are how bitmagnet's registry divides: `graphql` is the browser's, while `http`
+and `torznab` exist for clients that are not browsers. Anything offering a choice of Object
+actions wants them grouped this way, so the grouping lives here rather than beside the
+first screen that needed it.
+
+-}
+byNamespace : List ObjectAction -> List ( String, List ObjectAction )
+byNamespace actions =
+    List.foldl
+        (\action groups ->
+            if List.any (\( namespace, _ ) -> namespace == action.namespace) groups then
+                List.map
+                    (\( namespace, existing ) ->
+                        if namespace == action.namespace then
+                            ( namespace, existing ++ [ action ] )
+
+                        else
+                            ( namespace, existing )
+                    )
+                    groups
+
+            else
+                groups ++ [ ( action.namespace, [ action ] ) ]
+        )
+        []
+        actions

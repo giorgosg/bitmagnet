@@ -1172,3 +1172,123 @@ main {
   background: var(--faint);
   font-size: 0.875rem;
 }
+
+/* API keys ---------------------------------------------------------------- */
+
+/* The create form carries the same permission grid as the Role editor, so it needs the
+   same escape from `.panel > *`'s 22rem field cap — and the same `.panel` qualifier, for
+   the same reason: `.panel > *` is written later in this file, so `.api-key-form > *`
+   would tie on specificity and lose on source order, collapsing the grid into one column
+   with nothing to show for it. */
+.panel.api-key-form > * {
+  max-width: none;
+}
+
+.panel.api-key-form > .notice {
+  max-width: 48rem;
+}
+
+/* The one child that really is a form field. */
+.panel.api-key-form > input,
+.panel.api-key-form > select {
+  max-width: 22rem;
+}
+
+/* The secret, in the one render it exists in. It is deliberately the loudest thing on the
+   page: this is the only moment it can be copied, and a reader who scrolls past it has
+   lost it for good. */
+.panel.api-key-secret {
+  padding: 0.875rem 1rem 1.25rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent-soft);
+}
+
+.panel.api-key-secret > * {
+  max-width: none;
+}
+
+.api-key-warning {
+  margin: 0 0 0.5rem;
+  max-width: 48rem;
+}
+
+/* Wrapping rather than scrolling: a secret half out of view reads as fully copied when it
+   is not. `user-select: all` makes one click take the whole thing. */
+.api-key-secret-value code {
+  display: block;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--faint);
+  border-radius: 4px;
+  background: var(--bg);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.api-keys {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.api-key {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--faint);
+}
+
+.api-key-name {
+  font-weight: 600;
+}
+
+.api-key-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+.api-key-actions {
+  margin: 0.25rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.375rem;
+}
+
+.api-key-action {
+  padding: 0.0625rem 0.375rem;
+  border: 1px solid var(--faint);
+  border-radius: 999px;
+  font-size: 0.75rem;
+}
+
+/* A scoped action the owner's Role no longer grants. Struck through rather than hidden:
+   it is still part of the key and comes back when the Role does, but it is not authority
+   the key has now. */
+.api-key-action-suspended {
+  color: var(--dim);
+  text-decoration: line-through;
+}
+
+.api-key-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent-soft);
+}

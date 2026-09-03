@@ -1,6 +1,7 @@
 port module Main exposing (main)
 
 import ApiError
+import ApiKeys
 import Bitmagnet exposing (Page, Row)
 import Browser
 import Browser.Dom
@@ -117,6 +118,15 @@ type alias Model =
     -- Separate counter for the Role listing's fetches, on the same reasoning as the
     -- User listing's: an answer to a question this screen is no longer asking is dropped.
     , rolesEpoch : Int
+
+    -- The User's own API keys: the listing, the key being made, and which revocation has
+    -- been asked about but not yet confirmed. `registry` inside it is bitmagnet's list of
+    -- Object actions, which only some Identities may read — see `ApiKeys.offerable`.
+    , apiKeys : ApiKeys.State
+
+    -- Separate counter for the API-key listing's fetches, on the same reasoning as the
+    -- Role listing's.
+    , apiKeysEpoch : Int
 
     -- Whether the header's Identity menu is showing. Presentational, so it is not in the
     -- URL: it is closed by navigating, and reopening it is one click.
@@ -305,6 +315,8 @@ init flags url key =
       , userTyping = 0
       , roles = Roles.empty
       , rolesEpoch = 0
+      , apiKeys = ApiKeys.empty
+      , apiKeysEpoch = 0
       , menuOpen = False
       , identityRefresh = Resolving
       , epoch = 0
@@ -485,6 +497,18 @@ type Msg
     | GotRoles Int (Result (Graphql.Http.Error Roles.Page) Roles.Page)
     | GotRoleSaved (Result (Graphql.Http.Error Roles.Role) Roles.Role)
     | GotRoleDeleted String (Result (Graphql.Http.Error ()) ())
+    | ApiKeyNameChanged String
+    | ApiKeyExpiryChosen String
+    | ApiKeyActionToggled Identity.ObjectAction
+    | ApiKeyCreateSubmitted
+    | ApiKeySecretDismissed
+    | ApiKeyRevokeRequested Int
+    | ApiKeyRevokeConfirmed Int
+    | ApiKeyRevokeCancelled
+    | GotApiKeys Int (Result (Graphql.Http.Error (List ApiKeys.Key)) (List ApiKeys.Key))
+    | GotObjectActions Int (Result (Graphql.Http.Error (List Identity.ObjectAction)) (List Identity.ObjectAction))
+    | GotApiKeyCreated (Result (Graphql.Http.Error ApiKeys.Revealed) ApiKeys.Revealed)
+    | GotApiKeyDeleted (Result (Graphql.Http.Error ()) ())
     | SignOutRequested
     | GotSignOut (Result (Graphql.Http.Error ()) ())
     | AuthenticationChangedHere Refresh
@@ -1131,6 +1155,138 @@ update msg model =
                     )
                 )
 
+        ApiKeyNameChanged name ->
+            ( { model | apiKeys = ApiKeys.withDraft (ApiKeys.withName name model.apiKeys.draft) model.apiKeys }
+            , Cmd.none
+            )
+
+        ApiKeyExpiryChosen chosen ->
+            ( { model | apiKeys = ApiKeys.withDraft (ApiKeys.withExpiry chosen model.apiKeys.draft) model.apiKeys }
+            , Cmd.none
+            )
+
+        ApiKeyActionToggled action ->
+            ( { model | apiKeys = ApiKeys.toggle action model.apiKeys }, Cmd.none )
+
+        ApiKeyCreateSubmitted ->
+            if model.apiKeys.creation == ApiKeys.Creating then
+                ( model, Cmd.none )
+
+            else
+                ( { model | apiKeys = ApiKeys.withCreation ApiKeys.Creating model.apiKeys }
+                , ApiKeys.create model.apiUrl model.apiKeys.draft GotApiKeyCreated
+                )
+
+        ApiKeySecretDismissed ->
+            -- The secret leaves the model with the panel. It was only ever here to be
+            -- read once, and a dismissed panel that still held it would be a copy nobody
+            -- asked to keep.
+            ( { model
+                | apiKeys =
+                    model.apiKeys
+                        |> ApiKeys.withCreation ApiKeys.Ready
+                        |> ApiKeys.withDraft ApiKeys.newDraft
+              }
+            , Cmd.none
+            )
+
+        ApiKeyRevokeRequested id ->
+            ( { model | apiKeys = ApiKeys.withConfirming (Just id) model.apiKeys }, Cmd.none )
+
+        ApiKeyRevokeCancelled ->
+            ( { model | apiKeys = ApiKeys.withConfirming Nothing model.apiKeys }, Cmd.none )
+
+        ApiKeyRevokeConfirmed id ->
+            ( { model | apiKeys = ApiKeys.withConfirming Nothing model.apiKeys }
+            , ApiKeys.delete model.apiUrl id GotApiKeyDeleted
+            )
+
+        GotApiKeys apiKeysEpoch (Ok fetched) ->
+            if apiKeysEpoch /= model.apiKeysEpoch then
+                ( model, Cmd.none )
+
+            else
+                ( { model | apiKeys = ApiKeys.withListing (ApiKeys.Loaded fetched) model.apiKeys }
+                , Cmd.none
+                )
+
+        GotApiKeys apiKeysEpoch (Err error) ->
+            if apiKeysEpoch /= model.apiKeysEpoch then
+                ( model, Cmd.none )
+
+            else
+                onRequestFailure error
+                    model
+                    (\_ current ->
+                        ( { current
+                            | apiKeys =
+                                ApiKeys.withListing
+                                    (ApiKeys.Failed (ApiError.fromError error))
+                                    current.apiKeys
+                          }
+                        , Cmd.none
+                        )
+                    )
+
+        GotObjectActions apiKeysEpoch (Ok actions) ->
+            if apiKeysEpoch /= model.apiKeysEpoch then
+                ( model, Cmd.none )
+
+            else
+                ( { model | apiKeys = ApiKeys.withRegistry (Just actions) model.apiKeys }
+                , Cmd.none
+                )
+
+        GotObjectActions _ (Err _) ->
+            -- The registry is an expansion, not the screen. Without it `ApiKeys.offerable`
+            -- falls back to the Identity's own concrete Object actions, which is a smaller
+            -- offer rather than a broken page — so this failure is not reported as one.
+            ( model, Cmd.none )
+
+        GotApiKeyCreated (Ok revealed) ->
+            -- The secret is put on screen before the listing is refetched: the refetch
+            -- cannot return it, and a reader who navigates away has lost it.
+            let
+                ( refetched, cmd ) =
+                    fetchApiKeys model
+            in
+            ( { refetched | apiKeys = ApiKeys.withCreation (ApiKeys.Created revealed) refetched.apiKeys }
+            , cmd
+            )
+
+        GotApiKeyCreated (Err error) ->
+            onRequestFailure error
+                model
+                (\_ current ->
+                    ( { current
+                        | apiKeys =
+                            ApiKeys.withCreation
+                                (ApiKeys.Rejected (ApiError.fromError error))
+                                current.apiKeys
+                      }
+                    , Cmd.none
+                    )
+                )
+
+        GotApiKeyDeleted (Ok ()) ->
+            let
+                ( refetched, cmd ) =
+                    fetchApiKeys model
+            in
+            ( { refetched | apiKeys = ApiKeys.withRevocation Nothing refetched.apiKeys }, cmd )
+
+        GotApiKeyDeleted (Err error) ->
+            onRequestFailure error
+                model
+                (\_ current ->
+                    ( { current
+                        | apiKeys =
+                            ApiKeys.withRevocation (Just (ApiError.fromError error)) current.apiKeys
+                      }
+                    , Cmd.none
+                    )
+                )
+
         SignOutRequested ->
             if model.signOut == UserOverview.SigningOut then
                 ( model, Cmd.none )
@@ -1248,6 +1404,8 @@ update msg model =
                             , userTyping = model.userTyping + 1
                             , roles = Roles.empty
                             , rolesEpoch = model.rolesEpoch + 1
+                            , apiKeys = ApiKeys.empty
+                            , apiKeysEpoch = model.apiKeysEpoch + 1
                         }
 
                     epoch =
@@ -1497,6 +1655,19 @@ rolesMessages =
     }
 
 
+apiKeysMessages : ApiKeys.Messages Msg
+apiKeysMessages =
+    { nameChanged = ApiKeyNameChanged
+    , expiryChosen = ApiKeyExpiryChosen
+    , actionToggled = ApiKeyActionToggled
+    , submitted = ApiKeyCreateSubmitted
+    , secretDismissed = ApiKeySecretDismissed
+    , revokeRequested = ApiKeyRevokeRequested
+    , revokeConfirmed = ApiKeyRevokeConfirmed
+    , revokeCancelled = ApiKeyRevokeCancelled
+    }
+
+
 registerMessages : Register.Messages Msg
 registerMessages =
     { usernameChanged = RegisterUsernameChanged
@@ -1619,6 +1790,22 @@ fetchUsers model =
     in
     ( { model | usersEpoch = usersEpoch }
     , Users.fetch model.apiUrl model.users.query model.users.offset (GotUsers usersEpoch)
+    )
+
+
+{-| Refetch the API-key listing under a fresh epoch, for the same reason the Role listing
+does: `createAPIKey` answers with one key and `deleteAPIKey` with nothing, and the screen
+is about all of them. The registry is not refetched — it is bitmagnet's, and neither act
+changes it.
+-}
+fetchApiKeys : Model -> ( Model, Cmd Msg )
+fetchApiKeys model =
+    let
+        apiKeysEpoch =
+            model.apiKeysEpoch + 1
+    in
+    ( { model | apiKeysEpoch = apiKeysEpoch }
+    , ApiKeys.fetch model.apiUrl (GotApiKeys apiKeysEpoch)
     )
 
 
@@ -1813,7 +2000,7 @@ loadWhenReady identity apiUrl epochs route =
                 ( Failed "Your Identity does not permit searching torrent content.", Cmd.none )
 
             else
-                load apiUrl epochs route
+                load identity apiUrl epochs route
 
 
 {-| The four counters a load has to carry. They are separate because they answer
@@ -1826,6 +2013,7 @@ type alias Epochs =
     , identity : Int
     , users : Int
     , roles : Int
+    , apiKeys : Int
     }
 
 
@@ -1850,6 +2038,7 @@ guardedLoad model identity epoch route =
                 , identity = model.identityEpoch
                 , users = model.usersEpoch
                 , roles = model.rolesEpoch
+                , apiKeys = model.apiKeysEpoch
                 }
                 route
 
@@ -1994,8 +2183,8 @@ identityApplied identity model =
 
 {-| What a route needs fetched, and the state to show until it arrives.
 -}
-load : String -> Epochs -> Route -> ( Results, Cmd Msg )
-load apiUrl epochs route =
+load : Identity.Identity -> String -> Epochs -> Route -> ( Results, Cmd Msg )
+load identity apiUrl epochs route =
     case route of
         Route.Search params ->
             ( Loading, fetch apiUrl epochs.query (searchArgs params 0) )
@@ -2013,7 +2202,21 @@ load apiUrl epochs route =
             ( Blank, Cmd.none )
 
         Route.APIKeys ->
-            ( Blank, Cmd.none )
+            -- Two requests rather than one. `Query.auth` is non-null and permissioned, so
+            -- asking for the Object-action registry beside the keys would cost an ordinary
+            -- User their key list to a field they do not need. It is asked for separately,
+            -- and only by an Identity that has something a registry could expand.
+            ( Blank
+            , Cmd.batch
+                (ApiKeys.fetch apiUrl (GotApiKeys epochs.apiKeys)
+                    :: (if ApiKeys.needsRegistry identity then
+                            [ ApiKeys.fetchRegistry apiUrl (GotObjectActions epochs.apiKeys) ]
+
+                        else
+                            []
+                       )
+                )
+            )
 
         Route.AdminUsers ->
             ( Blank, Users.fetch apiUrl "" 0 (GotUsers epochs.users) )
@@ -2483,7 +2686,7 @@ viewAllowedRoute model =
                     p [ class "notice" ] [ text "Resolving Identity…" ]
 
         Route.APIKeys ->
-            p [ class "notice" ] [ text "API keys." ]
+            ApiKeys.view model.zone apiKeysMessages model.identity model.apiKeys
 
         Route.AdminUsers ->
             Users.view model.zone usersMessages model.identity model.users
