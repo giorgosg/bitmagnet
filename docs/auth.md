@@ -239,6 +239,25 @@ baseline: orchestrators poll it, and it reports liveness only.
   defaults to on while doing nothing tells an operator their addresses are verified when
   they are not. The default follows the behaviour, and flips back when the behaviour
   arrives.
+- **The bundled web UI keeps its token in `localStorage`, not in the session cookie.** The
+  Angular screens authenticate with `self.login`, which returns the JWT, and store it under
+  `bitmagnet-jwt` where any script on the origin can read it. `self.loginBrowser` and the
+  `HttpOnly` cookie described above have no caller in `webui/src` outside the generated
+  client.
+
+  This is the shipped default rather than an oversight. The cookie path was built for a
+  separately served same-origin browser client — the Magnes integration environment above
+  is what it is for — and the bundled auth screens are transitional: they exist so that
+  `auth.anonymous_access: false` does not leave the bundled UI unusable, and they come out
+  once that replacement is complete. They are presentation, never a boundary; the `@auth`
+  directive enforces server-side regardless of what the browser holds.
+
+  What it means for an operator: script injection anywhere on the API origin yields a
+  bearer token valid for the whole of `auth.jwt_duration`, and `logoutBrowser` expires the
+  cookie without revoking the token it carried, so signing out does not shorten that
+  window. Prefer `loginBrowser` for any client you write yourself, and keep
+  `auth.jwt_duration` no longer than you would accept a leaked token living.
+
 - **CORS origins still default to `*`.** Carried over from before this lineage had
   authentication. While anonymous access is on, any web page can query a reachable
   instance as the anonymous identity — including an instance bound to a LAN address that
