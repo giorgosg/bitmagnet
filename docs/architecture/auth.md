@@ -234,6 +234,15 @@ than a mutex, because the processes racing here do not share memory.
   `loginBrowser` reuses the User login path, then the authentication-owned cookie service
   writes the credential with the configured `__Secure-` name, `/graphql` path, and strict
   browser-only attributes. `logoutBrowser` expires the identical name and path.
+
+  **Nothing in the bundled UI calls either.** `webui/src` authenticates with `self.login`
+  and keeps the returned JWT in `localStorage`; the only reference to `loginBrowser` under
+  `webui/src` is in the generated client. Do not read the cookie layer as the path in use
+  — it was built for a separately served same-origin client, and it is exercised by its
+  own tests rather than by the shipped UI. The Angular auth screens are transitional and
+  are expected to be removed rather than migrated, which is why they were not pointed at
+  this path. The operator-facing consequence is in `docs/auth.md` under Known gaps.
+
 - **API keys** are `secret(12 random bytes) || uint32 id`, base62-encoded to 22 chars,
   bcrypt-hashed in the database. Two fixed defects are recorded in the comments: a
   decoded-length formula borrowed from base32 that rejected one key in 256, and a dropped
