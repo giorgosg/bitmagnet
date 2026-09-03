@@ -18,8 +18,9 @@ import (
 )
 
 // allowGuard authorizes everything, so these tests exercise the handler rather
-// than the permission model. Issue 01 is what makes that the realistic case:
-// anonymous callers hold ObjectActionImport by default.
+// than the permission model. That is also the realistic case: the anonymous
+// baseline grants ObjectActionImport by default, so on a stock instance the
+// guard above lets the request through.
 type allowGuard struct{}
 
 func (allowGuard) Allow(*gin.Context, rbac.ObjectAction) bool { return true }
