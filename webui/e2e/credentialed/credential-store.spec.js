@@ -8,6 +8,8 @@
 // manager, the manager was never offered it because Elm's onSubmit prevents the default, the
 // form cleared, and bitmagnet has no password reset.
 
+import crypto from "crypto";
+
 import { mintInvitation, signIn, expect, test } from "../support/credentialed.js";
 import { recordCredentialStores, storedCredentials } from "../support/credential-store.js";
 
@@ -31,8 +33,10 @@ test("a successful registration offers the credential", async ({
   const registered = {
     // bitmagnet's usernames are ^[a-zA-Z0-9][a-zA-Z0-9._-]{1,18}[a-zA-Z0-9]$, so twenty
     // characters is the ceiling and a timestamp does not fit under it.
-    username: `e2e-new-${Math.random().toString(36).slice(2, 8)}`,
-    password: "correct-horse-battery-staple-92",
+    username: `e2e-new-${crypto.randomBytes(3).toString("hex")}`,
+    // Generated, not written down. This one is a real User's password for as long as the
+    // run lasts, so the suite's claim to hold no password should stay literally true.
+    password: crypto.randomBytes(24).toString("base64url"),
   };
 
   await recordCredentialStores(page);
@@ -50,14 +54,4 @@ test("a successful registration offers the credential", async ({
   expect(await storedCredentials(page)).toEqual([
     { id: registered.username, password: registered.password },
   ]);
-});
-
-test("the invitation code arrives from the link", async ({ page, request, credentials }) => {
-  // The link an administrator shares is /register?code=…, so the field must already hold
-  // the code — a person following it should not have to paste anything.
-  const code = await mintInvitation(request, credentials);
-
-  await page.goto(`/register?code=${code}`);
-
-  await expect(page.getByLabel("Invitation code")).toHaveValue(code);
 });

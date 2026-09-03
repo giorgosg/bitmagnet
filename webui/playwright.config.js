@@ -16,8 +16,9 @@
 //   npm run test:e2e:credentialed the credentialed suite. It brings its own bitmagnet: a
 //                                 fixture server over a clone of the btm-testdb seed
 //                                 template, with a throwaway administrator registered
-//                                 through the bootstrap Invitation it prints. Nothing is
-//                                 left behind and no password exists anywhere.
+//                                 through the bootstrap Invitation it prints. Every password
+//                                 it uses is generated for the run, and nothing — database,
+//                                 User, or credential — outlives it.
 //
 // They are deliberately not run together. See e2e/README.md.
 

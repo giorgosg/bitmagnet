@@ -87,14 +87,17 @@ test.describe("a signed-in User", () => {
 });
 
 test.describe("signing out", () => {
+  test.beforeEach(async ({ page, credentials }) => {
+    await page.goto("/login");
+    await signIn(page, credentials);
+  });
+
   async function signOut(page, credentials) {
     await page.getByRole("button", { name: credentials.username }).click();
     await page.getByRole("button", { name: "Sign out" }).click();
   }
 
   test("returns to Anonymous", async ({ page, credentials }) => {
-    await page.goto("/login");
-    await signIn(page, credentials);
     await signOut(page, credentials);
 
     // The header is the visible half. bitmagnet expired the cookie and Magnes refetched
@@ -104,8 +107,6 @@ test.describe("signing out", () => {
   });
 
   test("leaves the routes that need a User guarded again", async ({ page, credentials }) => {
-    await page.goto("/login");
-    await signIn(page, credentials);
     await signOut(page, credentials);
 
     await page.goto("/account");
@@ -115,9 +116,6 @@ test.describe("signing out", () => {
   });
 
   test("is noticed by another tab", async ({ page, context, credentials }) => {
-    await page.goto("/login");
-    await signIn(page, credentials);
-
     const other = await context.newPage();
     await other.goto("/account");
     await expect(other.getByRole("heading", { name: "Your User" })).toBeVisible();

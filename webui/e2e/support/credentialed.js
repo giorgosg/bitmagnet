@@ -23,7 +23,12 @@ export const test = base.extend({
         );
       }
 
-      await use(JSON.parse(fs.readFileSync(file, "utf8")));
+      // The file is the harness's handshake, not a record for tests: it also carries the
+      // pid that e2e/harness/teardown.js stops. A spec has no business with that, so it is
+      // not handed one.
+      const { username, password, graphqlEndpoint } = JSON.parse(fs.readFileSync(file, "utf8"));
+
+      await use({ username, password, graphqlEndpoint });
     },
     { scope: "worker" },
   ],

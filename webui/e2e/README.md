@@ -15,8 +15,9 @@ The **credential-free** suite is everything reachable while Anonymous. Playwrigh
 gitignored `.dev/env`, so no host is named in the repository — see
 `docs/serving-and-testing.md`.
 
-The **credentialed** suite is everything past a successful sign-in. It needs no host and no
-password: it stands up its own bitmagnet per run and registers its own User. See below.
+The **credentialed** suite is everything past a successful sign-in. It needs no host and
+nobody's password: it stands up its own bitmagnet per run, registers its own User, and
+generates every password it uses. See below.
 
 ## Why these exist alongside elm-test
 
@@ -47,10 +48,11 @@ only for that run. Nothing is asked of a person and nothing is left behind.
 
 What happens, in order, from `e2e/harness/serve.js`:
 
-1. **A fixture server starts.** `dev fixture serve`, built from the `../bitmagnet` checkout,
-   serving the real Gin, auth middleware and gqlgen stack over a clone of the `../btm-testdb`
-   seed template — so the index has ~100k real torrents in it, not three rows. It announces
-   its address and a freshly minted bootstrap Invitation as one line of JSON on stdout.
+1. **A fixture server starts.** `dev fixture serve` — built there as of 2026-09-03 — from
+   the `../bitmagnet` checkout, serving the real Gin, auth middleware and gqlgen stack over a
+   clone of the `../btm-testdb` seed template, built there as of 2026-08-29. So the index has
+   ~100k real torrents in it, not three rows. It announces its address and a freshly minted
+   bootstrap Invitation as one line of JSON on stdout.
 2. **A throwaway administrator is registered** through that Invitation, with a password
    generated for the run. The first registration through a bootstrap Invitation is always an
    `admin`, which is what makes the administration screens reachable.
@@ -64,7 +66,8 @@ What happens, in order, from `e2e/harness/serve.js`:
 5. **Everything is dropped on the way out** — the cloned database, the credentials file, and
    the built binary. That shutdown is driven from `e2e/harness/teardown.js` rather than left
    to Playwright, which kills its web server faster than a `DROP DATABASE` finishes; without
-   it, every run left a `bitmagnet_test_*` database behind.
+   it, every run left a `bitmagnet_test_*` database behind. Verified 2026-09-03 over three
+   consecutive runs: no database, no build directory, no credentials file.
 
 ### What it needs present
 
@@ -77,20 +80,19 @@ Neither is needed by `npm run test:e2e`, which is why the two suites do not run 
 
 ### Deliberate settings
 
-The login throttle is raised almost out of existence for this suite. bitmagnet buckets it by
-client address and every request arrives from the proxy, so the whole suite shares one
-bucket: at the shipped 30 a minute after a burst of 5, parallel tests that each sign in
-would start being refused for reasons none of them are about. `MAGNES_E2E_LOGIN_REQUEST_BURST`
-and `MAGNES_E2E_LOGIN_REQUESTS_PER_MINUTE` set it, so a project that wants to *provoke*
-throttling — the wait state ticket 09 could only assert against a stub — sets both to 1.
-`MAGNES_E2E_ANONYMOUS_ACCESS` and `MAGNES_E2E_INVITATION_REQUIRED` are passed through the
-same way.
+The instance the harness asks for is stated in `fixtureFlags` in `e2e/harness/serve.js`,
+along with why the login throttle is not the shipped one. Change it there.
 
 ## What is still not covered
 
-API-key management, which is not built yet, and the administration workflows beyond
-reaching them: the User, Invitation and Role screens are driven only as far as arriving on
-each. Both are now a spec away rather than a harness away.
+- **API-key management**, which is not built yet.
+- **The administration workflows** beyond reaching them: the User, Invitation and Role
+  screens are driven only as far as arriving on each.
+- **Anonymous access off**, which the feature spec requires the one bundle to handle, and
+  **the login throttle's wait state**. Both need a fixture server configured the other way,
+  which is a second set of flags and a second project rather than anything new underneath.
+
+All of these are now a spec away rather than a harness away.
 
 ## Conventions
 

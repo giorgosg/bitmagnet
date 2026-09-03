@@ -23,19 +23,22 @@ const bitmagnet = process.env.MAGNES_E2E_BITMAGNET || path.join(root, "..", "bit
 const testdb = process.env.MAGNES_E2E_TESTDB || path.join(root, "..", "btm-testdb");
 const credentialsPath = process.env.MAGNES_E2E_CREDENTIALS;
 
-// The settings the workflows branch on. Passed through rather than hardcoded so a project
-// covering the other side of one — registration with invitations off, say — is a config
-// entry rather than a change here.
-const anonymousAccess = process.env.MAGNES_E2E_ANONYMOUS_ACCESS || "true";
-const invitationRequired = process.env.MAGNES_E2E_INVITATION_REQUIRED || "true";
-
-// The login throttle is turned off in all but name. bitmagnet buckets it by client address,
-// and every request arrives from the development proxy, so the whole suite shares one
-// bucket: at the shipped 30 a minute after a burst of 5, a handful of parallel tests that
-// each sign in would start being refused for reasons none of them are about. A project that
-// wants to *provoke* throttling sets these to 1 and asserts on the wait state.
-const loginRequestsPerMinute = process.env.MAGNES_E2E_LOGIN_REQUESTS_PER_MINUTE || "6000";
-const loginRequestBurst = process.env.MAGNES_E2E_LOGIN_REQUEST_BURST || "600";
+// The instance this suite expects, stated rather than inherited: the defaults these match
+// are bitmagnet's, and a change there should not quietly change what the suite is testing.
+//
+// The login throttle is the one that is not a default. bitmagnet buckets it by client
+// address and every request arrives from the development proxy, so the whole suite shares
+// one bucket: at the shipped 30 a minute after a burst of 5, parallel tests that each sign
+// in start being refused for reasons none of them are about. A suite that wants to *provoke*
+// throttling — the wait state ticket 09 could only assert against a stub — wants the
+// opposite of this, and its own fixture server, so it will set these to 1 where it stands
+// them up rather than reaching for a knob left here for it.
+const fixtureFlags = [
+  "--anonymous-access=true",
+  "--invitation-required=true",
+  "--login-requests-per-minute=6000",
+  "--login-request-burst=600",
+];
 
 // Everything this process is responsible for killing, newest first.
 const shutdownSteps = [];
@@ -87,16 +90,16 @@ function buildBundle() {
 function seedTemplateDSN() {
   if (process.env.TEST_POSTGRES_TEMPLATE_DSN) return process.env.TEST_POSTGRES_TEMPLATE_DSN;
 
-  const url = path.join(testdb, "bin", "testdb");
-  if (!fs.existsSync(url)) {
+  const testdbCommand = path.join(testdb, "bin", "testdb");
+  if (!fs.existsSync(testdbCommand)) {
     throw new Error(
-      `no seed template: ${url} is missing, and TEST_POSTGRES_TEMPLATE_DSN is unset. ` +
-        "See e2e/README.md.",
+      `no seed template: ${testdbCommand} is missing, and TEST_POSTGRES_TEMPLATE_DSN is ` +
+        "unset. See e2e/README.md.",
     );
   }
 
   try {
-    return childProcess.execFileSync(url, ["url"], { encoding: "utf8" }).trim();
+    return childProcess.execFileSync(testdbCommand, ["url"], { encoding: "utf8" }).trim();
   } catch (error) {
     throw new Error(
       `could not ask btm-testdb for its connection string (${error.message}). ` +
@@ -136,10 +139,7 @@ function startFixtureServer(binary, templateDSN) {
       "serve",
       "--address",
       "127.0.0.1:0",
-      `--anonymous-access=${anonymousAccess}`,
-      `--invitation-required=${invitationRequired}`,
-      `--login-requests-per-minute=${loginRequestsPerMinute}`,
-      `--login-request-burst=${loginRequestBurst}`,
+      ...fixtureFlags,
     ],
     {
       cwd: bitmagnet,
@@ -156,6 +156,14 @@ function startFixtureServer(binary, templateDSN) {
   return new Promise((resolve, reject) => {
     let buffered = "";
 
+    // Its own deadline, because the one that would otherwise apply is Playwright's
+    // web-server timeout — and reaching that means Playwright kills this process, which is
+    // the path measured to be faster than the fixture server's database drop. Failing here
+    // instead keeps the cleanup ours.
+    const deadline = setTimeout(() => {
+      reject(new Error("the fixture server did not announce itself within 60 seconds"));
+    }, 60_000);
+
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
       buffered += chunk;
@@ -167,6 +175,8 @@ function startFixtureServer(binary, templateDSN) {
       buffered = buffered.slice(newline + 1);
       child.stdout.removeAllListeners("data");
 
+      clearTimeout(deadline);
+
       try {
         resolve(JSON.parse(line));
       } catch (error) {
@@ -175,6 +185,7 @@ function startFixtureServer(binary, templateDSN) {
     });
 
     child.on("exit", (code) => {
+      clearTimeout(deadline);
       reject(new Error(`the fixture server exited with ${code} before announcing itself`));
     });
     child.on("error", reject);

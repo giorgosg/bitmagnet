@@ -11,7 +11,6 @@
     "review": "elm-review",
     "test:e2e": "playwright test",
     "test:e2e:credentialed": "env MAGNES_E2E_CREDENTIALED=1 playwright test",
-    "e2e:serve": "node e2e/harness/serve.js",
     "codegen": "elm-graphql ${BITMAGNET_URL:-http://localhost:3333}/graphql --base Magnes.Api --output src"
   },
   "license": "MIT",
