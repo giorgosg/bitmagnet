@@ -86,6 +86,7 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#70](https://github.com/giorgosg/bitmagnet/pull/70) | Collapse the duplication and shadowing in the auth packages                 | local — review finding 15                                            | Refactor; presenter wording pinned first, then held            |
 | [#71](https://github.com/giorgosg/bitmagnet/pull/71) | Delete the dead duplicate `rbac.AnonymousAccess`                            | local — review finding 14, narrow half                               | Dead-code deletion; suite and lint unchanged                   |
 | [#72](https://github.com/giorgosg/bitmagnet/pull/72) | Document that the bundled UI, not the cookie layer, is the shipped path     | local — review finding 08                                            | Documentation only; every claim re-checked at HEAD             |
+| [#73](https://github.com/giorgosg/bitmagnet/pull/73) | Add a fixture server command over the seeded template                       | local — test-fixtures ticket 02                                      | Corpus, registration, throttle and cleanup all driven for real |
 
 ## In flight
 

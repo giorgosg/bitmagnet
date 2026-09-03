@@ -13,25 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/99designs/gqlgen/graphql"
-	"github.com/bitmagnet-io/bitmagnet/internal/auth/api_key"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/authconfig"
-	"github.com/bitmagnet-io/bitmagnet/internal/auth/browser_session"
-	"github.com/bitmagnet-io/bitmagnet/internal/auth/http_auth"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/identity"
-	"github.com/bitmagnet-io/bitmagnet/internal/auth/jwt"
-	"github.com/bitmagnet-io/bitmagnet/internal/auth/rbac"
-	"github.com/bitmagnet-io/bitmagnet/internal/auth/user"
-	"github.com/bitmagnet-io/bitmagnet/internal/database"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dbtest"
-	"github.com/bitmagnet-io/bitmagnet/internal/gql"
-	gqlauth "github.com/bitmagnet-io/bitmagnet/internal/gql/auth"
-	"github.com/bitmagnet-io/bitmagnet/internal/gql/directive"
-	gqlhttpserver "github.com/bitmagnet-io/bitmagnet/internal/gql/httpserver"
-	"github.com/bitmagnet-io/bitmagnet/internal/gql/resolvers"
-	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
-	torznab_httpserver "github.com/bitmagnet-io/bitmagnet/internal/torznab/httpserver"
+	"github.com/bitmagnet-io/bitmagnet/internal/dev/fixtureserver"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -99,97 +85,26 @@ func newAuthTestServerWithConfigAndAuthenticator(
 
 	db := dbtest.New(t)
 
-	var provider database.DaoTransactionProvider = daoProvider{query: db.Query}
-
-	values := cfg.UserValues()
-	// These tests exercise the GraphQL auth path, not bcrypt's work factor.
-	values.PasswordHashingCost.Set(user.PasswordHashingCost(bcrypt.MinCost))
-
-	jwtService := jwt.NewService(jwt.Secret("test-secret"), jwt.Duration(cfg.JWTDuration))
-	userService := user.NewService(
-		provider,
-		jwtService,
-		values,
-	)
-	// Built exactly as production does, directive and all: without it the
-	// schema resolves an identity and then ignores it.
-	schema := gql.NewExecutableSchema(gql.Config{
-		Resolvers: &resolvers.Resolver{},
-		Directives: gql.DirectiveRoot{
-			Auth: gqlauth.NewDirective(),
-		},
+	// fixtureserver.Build is the whole stack, shared with the dev fixture
+	// command. Assembling it here as well would give that command its own copy
+	// to drift away from the one these tests cover.
+	stack, err := fixtureserver.Build(fixtureserver.Options{
+		Config:    cfg,
+		Provider:  daoProvider{query: db.Query},
+		Logger:    zap.NewNop().Sugar(),
+		JWTSecret: "test-secret",
+		// These tests exercise the GraphQL auth path, not bcrypt's work factor.
+		PasswordHashingCost:   bcrypt.MinCost,
+		AuthenticatorOverride: authenticatorOverride,
 	})
-
-	// The @auth directives in the schema are the GraphQL object action set. The
-	// non-GraphQL surfaces contribute their own through the same value group in
-	// authfx, and createAPIKey now checks a requested permission against the
-	// whole registry - so a stack registering only half of it would refuse keys
-	// production accepts.
-	registeredObjectActions := append(
-		gqlauth.ObjectActions(
-			directive.ExtractAuthDirectives(directive.ExtractSchemaDirectives(schema.Schema())),
-		),
-		append(http_auth.ObjectActionProvider()(), torznab_httpserver.ObjectAction)...,
-	)
-	objectActions := func() []rbac.ObjectAction { return registeredObjectActions }
-
-	apiKeyService := api_key.NewService(api_key.NewRepository(provider), objectActions)
-
-	rbacService := rbac.NewService(
-		rbac.NewRepository(provider),
-		objectActions,
-		rbac.PermissionProviders(
-			rbac.CorePermissions,
-			rbac.VerbatimPermissions(objectActions),
-			gqlauth.Permissions,
-			authconfig.AnonymousPermissions(cfg, objectActions),
-		),
-		rbac.CacheTTL(time.Minute),
-	)
-
-	authenticator := identity.NewAuthenticator(jwtService, userService, apiKeyService, rbacService)
-	if authenticatorOverride != nil {
-		authenticator = authenticatorOverride
-	}
-
-	schema = gql.NewExecutableSchema(gql.Config{
-		Resolvers: &resolvers.Resolver{
-			UserService:   userService,
-			APIKeyService: apiKeyService,
-			RBACService:   rbacService,
-			BrowserCookie: browser_session.NewCookie(cfg),
-		},
-		Directives: gql.DirectiveRoot{
-			Auth: gqlauth.NewDirective(),
-		},
-	})
-
-	engine := gin.New()
-
-	// Apply the production http server option rather than mounting the
-	// middlewares by hand, so this also covers what that option installs.
-	authOption := http_auth.New(http_auth.Params{
-		Middleware: http_auth.NewMiddleware(authenticator, browser_session.NewCookie(cfg)),
-	}).Option
-	require.Equal(t, "auth", authOption.Key())
-	require.NoError(t, authOption.Apply(engine))
-
-	graphQLOption := gqlhttpserver.New(gqlhttpserver.Params{
-		Schema: lazy.New(func() (graphql.ExecutableSchema, error) {
-			return schema, nil
-		}),
-		Logger:        zap.NewNop().Sugar(),
-		BrowserCookie: browser_session.NewCookie(cfg),
-	}).Option
-	require.Equal(t, "graphql", graphQLOption.Key())
-	require.NoError(t, graphQLOption.Apply(engine))
+	require.NoError(t, err)
 
 	// The bootstrap invitation is what makes the first registration possible.
-	invitation, err := userService.CreateInitialInvitation(t.Context())
+	invitation, err := stack.UserService.CreateInitialInvitation(t.Context())
 	require.NoError(t, err)
 	require.NotEmpty(t, invitation.Code)
 
-	server := httptest.NewServer(engine)
+	server := httptest.NewServer(stack.Engine)
 	t.Cleanup(server.Close)
 
 	return server, invitation.Code

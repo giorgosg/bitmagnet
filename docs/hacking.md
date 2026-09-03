@@ -105,6 +105,39 @@ Postgres refuses to clone a template while anything is connected to it. btm-test
 its templates against connections once built, so when `dbtest` reports that error it
 usually means a `bin/testdb seed` rebuild is running right now; wait for it and retry.
 
+### Driving a real instance from outside: `dev fixture serve`
+
+A browser suite cannot test anything past a sign-in against a test binary. `internal/dev`
+therefore has a command that serves a real bitmagnet, over a clone of the same seed
+template, and prints what a harness needs to drive it:
+
+```bash
+TEST_POSTGRES_TEMPLATE_DSN=$(cd ../btm-testdb && bin/testdb url) \
+  go run ./internal/dev fixture serve --anonymous-access=false
+```
+
+It writes **one line of JSON to stdout** and nothing else — address, GraphQL endpoint,
+bootstrap invitation code, database name, and the two settings a harness branches on — so
+the harness parses it rather than scraping logs. gin is put in release mode and pointed at
+stderr to keep that line alone on stdout. The default address is `127.0.0.1:0`, so
+parallel runs do not collide and the assigned port comes back in the announcement.
+
+The invitation is minted fresh for each run, which is the point: the harness registers its
+own throwaway administrator instead of a password living somewhere. `--invitation-required`,
+`--anonymous-access`, `--jwt-duration`, `--login-requests-per-minute` and
+`--login-request-burst` vary the workflows; setting the last two to `1` makes the second
+login attempt throttle, which is otherwise not reachable inside a test's patience.
+
+The clone is dropped when the command exits, including on `SIGINT`/`SIGTERM`. That drop
+runs from an fx `OnStop` hook rather than a `defer`, because `fx.App.Run` returns on the
+signal and the process would otherwise exit while the cleanup was still running — which
+leaves a stray database on the fixture instance. If you ever do find one, they are named
+`bitmagnet_test_*` and are safe to drop.
+
+The engine it serves is assembled by `internal/dev/fixtureserver`, which the GraphQL auth
+integration tests use too. That sharing is deliberate: a second copy of that wiring would
+pass its own tests while drifting from the one under test.
+
 ## Where the interesting problems are
 
 The fork survey in [forks/](forks/README.md) is a map of what the community found worth

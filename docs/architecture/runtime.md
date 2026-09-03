@@ -93,6 +93,13 @@ once carried a shutdown deadlock. Treat any change to a stop path as security-gr
 | `classifier` | Inspect and test the classifier configuration and its JSON schema |
 | `config`     | Show and validate resolved configuration                          |
 
+`internal/dev` is a **separate binary** with its own `commands` group, and nothing in it
+reaches the shipped surface above: `migrate` and `gorm` (the generators `task` calls), and
+`fixture serve`, which stands up a real authenticated instance over a clone of the
+btm-testdb seed template for an external harness to drive. The engine that last one serves
+is built by `internal/dev/fixtureserver`, shared with the GraphQL auth integration tests so
+the two cannot drift. See [hacking.md](../hacking.md).
+
 ## Configuration
 
 `internal/config` resolves a tree of typed structs. A subsystem contributes a `Spec`
