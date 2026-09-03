@@ -63,6 +63,9 @@ reaching an instance. Regenerate against one when bitmagnet is upgraded:
 BITMAGNET_URL=http://your-bitmagnet:3333 npm run codegen
 ```
 
+That reads the schema by introspection, which bitmagnet keeps off by default; see
+[Regenerating the client](docs/serving-and-testing.md#regenerating-the-client).
+
 ## Design decisions
 
 ### Bitmagnet serves Magnes and enforces access

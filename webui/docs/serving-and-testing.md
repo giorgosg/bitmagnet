@@ -219,3 +219,18 @@ generate against the target fork. Confirm before committing: the schema should i
 to include `Self`, `User`, `Role`, `APIKey`, `Invitation`, `AuthQuery` and `AuthMutation`.
 
 Commit the result — a checkout should build without reaching an instance.
+
+### Introspection is off by default
+
+`npm run codegen` reads the schema by introspection, and bitmagnet gates that behind
+`graphql.introspection`, which defaults to `false` (see the fork's `docs/auth.md`). Against
+an instance that has not been told otherwise, `__schema` answers `INTERNAL_SERVER_ERROR`
+while ordinary queries answer normally — so codegen fails in a way that looks like the
+instance is broken rather than like a setting is off.
+
+The key gates developer surface, not access: introspection carries no authorization of its
+own, so on an anonymously reachable instance it hands out a full map of the API. Turn it on
+for the regeneration and turn it back off, rather than leaving it on.
+
+The fixture server from `e2e/` does not help here — it leaves the same config at its zero
+value, so it is gated too.

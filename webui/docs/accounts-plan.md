@@ -49,7 +49,10 @@ BITMAGNET_URL=http://your-bitmagnet:3333 npm run codegen
 npm run format
 ```
 
-Be explicit about the URL rather than relying on the `http://localhost:3333` default.
+Be explicit about the URL rather than relying on the `http://localhost:3333` default, and
+turn `graphql.introspection` on at the instance first — it defaults to `false`, and codegen
+cannot read the schema without it. See
+[serving-and-testing.md](serving-and-testing.md#regenerating-the-client).
 **[verified]** `trunk` `77fdb9de7` introspects to 135 types including all seven above.
 Check for them before committing; codegen can succeed against the wrong schema while
 producing a client without the required surface.
