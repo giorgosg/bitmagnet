@@ -16,7 +16,8 @@ you turn it on.
 object action except auth administration. Every existing client keeps working with no
 credentials. Set it to `false` to require authentication.
 
-Then start the process and **read the log for the bootstrap invitation code**. An
+Then start the process and **read the log for the bootstrap invitation code** — or ask
+for it afterwards with `bitmagnet auth initial-invitation`, below. An
 `auth_initial_invitation` worker creates an admin invitation when no enabled admin user
 exists and logs its code; that is how the first administrator registers, through the web
 UI's registration form. It is idempotent — a restart finds the unclaimed invitation rather
@@ -25,8 +26,48 @@ than issuing another — and safe to run as multiple replicas.
 **The code is logged once, when it is created.** Later boots report only its last four
 characters, enough to tell that an invitation is still outstanding and which one, without
 every log file, aggregator and support bundle holding a live path to the first
-administrator account. If you lose the code before claiming it, delete the unclaimed
-invitation and restart — the next boot mints and logs a new one:
+administrator account.
+
+### Recovering the code
+
+If you missed that log line, or you are adopting an instance somebody else started, read
+the outstanding code back off the machine:
+
+```bash
+bitmagnet auth initial-invitation
+```
+
+Paste what it prints into the **Invitation** field of the registration form; registering
+with it creates the first administrator. It reads and never writes — running it twice
+prints the same code, and an instance deliberately left without an administrator
+invitation still has none afterwards. It reports the other states in words rather than by
+printing nothing: an administrator already exists, or nothing is outstanding because the
+workers have not run.
+
+The command writes the code to stdout on its own and everything else to stderr. **The
+application's logger also writes to stdout**, though, so a migration or startup line can
+land in front of the code on the pipe. Raising the log level suppresses the routine ones:
+
+```bash
+LOG_LEVEL=error bitmagnet auth initial-invitation
+```
+
+That reduces the noise rather than eliminating it — a warning or error still goes to
+stdout. For a script, take the last line rather than the whole stream:
+
+```bash
+code=$(LOG_LEVEL=error bitmagnet auth initial-invitation 2>/dev/null | tail -n 1)
+```
+
+There is deliberately no registration **link**. bitmagnet does not know its own external
+scheme, host, port, or the path a UI is mounted under behind a reverse proxy, so any URL
+it built would be wrong exactly when you could least afford it.
+
+**The code is never exposed over the API**, authenticated or not: reaching it requires
+access to the machine, which is the same boundary the log line had. Serving it over
+GraphQL would hand the instance to whoever asked first.
+
+Deleting the unclaimed invitation and restarting still works, and mints a fresh one:
 
 ```sql
 DELETE FROM invitations
@@ -161,7 +202,8 @@ For a real Magnes browser run, make these three properties explicit:
 
 Set `auth.anonymous_access` to `false` for the authenticated Magnes scenario, and also run
 the matrix once with its default `true` value to preserve the open-installation contract.
-Registration uses the bootstrap Invitation from the bitmagnet log and remains separate
+Registration uses the bootstrap Invitation from the bitmagnet log — or from
+`bitmagnet auth initial-invitation` — and remains separate
 from login; after registration, submit the username and password to `loginBrowser`, then
 query `self.identity`. Browser code must never read or store the cookie value.
 

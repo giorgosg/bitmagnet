@@ -87,6 +87,7 @@ once carried a shutdown deadlock. Treat any change to a stop path as security-gr
 
 | Command      | Does                                                              |
 | ------------ | ----------------------------------------------------------------- |
+| `auth`       | `initial-invitation` — print the outstanding bootstrap code       |
 | `worker`     | `run` / `list` — the normal way to run the application            |
 | `process`    | Process specific infohashes through the classifier now            |
 | `reprocess`  | Re-run classification in bulk over the existing catalogue         |
