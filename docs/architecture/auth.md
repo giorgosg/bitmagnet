@@ -224,6 +224,20 @@ the same empty state and inserts its own code — a synchronized 16-replica star
 16 distinct, non-expiring administrator invitations. It has to be a database lock rather
 than a mutex, because the processes racing here do not share memory.
 
+Because the code is logged only once, `user.Service` carries a second, **read-only**
+method beside it: `GetInitialInvitation` answers "what is the outstanding code?" and never
+writes. The two must not be confused — `CreateInitialInvitation` is a create-or-return, so
+using it to answer that question would issue an administrator invitation on an instance
+deliberately left without one. Both ask the same two questions of the database, through
+the shared `enabledAdminConditions` and `bootstrapInvitationConditions` predicates, so the
+read cannot drift onto a different invitation than the boot hook issued. The read needs no
+advisory lock: the lock serializes a check followed by an insert, and there is no insert.
+
+`internal/app/cmd/authcmd` exposes that read as `bitmagnet auth initial-invitation`. It is
+a **command and not a GraphQL field on purpose**: the log line was proof of console
+access, and serving the code over the API would hand a fresh instance to whoever asked
+first. See [../auth.md](../auth.md) for the operator-facing description.
+
 ## Credentials
 
 - **Session tokens** are JWTs. `jwt.Parse` pins HS256 rather than accepting whatever

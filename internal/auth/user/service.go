@@ -14,6 +14,11 @@ type Service interface {
 	// CreateInitialInvitation checks if there is any admin user or admin invitation.
 	// If none is found, it creates an admin invitation.
 	CreateInitialInvitation(ctx context.Context) (InitialInvitation, error)
+	// GetInitialInvitation reports the outstanding admin invitation and never
+	// creates one. Callers answering "what is the code?" want this rather than
+	// CreateInitialInvitation, which would issue an administrator invitation on
+	// an instance deliberately left without one.
+	GetInitialInvitation(ctx context.Context) (InitialInvitation, error)
 	Invite(ctx context.Context, request InviteRequest) (model.Invitation, error)
 	Register(ctx context.Context, request RegisterRequest) (model.User, error)
 	Login(ctx context.Context, username, password string) (LoginResult, error)
