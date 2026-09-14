@@ -35,4 +35,6 @@ var (
 	ErrDeleteInvitation            = errors.New("delete invitation failed")
 	ErrSetEnabled                  = errors.New("set enabled failed")
 	ErrLoginRequestLimiter         = errors.New("too many login requests")
+	ErrSessionRevoked              = errors.New("session has been revoked")
+	ErrRevokeSessions              = errors.New("revoke sessions failed")
 )

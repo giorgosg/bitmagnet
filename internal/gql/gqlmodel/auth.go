@@ -124,8 +124,40 @@ func (m SelfMutation) LoginBrowser(ctx context.Context, username, password strin
 	return nil, m.BrowserCookie.Issue(ctx, result.Token)
 }
 
+// LogoutBrowser clears the cookie and revokes the session it carried. Clearing
+// the cookie alone only drops the client's copy: the JWT inside it stays valid
+// for its full lifetime, so anything that captured it before the logout kept the
+// account until the token expired.
+//
+// Revoking ends every session for that user, not only this one — see
+// user.RevokeSessions. Anonymous callers reach this by design, and revoke
+// nothing; an API-key identity is refused a revocation for the same reason it is
+// refused key management, so a narrowly scoped key cannot log its owner out.
 func (m SelfMutation) LogoutBrowser(ctx context.Context) (*string, error) {
+	if currentUser, err := gqlauth.UserSessionFromContext(ctx); err == nil {
+		if revokeErr := m.UserService.RevokeSessions(ctx, currentUser.ID); revokeErr != nil {
+			return nil, revokeErr
+		}
+	}
+
 	return nil, m.BrowserCookie.Expire(ctx)
+}
+
+// UpdatePassword rotates the caller's own password, and with it every session
+// the old password opened — including the caller's, which has to log in again.
+//
+// Re-issuing a token here instead would keep the caller signed in, and is what a
+// larger contract would do: it means answering with a credential, and for the
+// cookie transport also writing a new one. Ending the session is the simpler
+// promise, and the safer default for the case this exists to serve, which is a
+// password rotated because something was leaked.
+func (m SelfMutation) UpdatePassword(ctx context.Context, input gen.UpdatePasswordInput) (*string, error) {
+	currentUser, err := gqlauth.UserSessionFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return nil, m.UserService.UpdatePassword(ctx, currentUser.ID, input.CurrentPassword, input.NewPassword)
 }
 
 func (m SelfMutation) CreateAPIKey(ctx context.Context, input gen.CreateAPIKeyInput) (gen.CreateAPIKeyResult, error) {

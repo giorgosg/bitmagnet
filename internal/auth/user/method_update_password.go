@@ -53,11 +53,21 @@ func (s *service) UpdatePassword(ctx context.Context, userID int, currentPasswor
 			return nil
 		}
 
-		_, err = tx.WithContext(ctx).User.Where(tx.User.ID.Eq(userID)).UpdateSimple(
+		if _, err = tx.WithContext(ctx).User.Where(tx.User.ID.Eq(userID)).UpdateSimple(
 			tx.User.Password.Value(hashedPassword),
-		)
+		); err != nil {
+			return err
+		}
 
-		return err
+		// Rotating a password is what an operator reaches for when a token has
+		// leaked, so it has to end the sessions the old password opened -- in the
+		// same transaction, because a password changed without the revocation
+		// would leave exactly the credential the rotation was meant to kill.
+		//
+		// The caller's own session goes with them. See the GraphQL mutation's
+		// note: the alternative is re-issuing a token here, which is a larger
+		// contract than "sign in again".
+		return revokeSessionsTx(ctx, tx, userID)
 	})
 	if errTx != nil {
 		return fmt.Errorf("%w: %w: %w: %w", Err, ErrUpdatePassword, ErrTransaction, errTx)

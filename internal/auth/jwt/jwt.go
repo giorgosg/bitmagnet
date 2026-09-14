@@ -16,11 +16,25 @@ const issuer = "bitmagnet"
 type Claims struct {
 	UserID   int    `json:"user_id"`
 	Username string `json:"username"`
+	// TokenEpoch is the generation of the user's sessions at the moment this
+	// token was minted. Authentication refuses a token whose epoch is behind the
+	// user row's, which is how a logout or a password change revokes tokens it
+	// cannot reach. A token minted before the claim existed decodes as 0, the
+	// same as the column's default, so nothing is revoked retroactively.
+	TokenEpoch int32 `json:"token_epoch"`
 	jwt.RegisteredClaims
 }
 
+// Subject is what a token is minted for. The fields travel together and two of
+// them are bare integers, so they are named rather than positional.
+type Subject struct {
+	UserID     int
+	Username   string
+	TokenEpoch int32
+}
+
 type Service interface {
-	Generate(userID int, username string) (string, error)
+	Generate(subject Subject) (string, error)
 	Parse(token string) (*Claims, error)
 }
 
@@ -54,10 +68,11 @@ func NewService(secretKey Secret, duration Duration) Service {
 	}
 }
 
-func (j *service) Generate(userID int, username string) (string, error) {
+func (j *service) Generate(subject Subject) (string, error) {
 	claims := &Claims{
-		UserID:   userID,
-		Username: username,
+		UserID:     subject.UserID,
+		Username:   subject.Username,
+		TokenEpoch: subject.TokenEpoch,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(j.tokenDuration)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

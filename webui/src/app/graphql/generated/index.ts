@@ -675,6 +675,11 @@ export type SelfMutation = {
   loginBrowser?: Maybe<Scalars['Void']['output']>;
   logoutBrowser?: Maybe<Scalars['Void']['output']>;
   register: RegisterResult;
+  /**
+   * Change the calling account's own password. Every session for that account
+   * ends, including the one that called this, so the client has to log in again.
+   */
+  updatePassword?: Maybe<Scalars['Void']['output']>;
 };
 
 
@@ -702,6 +707,11 @@ export type SelfMutationLoginBrowserArgs = {
 
 export type SelfMutationRegisterArgs = {
   input: RegisterInput;
+};
+
+
+export type SelfMutationUpdatePasswordArgs = {
+  input: UpdatePasswordInput;
 };
 
 export type SelfQuery = {
@@ -1044,6 +1054,11 @@ export type TorrentTagFacetInput = {
   aggregate?: InputMaybe<Scalars['Boolean']['input']>;
   filter?: InputMaybe<Array<Scalars['String']['input']>>;
   logic?: InputMaybe<FacetLogic>;
+};
+
+export type UpdatePasswordInput = {
+  currentPassword: Scalars['String']['input'];
+  newPassword: Scalars['String']['input'];
 };
 
 export type User = {

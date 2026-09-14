@@ -58,6 +58,18 @@ func (a authenticatorJWT) Authenticate(ctx context.Context, token string) (Ident
 		return nil, false, fmt.Errorf("%w: %w", user.Err, user.ErrDisabled)
 	}
 
+	// A logout or a password change bumps the user's token epoch, and every
+	// token minted before that carries the older one. This is the only place the
+	// two meet: the token is stateless and cannot be recalled, so the row is what
+	// says whether it is still current.
+	//
+	// No match, for the same reason as a disabled account above — a revoked
+	// session that aborted the chain could not reach self.login to replace
+	// itself.
+	if claims.TokenEpoch != usr.TokenEpoch {
+		return nil, false, fmt.Errorf("%w: %w", user.Err, user.ErrSessionRevoked)
+	}
+
 	role, err := a.rbac.GetRole(ctx, rbac.Role(usr.RoleName))
 	if err != nil {
 		return nil, true, err

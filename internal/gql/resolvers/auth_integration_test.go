@@ -953,7 +953,13 @@ func TestSelfRecoveryBoundaryIsReachableForEveryIdentity(t *testing.T) {
 	userToken := registerAndLoginAsRole(t, server, adminToken, "user", "ordinary")
 	editorToken := registerAndLoginAsRole(t, server, adminToken, "editor", "editor")
 	customToken := registerAndLoginAsRole(t, server, adminToken, "custom", "custom")
-	customCookie := loginBrowserCookie(t, server, "custom", "correct-horse-battery-staple-99")
+
+	// The logout at the end of this function is a second account on the same
+	// Role, not this one. Logging out revokes every session for the user, and
+	// the parallel subtests below run after this function returns - sharing an
+	// account would leave them holding a token that logout had just revoked.
+	_ = registerAndLoginAsRole(t, server, adminToken, "custom", "custom-browser")
+	customCookie := loginBrowserCookie(t, server, "custom-browser", "correct-horse-battery-staple-99")
 	apiKey := apiKeyFrom(t, createAPIKeyAs(
 		t, server, adminToken, "recovery", "graphql", "version", "query",
 	))

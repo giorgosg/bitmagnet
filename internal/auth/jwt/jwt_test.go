@@ -19,7 +19,7 @@ func TestJWTService_GenerateAndValidateToken(t *testing.T) {
 	username := "testuser"
 
 	// Generate token
-	token, err := jwtService.Generate(userID, username)
+	token, err := jwtService.Generate(jwt.Subject{UserID: userID, Username: username})
 	require.NoError(t, err)
 	require.NotEmpty(t, token)
 
@@ -58,7 +58,7 @@ func TestJWTService_TokenWithDifferentSecret(t *testing.T) {
 	username := "testuser"
 
 	// Generate token with first service
-	token, err := jwtService1.Generate(userID, username)
+	token, err := jwtService1.Generate(jwt.Subject{UserID: userID, Username: username})
 	require.NoError(t, err)
 
 	// Try to validate with second service (different secret)
@@ -88,4 +88,34 @@ func TestJWTService_RejectsTokenFromDifferentIssuer(t *testing.T) {
 
 	_, err = service.Parse(signed)
 	require.Error(t, err, "tokens issued for another application must be rejected")
+}
+
+// The epoch has to survive the round trip, because it is the only thing that
+// distinguishes a current session from a revoked one.
+func TestJWTServiceCarriesTheTokenEpoch(t *testing.T) {
+	t.Parallel()
+
+	jwtService := jwt.NewService("test-secret-key", jwt.Duration(time.Minute))
+
+	token, err := jwtService.Generate(jwt.Subject{UserID: 123, Username: "testuser", TokenEpoch: 7})
+	require.NoError(t, err)
+
+	claims, err := jwtService.Parse(token)
+	require.NoError(t, err)
+	assert.Equal(t, int32(7), claims.TokenEpoch)
+}
+
+// A token minted before the claim existed has to keep working, or deploying the
+// revocation would log every session out.
+func TestJWTServiceReadsAMissingEpochAsZero(t *testing.T) {
+	t.Parallel()
+
+	jwtService := jwt.NewService("test-secret-key", jwt.Duration(time.Minute))
+
+	token, err := jwtService.Generate(jwt.Subject{UserID: 123, Username: "testuser"})
+	require.NoError(t, err)
+
+	claims, err := jwtService.Parse(token)
+	require.NoError(t, err)
+	assert.Zero(t, claims.TokenEpoch)
 }

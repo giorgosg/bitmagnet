@@ -24,6 +24,9 @@ type Service interface {
 	Login(ctx context.Context, username, password string) (LoginResult, error)
 	SetRole(ctx context.Context, userID int, roleName string) (model.User, error)
 	UpdatePassword(ctx context.Context, userID int, currentPassword, newPassword string) error
+	// RevokeSessions ends every outstanding token for a user. UpdatePassword
+	// does it too, in its own transaction.
+	RevokeSessions(ctx context.Context, userID int) error
 	Get(ctx context.Context, userID int) (model.User, error)
 	GetByUsername(ctx context.Context, username string) (model.User, error)
 	List(ctx context.Context, params ListUsersParams) (ListUsersResult, error)
