@@ -51,7 +51,11 @@ func New(params Params) Result {
 	active := &concurrency.AtomicValue[bool]{}
 	settings := crawlerSettingsFromConfig(params.Config)
 
-	var c crawler
+	var (
+		c           crawler
+		stopCrawler context.CancelFunc
+		crawlerDone chan struct{}
+	)
 
 	persistedTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: "bitmagnet",
@@ -64,6 +68,9 @@ func New(params Params) Result {
 		Worker: worker.NewWorker(
 			"dht_crawler",
 			fx.Hook{
+				// The crawler outlives this hook's context by design; see the
+				// comment on the context it creates below.
+				//nolint:contextcheck
 				OnStart: func(context.Context) error {
 					active.Set(true)
 
@@ -132,7 +139,6 @@ func New(params Params) Result {
 						},
 						blockingManager: blockingManager,
 						soughtNodeID:    &concurrency.AtomicValue[protocol.ID]{},
-						stopped:         make(chan struct{}),
 						persistedTotal:  persistedTotal,
 						logger:          params.Logger.Named("dht_crawler"),
 						maxQueueDepth:   params.Config.MaxQueueDepth,
@@ -140,20 +146,41 @@ func New(params Params) Result {
 					}
 					c.soughtNodeID.Set(protocol.RandomNodeID())
 
-					// todo: Fix!
-					//nolint:contextcheck
-					go c.start()
+					// The crawler's lifetime is not the start hook's: fx
+					// cancels that context once startup completes, so deriving
+					// from it would stop the crawler the moment it began. The
+					// stop hook below is what ends this one.
+					crawlerCtx, cancel := context.WithCancel(context.Background())
+					stopCrawler = cancel
+					crawlerDone = make(chan struct{})
+
+					go func() {
+						defer close(crawlerDone)
+
+						c.start(crawlerCtx)
+					}()
 
 					return nil
 				},
-				OnStop: func(context.Context) error {
+				OnStop: func(ctx context.Context) error {
 					active.Set(false)
 
-					if c.stopped != nil {
-						close(c.stopped)
+					if stopCrawler == nil {
+						return nil
 					}
 
-					return nil
+					stopCrawler()
+
+					// Waiting is the point: the crawler writes the batches it
+					// still holds as it stops, and returning before that is what
+					// used to discard them. The caller's context bounds the wait,
+					// so a stage that will not stop cannot hold up the process.
+					select {
+					case <-crawlerDone:
+						return nil
+					case <-ctx.Done():
+						return ctx.Err()
+					}
 				},
 			},
 		),
