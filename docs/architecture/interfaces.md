@@ -82,6 +82,12 @@ a cross-origin POST a _simple request_, sent with no preflight, so a page the op
 visits could write to this endpoint without the browser ever consulting `allowed_origins`.
 Refusing them forces the preflight that the origin policy gets to answer.
 
+The import owns a context derived from the request's, and cancelling it - a client
+disconnecting mid-stream, or a shutdown - ends the buffering loop and makes any waiting
+`Import` return `ErrImportClosed`. That has to hold: `http.Server.Shutdown` waits for
+in-flight requests, so an import that cannot be interrupted hangs the process rather than
+just itself.
+
 ## Telemetry and health
 
 - `/metrics` — Prometheus. Collectors are contributed to the `prometheus_collectors` group
