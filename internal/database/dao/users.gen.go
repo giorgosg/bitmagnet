@@ -39,6 +39,7 @@ func newUser(db *gorm.DB, opts ...gen.DOOption) user {
 	_user.LastLoginAt = field.NewField(tableName, "last_login_at")
 	_user.CreatedAt = field.NewTime(tableName, "created_at")
 	_user.UpdatedAt = field.NewTime(tableName, "updated_at")
+	_user.TokenEpoch = field.NewInt32(tableName, "token_epoch")
 	_user.Role = userBelongsToRole{
 		db: db.Session(&gorm.Session{}),
 
@@ -76,6 +77,7 @@ type user struct {
 	LastLoginAt     field.Field
 	CreatedAt       field.Time
 	UpdatedAt       field.Time
+	TokenEpoch      field.Int32
 	Role            userBelongsToRole
 
 	Permissions userHasManyPermissions
@@ -106,6 +108,7 @@ func (u *user) updateTableName(table string) *user {
 	u.LastLoginAt = field.NewField(table, "last_login_at")
 	u.CreatedAt = field.NewTime(table, "created_at")
 	u.UpdatedAt = field.NewTime(table, "updated_at")
+	u.TokenEpoch = field.NewInt32(table, "token_epoch")
 
 	u.fillFieldMap()
 
@@ -122,7 +125,7 @@ func (u *user) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
 }
 
 func (u *user) fillFieldMap() {
-	u.fieldMap = make(map[string]field.Expr, 13)
+	u.fieldMap = make(map[string]field.Expr, 14)
 	u.fieldMap["id"] = u.ID
 	u.fieldMap["username"] = u.Username
 	u.fieldMap["email"] = u.Email
@@ -134,6 +137,7 @@ func (u *user) fillFieldMap() {
 	u.fieldMap["last_login_at"] = u.LastLoginAt
 	u.fieldMap["created_at"] = u.CreatedAt
 	u.fieldMap["updated_at"] = u.UpdatedAt
+	u.fieldMap["token_epoch"] = u.TokenEpoch
 
 }
 

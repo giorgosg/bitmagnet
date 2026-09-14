@@ -109,6 +109,10 @@ as an `HttpOnly`, `Secure`, `SameSite=Strict` cookie on `/graphql`. The mutation
 credential or Identity snapshot; query `self.identity` after it succeeds. `self.logoutBrowser`
 expires the same cookie and succeeds even when the browser has no usable credential.
 
+Logging out also **revokes the session**, rather than only dropping the browser's copy of
+it. That ends every session for that account, on every device and both transports — see
+[Ending a session](#ending-a-session).
+
 The cookie name defaults to `__Secure-bitmagnet` and is configurable through
 `auth.browser_cookie_name`, but the `__Secure-` prefix is required. Its expiry follows
 `auth.jwt_duration`. Because browsers reject `Secure` cookies over plain HTTP, browser login
@@ -120,6 +124,34 @@ Identity discovery, registration, both login forms, and browser logout remain re
 when the current Role has no Permissions. Sensitive fields below that boundary — listing,
 creating, or deleting API keys — still require an authenticated User session and reject API
 key identities as well as Anonymous callers.
+
+## Ending a session
+
+A JWT is stateless: it cannot be recalled, and until it expires it is accepted on its own
+merits. Every token therefore carries the **epoch** of its user's sessions, and
+authentication refuses a token whose epoch is behind the one on the user row. Two things
+bump it:
+
+| Operation             | Effect                                                                |
+| --------------------- | --------------------------------------------------------------------- |
+| `self.logoutBrowser`  | ends every session for the calling account, then expires the cookie   |
+| `self.updatePassword` | ends every session for the account, including the one that changed it |
+
+Both revoke **all** of that account's sessions, not just the credential in hand. bitmagnet
+keeps no per-session record — see
+[ADR 0003](adr/0003-revoke-sessions-with-a-per-user-token-epoch.md) — so "sign out of this
+device only" is not available. A revoked token behaves exactly like any other dead
+credential: the request falls through to Anonymous rather than being refused outright, so
+the client can still reach `self.login` to replace it.
+
+`self.updatePassword(input: {currentPassword, newPassword})` is the rotation surface. It
+requires an interactive User session — an API key is refused, as it is for key management —
+checks the current password, and holds the new password to `auth.password_min_entropy`. The
+caller has to log in again afterwards; that is deliberate, since the operation exists for
+the case where a credential has leaked.
+
+Revoking does not touch API keys. They are separate credentials with their own lifecycle:
+delete the key.
 
 An explicit `Authorization` header always takes precedence over the browser cookie. A bad
 explicit bearer credential falls back to the Anonymous identity; it does not borrow the
@@ -154,6 +186,7 @@ message or its wrapping. Application errors retain their GraphQL `path` and `loc
 | `EMAIL_REQUIRED`                        | `auth.email_required` is on and no email was supplied          |
 | `EMAIL_INVALID`                         | The email does not match the server's address pattern          |
 | `PASSWORD_INSUFFICIENT_ENTROPY`         | The password is below `auth.password_min_entropy`              |
+| `PASSWORD_INCORRECT`                    | The current password given to `self.updatePassword` is wrong   |
 | `ROLE_NOT_FOUND`                        | The named Role does not exist                                  |
 | `PERMISSION_INVALID`                    | A requested API-key Object action is not a registered one      |
 | `UNAUTHORIZED`                          | The Identity lacks the refused GraphQL Object action           |
@@ -295,10 +328,11 @@ baseline: orchestrators poll it, and it reports liveness only.
   directive enforces server-side regardless of what the browser holds.
 
   What it means for an operator: script injection anywhere on the API origin yields a
-  bearer token valid for the whole of `auth.jwt_duration`, and `logoutBrowser` expires the
-  cookie without revoking the token it carried, so signing out does not shorten that
-  window. Prefer `loginBrowser` for any client you write yourself, and keep
-  `auth.jwt_duration` no longer than you would accept a leaked token living.
+  bearer token valid until it expires or the session is revoked. Signing out now does
+  revoke it — see [Ending a session](#ending-a-session) — so a leaked token is no longer
+  good for the whole of `auth.jwt_duration` regardless of what the user does. Prefer
+  `loginBrowser` for any client you write yourself, and keep `auth.jwt_duration` no longer
+  than you would accept an unnoticed leak living.
 
 - **CORS origins still default to `*`.** Carried over from before this lineage had
   authentication. While anonymous access is on, any web page can query a reachable

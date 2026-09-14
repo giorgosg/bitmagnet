@@ -86,6 +86,23 @@ It took four fixes to hold this across both credential types. `revokedAPIKey` na
 five outcomes meaning "not a usable credential" and lets them fall through, leaving only
 genuine repository failures to abort.
 
+**A stale token epoch is one of those ways to fail.** `users.token_epoch` is the
+generation of a user's sessions; every JWT carries the value current when it was minted,
+and `authenticator_jwt.go` refuses one that is behind the row. It is the only revocation a
+stateless token can have: the token cannot be recalled, so what changes is the row it is
+checked against. `user.RevokeSessions` bumps it, and `UpdatePassword` does the same inside
+its own transaction, so a rotated password and the sessions it invalidates commit together.
+
+The increment is computed by the database (`token_epoch = token_epoch + 1`) rather than
+read and written back, so two concurrent revocations cannot both write the same value and
+leave the first one's tokens alive.
+
+This revokes per **account**, not per session, which is the trade recorded in
+[ADR 0003](../adr/0003-revoke-sessions-with-a-per-user-token-epoch.md): it costs nothing
+per request, because the authenticator already loads the user row, and it cannot express
+"sign out of this device only". Tokens minted before the claim existed decode as epoch 0,
+which is the column's default, so deploying it revokes nothing retroactively.
+
 The HTTP boundary uses the recorded source to expire rejected browser cookies. It never
 expires a cookie ignored because an explicit bearer was present, and it leaves credentials
 untouched when authentication failed because the database or RBAC service could not answer.

@@ -1,0 +1,3 @@
+# Revoke sessions with a per-user token epoch
+
+Every JWT carries the epoch of its user's sessions, held in `users.token_epoch`, and authentication refuses a token whose epoch is behind the row's. Logout and a password change both bump it. This makes a stateless token revocable without a per-session record, at no cost per request — the authenticator already loads the user row — and the price is that revocation is per account rather than per session: signing out on one device signs out every device, and "sign out everywhere else" cannot be offered separately. A per-session store remains the way to change that, and would replace this rather than extend it.

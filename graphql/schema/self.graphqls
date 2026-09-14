@@ -11,6 +11,16 @@ type SelfMutation {
   logoutBrowser: Void
   createAPIKey(input: CreateAPIKeyInput!): CreateAPIKeyResult!
   deleteAPIKey(id: Int!): Void
+  """
+  Change the calling account's own password. Every session for that account
+  ends, including the one that called this, so the client has to log in again.
+  """
+  updatePassword(input: UpdatePasswordInput!): Void
+}
+
+input UpdatePasswordInput {
+  currentPassword: String!
+  newPassword: String!
 }
 
 input RegisterInput {

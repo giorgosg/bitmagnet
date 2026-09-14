@@ -20,7 +20,15 @@ func (c *crawler) getNodesForSampleInfoHashes(ctx context.Context) {
 			}
 		}
 
-		<-time.After(time.Second)
+		// Also selected on the context: an empty routing table skips the loop
+		// above, and this used to be the whole body, so a cancelled crawler kept
+		// polling for ever and the stop hook waited for a stage that never
+		// returned.
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Second):
+		}
 	}
 }
 

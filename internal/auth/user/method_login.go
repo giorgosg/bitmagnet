@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/jwt"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -59,7 +60,11 @@ func (s *service) Login(ctx context.Context, username, password string) (LoginRe
 		return LoginResult{}, fmt.Errorf("%w: %w: %w", Err, ErrLogin, ErrDisabled)
 	}
 
-	token, err := s.jwtService.Generate(user.ID, user.Username)
+	token, err := s.jwtService.Generate(jwt.Subject{
+		UserID:     user.ID,
+		Username:   user.Username,
+		TokenEpoch: user.TokenEpoch,
+	})
 	if err != nil {
 		return LoginResult{}, fmt.Errorf("%w: %w: %w: %w", Err, ErrLogin, ErrGenerateToken, err)
 	}
