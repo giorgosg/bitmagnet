@@ -24,6 +24,7 @@ type User struct {
 	LastLoginAt     sql.NullTime     `gorm:"column:last_login_at" json:"lastLoginAt"`
 	CreatedAt       time.Time        `gorm:"column:created_at;not null;<-:create" json:"createdAt"`
 	UpdatedAt       time.Time        `gorm:"column:updated_at;not null" json:"updatedAt"`
+	TokenEpoch      int32            `gorm:"column:token_epoch;not null" json:"tokenEpoch"`
 	Role            Role             `gorm:"foreignKey:Name;references:RoleName" json:"role"`
 	Permissions     []RolePermission `gorm:"foreignKey:RoleName;references:RoleName" json:"permissions"`
 }

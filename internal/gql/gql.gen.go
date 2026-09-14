@@ -342,12 +342,13 @@ type ComplexityRoot struct {
 	}
 
 	SelfMutation struct {
-		CreateAPIKey  func(childComplexity int, input gen.CreateAPIKeyInput) int
-		DeleteAPIKey  func(childComplexity int, id int) int
-		Login         func(childComplexity int, username string, password string) int
-		LoginBrowser  func(childComplexity int, username string, password string) int
-		LogoutBrowser func(childComplexity int) int
-		Register      func(childComplexity int, input gen.RegisterInput) int
+		CreateAPIKey   func(childComplexity int, input gen.CreateAPIKeyInput) int
+		DeleteAPIKey   func(childComplexity int, id int) int
+		Login          func(childComplexity int, username string, password string) int
+		LoginBrowser   func(childComplexity int, username string, password string) int
+		LogoutBrowser  func(childComplexity int) int
+		Register       func(childComplexity int, input gen.RegisterInput) int
+		UpdatePassword func(childComplexity int, input gen.UpdatePasswordInput) int
 	}
 
 	SelfQuery struct {
@@ -1791,6 +1792,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.SelfMutation.Register(childComplexity, args["input"].(gen.RegisterInput)), true
+	case "SelfMutation.updatePassword":
+		if e.ComplexityRoot.SelfMutation.UpdatePassword == nil {
+			break
+		}
+
+		args, err := ec.field_SelfMutation_updatePassword_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.SelfMutation.UpdatePassword(childComplexity, args["input"].(gen.UpdatePasswordInput)), true
 
 	case "SelfQuery.apiKeys":
 		if e.ComplexityRoot.SelfQuery.APIKeys == nil {
@@ -2650,6 +2662,7 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 		ec.unmarshalInputTorrentReprocessInput,
 		ec.unmarshalInputTorrentSourceFacetInput,
 		ec.unmarshalInputTorrentTagFacetInput,
+		ec.unmarshalInputUpdatePasswordInput,
 		ec.unmarshalInputVideoResolutionFacetInput,
 		ec.unmarshalInputVideoSourceFacetInput,
 	)
@@ -3423,6 +3436,16 @@ type SelfMutation {
   logoutBrowser: Void
   createAPIKey(input: CreateAPIKeyInput!): CreateAPIKeyResult!
   deleteAPIKey(id: Int!): Void
+  """
+  Change the calling account's own password. Every session for that account
+  ends, including the one that called this, so the client has to log in again.
+  """
+  updatePassword(input: UpdatePasswordInput!): Void
+}
+
+input UpdatePasswordInput {
+  currentPassword: String!
+  newPassword: String!
 }
 
 input RegisterInput {
@@ -4219,6 +4242,8 @@ func (ec *executionContext) childFields_SelfMutation(ctx context.Context, field 
 		return ec.fieldContext_SelfMutation_createAPIKey(ctx, field)
 	case "deleteAPIKey":
 		return ec.fieldContext_SelfMutation_deleteAPIKey(ctx, field)
+	case "updatePassword":
+		return ec.fieldContext_SelfMutation_updatePassword(ctx, field)
 	}
 	return nil, fmt.Errorf("no field named %q was found under type SelfMutation", field.Name)
 }
@@ -5063,6 +5088,20 @@ func (ec *executionContext) field_SelfMutation_register_args(ctx context.Context
 	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input",
 		func(ctx context.Context, v any) (gen.RegisterInput, error) {
 			return ec.unmarshalNRegisterInput2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐRegisterInput(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_SelfMutation_updatePassword_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input",
+		func(ctx context.Context, v any) (gen.UpdatePasswordInput, error) {
+			return ec.unmarshalNUpdatePasswordInput2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐUpdatePasswordInput(ctx, v)
 		})
 	if err != nil {
 		return nil, err
@@ -10293,6 +10332,50 @@ func (ec *executionContext) fieldContext_SelfMutation_deleteAPIKey(ctx context.C
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_SelfMutation_deleteAPIKey_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SelfMutation_updatePassword(ctx context.Context, field graphql.CollectedField, obj *gqlmodel.SelfMutation) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_SelfMutation_updatePassword(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return obj.UpdatePassword(ctx, fc.Args["input"].(gen.UpdatePasswordInput))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOVoid2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_SelfMutation_updatePassword(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SelfMutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Void does not have child fields")
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_SelfMutation_updatePassword_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -16160,6 +16243,43 @@ func (ec *executionContext) unmarshalInputTorrentTagFacetInput(ctx context.Conte
 	return it, nil
 }
 
+func (ec *executionContext) unmarshalInputUpdatePasswordInput(ctx context.Context, obj any) (gen.UpdatePasswordInput, error) {
+	var it gen.UpdatePasswordInput
+	if obj == nil {
+		return it, nil
+	}
+
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"currentPassword", "newPassword"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "currentPassword":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("currentPassword"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.CurrentPassword = data
+		case "newPassword":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("newPassword"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.NewPassword = data
+		}
+	}
+	return it, nil
+}
+
 func (ec *executionContext) unmarshalInputVideoResolutionFacetInput(ctx context.Context, obj any) (gen.VideoResolutionFacetInput, error) {
 	var it gen.VideoResolutionFacetInput
 	if obj == nil {
@@ -19499,6 +19619,44 @@ func (ec *executionContext) _SelfMutation(ctx context.Context, sel ast.Selection
 					}
 				}()
 				res = ec._SelfMutation_deleteAPIKey(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "updatePassword":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._SelfMutation_updatePassword(ctx, field, obj)
 				if res == graphql.RequiredNull {
 					atomic.AddUint32(&fs.Invalids, 1)
 				}
@@ -22881,6 +23039,11 @@ func (ec *executionContext) marshalNTorrentSuggestTagsResult2githubᚗcomᚋbitm
 
 func (ec *executionContext) marshalNTorrentTagAgg2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐTorrentTagAgg(ctx context.Context, sel ast.SelectionSet, v gen.TorrentTagAgg) graphql.Marshaler {
 	return ec._TorrentTagAgg(ctx, sel, &v)
+}
+
+func (ec *executionContext) unmarshalNUpdatePasswordInput2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐUpdatePasswordInput(ctx context.Context, v any) (gen.UpdatePasswordInput, error) {
+	res, err := ec.unmarshalInputUpdatePasswordInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
 }
 
 func (ec *executionContext) marshalNUser2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋmodelᚐUser(ctx context.Context, sel ast.SelectionSet, v model.User) graphql.Marshaler {

@@ -101,6 +101,11 @@ at: a template stale against the migrations in the tree is refused rather than u
 an instance with no template on it skips rather than fails. Treat the clone's content as
 read-only — one immutable template is what keeps the clone cost flat.
 
+**Adding a migration obsoletes the template**, and the seeded tests then fail rather than
+skip — deliberately, since a clone of the older schema would be missing the columns the new
+code writes to. Migrate btm-testdb's corpus database and run `bin/testdb seed` to build the
+template at the new version.
+
 Postgres refuses to clone a template while anything is connected to it. btm-testdb seals
 its templates against connections once built, so when `dbtest` reports that error it
 usually means a `bin/testdb seed` rebuild is running right now; wait for it and retry.

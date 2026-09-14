@@ -36,6 +36,7 @@ var wantPresentations = []struct {
 		ErrorCodePasswordInsufficientEntropy,
 		"password has insufficient entropy",
 	},
+	{user.ErrIncorrectPassword, ErrorCodePasswordIncorrect, "password is incorrect"},
 	{user.ErrRoleNotFound, ErrorCodeRoleNotFound, "role not found"},
 	{api_key.ErrPermissionInvalid, ErrorCodePermissionInvalid, "invalid api key permission"},
 }

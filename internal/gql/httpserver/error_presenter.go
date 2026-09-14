@@ -24,6 +24,7 @@ const (
 	ErrorCodeEmailRequired                       = "EMAIL_REQUIRED"
 	ErrorCodeEmailInvalid                        = "EMAIL_INVALID"
 	ErrorCodePasswordInsufficientEntropy         = "PASSWORD_INSUFFICIENT_ENTROPY"
+	ErrorCodePasswordIncorrect                   = "PASSWORD_INCORRECT"
 	ErrorCodeRoleNotFound                        = "ROLE_NOT_FOUND"
 	ErrorCodePermissionInvalid                   = "PERMISSION_INVALID"
 	ErrorCodeUnauthorized                        = "UNAUTHORIZED"
@@ -86,6 +87,7 @@ var serviceErrorPresentations = []errorClassification{
 	{target: user.ErrEmailMissing, code: ErrorCodeEmailRequired},
 	{target: user.ErrEmailInvalid, code: ErrorCodeEmailInvalid},
 	{target: user.ErrPasswordInsufficientEntropy, code: ErrorCodePasswordInsufficientEntropy},
+	{target: user.ErrIncorrectPassword, code: ErrorCodePasswordIncorrect},
 	{target: user.ErrRoleNotFound, code: ErrorCodeRoleNotFound},
 	{target: api_key.ErrPermissionInvalid, code: ErrorCodePermissionInvalid},
 }

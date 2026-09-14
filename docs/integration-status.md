@@ -88,6 +88,7 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#72](https://github.com/giorgosg/bitmagnet/pull/72) | Document that the bundled UI, not the cookie layer, is the shipped path     | local — review finding 08                                            | Documentation only; every claim re-checked at HEAD             |
 | [#73](https://github.com/giorgosg/bitmagnet/pull/73) | Add a fixture server command over the seeded template                       | local — test-fixtures ticket 02                                      | Corpus, registration, throttle and cleanup all driven for real |
 | [#74](https://github.com/giorgosg/bitmagnet/pull/74) | Retrieve the outstanding bootstrap invitation from the console              | local — bootstrap-invitation ticket 01                               | Create-or-return minted a second invitation; observed red      |
+| [#77](https://github.com/giorgosg/bitmagnet/pull/77) | Revoke sessions on logout, and expose `self.updatePassword`                 | local — review finding 06                                            | A logged-out token still answered as its user; seven red       |
 
 ## In flight
 

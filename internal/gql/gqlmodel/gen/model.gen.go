@@ -333,6 +333,11 @@ type TorrentTagFacetInput struct {
 	Filter    graphql.Omittable[[]string]          `json:"filter,omitempty"`
 }
 
+type UpdatePasswordInput struct {
+	CurrentPassword string `json:"currentPassword"`
+	NewPassword     string `json:"newPassword"`
+}
+
 type VideoResolutionAgg struct {
 	Value      *model.VideoResolution `json:"value,omitempty"`
 	Label      string                 `json:"label"`
