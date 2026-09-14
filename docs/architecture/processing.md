@@ -25,9 +25,25 @@ is inserted, and a ticker polls at `CheckInterval` as a safety net. A handler th
 job immediately resets its ticker to fire again, so a backlog drains at full speed.
 
 Claiming a job is `SELECT … FOR UPDATE SKIP LOCKED` inside a transaction, which is what
-makes multiple bitmagnet processes against one database safe. **The handler runs inside
-that transaction** — see the issue notes below for why that matters
-under load.
+makes multiple bitmagnet processes against one database safe. That transaction **commits
+before the handler runs**: it sets `locked_until` — the claim's lease — and nothing else.
+The handler then runs with no transaction open, and a second short transaction writes the
+outcome and clears the lease.
+
+The lease is also the recovery path. A worker that dies mid-job leaves the row `pending`
+with a lease that expires, and the next fetch picks it up; nothing else reaps it, and there
+is no separate reaper. That is what the claiming transaction's rollback used to do. The
+lease is `JobTimeout + 30s`, and `handler.Exec` returns within `JobTimeout` whatever the job
+does, so the slack covers only the outcome write.
+
+Two consequences to know before changing this:
+
+- **The outcome write is conditional on still holding the lease.** A job that overran has
+  already been handed to another worker, and its late outcome must not overwrite theirs — or
+  mark as processed a job whose second run has not finished. A discarded outcome logs at
+  warn.
+- **Retries are still counted only when an outcome is written.** A job abandoned by a dead
+  worker is retried without consuming one, exactly as when the transaction rolled back.
 
 Failed jobs go to `retry` with `queue.CalculateBackoff(retries)` until `max_retries`, then
 `failed`. A garbage collector deletes `processed`/`failed` rows past their

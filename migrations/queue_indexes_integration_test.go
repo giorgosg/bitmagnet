@@ -75,6 +75,7 @@ func TestQueueIndexes(t *testing.T) {
 			where queue = 'process_torrent'
 				and status in ('pending', 'retry')
 				and run_after <= now()
+				and (locked_until is null or locked_until <= now())
 			order by (status = 'retry') desc, priority, run_after, id
 			for update skip locked
 			limit 1
