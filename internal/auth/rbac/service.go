@@ -21,9 +21,8 @@ type Enforcer interface {
 	// group is satisfied when any one of its subjects allows it.
 	//
 	// It exists so that a decision needing more than one question costs one
-	// acquisition of the service's semaphore rather than one per question. The
-	// semaphore is process-global and the @auth directive fires per field, so the
-	// difference is per field of every query.
+	// round through casbin rather than one per question. The @auth directive
+	// fires per field, so the difference is per field of every query.
 	EnforceEvery(ctx context.Context, groups [][]Subject, objectAction ObjectAction) (bool, error)
 	// FilterAllowed returns the object actions any of the subjects allows,
 	// preserving the order they were given in.
@@ -35,7 +34,7 @@ type Enforcer interface {
 	// an admin holds nothing, and any hand-rolled approximation is a second
 	// source of truth that can drift from the decision it describes.
 	//
-	// One batch, so the whole set costs one acquisition of the semaphore.
+	// One batch, so the whole set costs one round through casbin.
 	FilterAllowed(
 		ctx context.Context,
 		subjects []Subject,
@@ -56,7 +55,6 @@ func NewService(
 	ttl CacheTTL,
 ) Service {
 	return &service{
-		sem:                  make(chan struct{}, 1),
 		repository:           repository,
 		objectActionProvider: objectActionProvider,
 		permissionProvider:   permissionProvider,
@@ -67,7 +65,22 @@ func NewService(
 // service implements the Service interface backed by casbin.
 // The design is partly working around the fact that casbin does not support context.
 type service struct {
-	sem                  chan struct{}
+	// casbinMutex guards casbinDeps and lastUpdate, and is held only while the
+	// policy is compiled or reloaded -- never while a decision is made. casbin's
+	// own SyncedEnforcer is what keeps a decision from seeing a half-loaded
+	// policy, so decisions run concurrently with each other.
+	//
+	// This replaced a one-slot semaphore that every authorization decision in the
+	// process passed through, one at a time. The semaphore made the wait
+	// cancellable, which this does not; what is waited for is now a single
+	// permissions query once per TTL, rather than every other decision and every
+	// role write.
+	casbinMutex sync.RWMutex
+	// writeMutex serialises a role write with the reload that follows it. Two
+	// administrators writing at once could otherwise leave the compiled policy
+	// reflecting the earlier write until the TTL expired. It is not on the
+	// decision path.
+	writeMutex           sync.Mutex
 	ttl                  time.Duration
 	lastUpdate           time.Time
 	repository           Repository
@@ -82,7 +95,7 @@ type service struct {
 }
 
 type casbinDeps struct {
-	*casbin.Enforcer
+	*casbin.SyncedEnforcer
 	*casbinAdapter
 }
 
@@ -112,7 +125,8 @@ func (s *service) EnforceEvery(
 	return withCasbin(ctx, s, func(deps *casbinDeps) (bool, error) {
 		// One batch for every group, then split the answers back out by group. casbin
 		// evaluation is pure, so asking all of them is the same decision as asking
-		// each in turn - it just costs one acquisition instead of one per group.
+		// each in turn - it just costs one round through casbin instead of one
+		// per group.
 		var requests [][]any
 
 		for _, subjects := range groups {
@@ -323,35 +337,45 @@ func (s *service) invalidateRoleCache() {
 	s.roleCache = nil
 }
 
+// GetPermissions reports the compiled policy's permissions. It reads them under
+// the read lock and copies: a reload replaces this slice, and the caller is not
+// holding anything that would keep it still.
 func (s *service) GetPermissions(ctx context.Context) ([]Permission, error) {
-	return withCasbin(ctx, s, func(deps *casbinDeps) ([]Permission, error) {
-		return deps.permissions, nil
-	})
+	deps, err := s.acquireCasbin(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	s.casbinMutex.RLock()
+	defer s.casbinMutex.RUnlock()
+
+	return slices.Clone(deps.permissions), nil
 }
 
 func (s *service) PutRole(ctx context.Context, role Role, objectActions []ObjectAction) (RoleInfo, error) {
-	// Before the semaphore and before the repository: the name becomes a casbin
-	// policy subject, and the matcher globs the stored value against the request.
+	// Before any lock and before the repository: the name becomes a casbin policy
+	// subject, and the matcher globs the stored value against the request.
 	if err := role.Validate(); err != nil {
 		return RoleInfo{}, err
 	}
 
-	return withSem(ctx, s, func() (RoleInfo, error) {
-		roleInfo, err := s.repository.PutRole(ctx, role, objectActions)
-		if err != nil {
-			return RoleInfo{}, err
-		}
+	// The write lock, not the decision lock: the repository call below is a
+	// database write, and an authorization decision must not queue behind it.
+	s.writeMutex.Lock()
+	defer s.writeMutex.Unlock()
 
-		s.invalidateRoleCache()
+	roleInfo, err := s.repository.PutRole(ctx, role, objectActions)
+	if err != nil {
+		return RoleInfo{}, err
+	}
 
-		if !s.lastUpdate.IsZero() {
-			if err = s.updatePermissions(ctx); err != nil {
-				return RoleInfo{}, err
-			}
-		}
+	s.invalidateRoleCache()
 
-		return s.mergeCoreRolePermissions(roleInfo), nil
-	})
+	if err = s.reloadPermissions(ctx); err != nil {
+		return RoleInfo{}, err
+	}
+
+	return s.mergeCoreRolePermissions(roleInfo), nil
 }
 
 func (s *service) DeleteRole(ctx context.Context, role Role) error {
@@ -359,106 +383,113 @@ func (s *service) DeleteRole(ctx context.Context, role Role) error {
 		return errors.New("core roles cannot be deleted")
 	}
 
-	return withSemErr(ctx, s, func() error {
-		if err := s.repository.DeleteRole(ctx, role); err != nil {
-			return err
-		}
+	s.writeMutex.Lock()
+	defer s.writeMutex.Unlock()
 
-		s.invalidateRoleCache()
+	if err := s.repository.DeleteRole(ctx, role); err != nil {
+		return err
+	}
 
-		if !s.lastUpdate.IsZero() {
-			return s.updatePermissions(ctx)
-		}
+	s.invalidateRoleCache()
 
-		return nil
-	})
+	return s.reloadPermissions(ctx)
 }
 
 func (s *service) GetObjectActions() []ObjectAction {
 	return s.objectActionProvider()
 }
 
-// withSem runs fn while holding the service's one-slot semaphore.
+// withCasbin runs fn against the compiled policy, holding no lock of this
+// service's while it runs. casbin.SyncedEnforcer serialises a policy load
+// against enforcement itself, so nothing here has to.
 //
-// casbin has no context support, so every interaction with it is serialised
-// behind this one channel. That makes *how often* the semaphore is taken a
-// property of the whole server rather than of any one method, and seven
-// hand-written copies of the select-and-defer pair made it impossible to count
-// at a glance -- which is the question the outstanding scalability work has to
-// answer. Keeping the protocol in one place also removes the way to get it
-// wrong: a caller cannot forget the release, because it is not theirs to write.
-//
-// A free function rather than a method because Go does not allow methods to
-// take type parameters.
-func withSem[T any](ctx context.Context, s *service, fn func() (T, error)) (T, error) {
-	var zero T
+// A free function rather than a method because Go does not allow methods to take
+// type parameters.
+func withCasbin[T any](ctx context.Context, s *service, fn func(*casbinDeps) (T, error)) (T, error) {
+	deps, err := s.acquireCasbin(ctx)
+	if err != nil {
+		var zero T
 
-	select {
-	case <-ctx.Done():
-		return zero, ctx.Err()
-	case s.sem <- struct{}{}:
+		return zero, err
 	}
 
-	defer func() { <-s.sem }()
-
-	return fn()
+	return fn(deps)
 }
 
-// withSemErr is withSem for a call that reports only an error.
-func withSemErr(ctx context.Context, s *service, fn func() error) error {
-	_, err := withSem(ctx, s, func() (struct{}, error) {
-		return struct{}{}, fn()
-	})
-
-	return err
-}
-
-// withCasbin is withSem for the calls that go on to talk to casbin. acquireCasbin
-// initialises s.casbinDeps on first use, so it has to run inside the semaphore
-// too, not before it.
-func withCasbin[T any](ctx context.Context, s *service, fn func(*casbinDeps) (T, error)) (T, error) {
-	return withSem(ctx, s, func() (T, error) {
-		deps, err := s.acquireCasbin(ctx)
-		if err != nil {
-			var zero T
-
-			return zero, err
-		}
-
-		return fn(deps)
-	})
-}
-
-// acquireCasbin returns the casbin enforcer instance, initializing it if necessary.
+// acquireCasbin returns the compiled policy, compiling or reloading it when it
+// is missing or older than the TTL.
+//
+// The fast path is a read lock, which is what every decision takes. Only a
+// compile or a reload takes the write lock, and the second check inside it means
+// a stampede at TTL expiry costs one permissions query rather than one each.
 func (s *service) acquireCasbin(ctx context.Context) (*casbinDeps, error) {
+	s.casbinMutex.RLock()
+	deps, lastUpdate := s.casbinDeps, s.lastUpdate
+	s.casbinMutex.RUnlock()
+
+	if deps != nil && time.Since(lastUpdate) <= s.ttl {
+		return deps, nil
+	}
+
+	s.casbinMutex.Lock()
+	defer s.casbinMutex.Unlock()
+
+	// Another goroutine may have compiled or reloaded while this one waited.
+	if s.casbinDeps != nil && time.Since(s.lastUpdate) <= s.ttl {
+		return s.casbinDeps, nil
+	}
+
 	if s.casbinDeps == nil {
-		permissions, err := s.repository.GetPermissions(ctx)
-		if err != nil {
-			return nil, err
-		}
+		return s.compilePermissions(ctx)
+	}
 
-		adapterDynamic := &casbinAdapter{
-			permissions: append(s.permissionProvider(), permissions...),
-		}
-
-		eCasbin, err := newCasbinEnforcer(adapterDynamic)
-		if err != nil {
-			return nil, err
-		}
-
-		s.casbinDeps = &casbinDeps{
-			casbinAdapter: adapterDynamic,
-			Enforcer:      eCasbin,
-		}
-
-		s.lastUpdate = time.Now()
-	} else if time.Since(s.lastUpdate) > s.ttl {
-		if err := s.updatePermissions(ctx); err != nil {
-			return nil, err
-		}
+	if err := s.updatePermissions(ctx); err != nil {
+		return nil, err
 	}
 
 	return s.casbinDeps, nil
+}
+
+// compilePermissions builds the enforcer for the first time. The caller holds
+// the write lock.
+func (s *service) compilePermissions(ctx context.Context) (*casbinDeps, error) {
+	permissions, err := s.repository.GetPermissions(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	adapterDynamic := &casbinAdapter{
+		permissions: append(s.permissionProvider(), permissions...),
+	}
+
+	eCasbin, err := newCasbinEnforcer(adapterDynamic)
+	if err != nil {
+		return nil, err
+	}
+
+	s.casbinDeps = &casbinDeps{
+		casbinAdapter:  adapterDynamic,
+		SyncedEnforcer: eCasbin,
+	}
+
+	s.lastUpdate = time.Now()
+
+	return s.casbinDeps, nil
+}
+
+// reloadPermissions refreshes the compiled policy after this process has written
+// a role, so an administrator sees their own change rather than waiting out the
+// TTL. Before anything has compiled it there is nothing to refresh: the first
+// decision will read the written state anyway.
+func (s *service) reloadPermissions(ctx context.Context) error {
+	s.casbinMutex.Lock()
+	defer s.casbinMutex.Unlock()
+
+	if s.lastUpdate.IsZero() {
+		return nil
+	}
+
+	return s.updatePermissions(ctx)
 }
 
 func (s *service) updatePermissions(ctx context.Context) error {
@@ -469,7 +500,10 @@ func (s *service) updatePermissions(ctx context.Context) error {
 
 	s.setPermissions(permissions)
 
-	err = s.Enforcer.LoadPolicy()
+	// The synced enforcer's LoadPolicy, which takes casbin's write lock. The
+	// plain Enforcer embedded inside it has a method of the same name that does
+	// not.
+	err = s.SyncedEnforcer.LoadPolicy()
 	if err != nil {
 		return err
 	}

@@ -158,32 +158,49 @@ Object actions and permissions are both collected from fx value groups
 (`auth_object_actions`, `auth_permissions`), so a module registers its own without
 `authfx` knowing about it.
 
-`rbac.Service` wraps casbin. Because casbin has no context support, the service serialises
-every call through a one-slot semaphore and caches the compiled policy for
-`RBACCacheTTL` — so a permission change takes up to that long to take effect, and every
-authorization check in the process is serialised. Both properties are written up in the
-issue notes below.
+`rbac.Service` wraps casbin and caches the compiled policy for `RBACCacheTTL` — so a
+permission change takes up to that long to take effect.
 
-The acquisition protocol lives in one place, `withSem` and its two wrappers `withSemErr`
-and `withCasbin`, rather than being written out at each method. How often that semaphore
-is taken is a property of the whole server, so it has to be countable at a glance; the
-wrappers also mean a caller cannot forget to release it. `withCasbin` is the one to use
-for anything that talks to casbin, because `acquireCasbin` initialises the enforcer on
-first use and so must run inside the semaphore, not before it.
+**Decisions run concurrently.** The enforcer is a `casbin.SyncedEnforcer`, which takes a
+read lock to enforce and a write lock to load, so a decision can never see a half-loaded
+policy and never waits for another decision. The service's own `casbinMutex` guards only
+`casbinDeps` and `lastUpdate`, and is held while the policy is compiled or reloaded —
+never while a decision is made. `acquireCasbin` reads under it and, when the TTL has
+passed, takes it for writing and checks again, so a stampede at expiry costs one
+permissions query rather than one each.
 
-**Roles are cached on the same TTL**, behind their own `RWMutex` rather than the semaphore.
+This replaced a one-slot semaphore that every authorization decision in the process passed
+through, one at a time — every `@auth` field, every Torznab request, every guarded
+endpoint. The semaphore made the wait cancellable, which the mutex does not; what is
+waited for is now one permissions query once per TTL rather than every other decision and
+every role write.
+
+**Role writes do not block decisions.** `PutRole` and `DeleteRole` hold a separate
+`writeMutex` across the repository write and the reload that follows it — two
+administrators writing at once would otherwise be able to leave the compiled policy
+reflecting the earlier write until the TTL expired — and that mutex is not on the decision
+path. It used to be the same semaphore, so an authorization decision queued behind a
+database write.
+
+One trap for anything editing this: `casbinDeps` embeds `*casbin.SyncedEnforcer`, which
+itself embeds a plain `*casbin.Enforcer` under the field name `Enforcer`. Writing
+`s.Enforcer.LoadPolicy()` therefore reaches the **unsynchronised** method of the same name.
+Say `s.SyncedEnforcer.LoadPolicy()`.
+
+**Roles are cached on the same TTL**, behind their own `RWMutex`.
 Every authentication resolves a role, and the repository preloads its permissions, so the
 lookup was two statements straight to the database on every request — the steady-state
 cost of an instance a Torznab client is polling. A role written by this process
 invalidates the snapshot immediately, so an administrator sees their own change; a change
 made by another process becomes visible on the TTL, as permissions already did.
 
-Because that semaphore is process-global and the `@auth` directive fires **per field**, a
-decision that asks more than one question is worth combining. `EnforceEvery` takes a list
-of subject groups — every group must allow, and a group is satisfied by any subject in it
-— and answers them in one `BatchEnforce` under one acquisition. `identity.APIKey` is the
-caller that needs it: its role gate and its scope gate are two questions for one decision,
-and asked separately they serialised an N-field query 2N times. `FilterAllowed` is the
+Because the `@auth` directive fires **per field**, a decision that asks more than one
+question is worth combining. `EnforceEvery` takes a list of subject groups — every group
+must allow, and a group is satisfied by any subject in it — and answers them in one
+`BatchEnforce`. `identity.APIKey` is the caller that needs it: its role gate and its scope
+gate are two questions for one decision, and asked separately an N-field query paid 2N
+where N would do. It mattered more when each of those rounds also took the process-global
+semaphore; the batch is still the cheaper shape. `FilterAllowed` is the
 same idea for a different shape of question — which of these object actions does this
 subject allow — and exists so that reporting an identity's permissions asks casbin rather
 than reimplementing its matcher.

@@ -61,10 +61,11 @@ func (a APIKey) EffectivePermissions(ctx context.Context) ([]rbac.ObjectAction, 
 // own permissions or the anonymous role must allow it too. A key can therefore
 // never exceed its User.
 //
-// Both gates go in one EnforceEvery call. Asked separately they cost two
-// acquisitions of the rbac service's process-global semaphore for one decision,
-// and the @auth directive fires per field - so an N-field query serialised 2N
-// times where N would do.
+// Both gates go in one EnforceEvery call. Asked separately they cost two rounds
+// through casbin for one decision, and the @auth directive fires per field - so
+// an N-field query paid 2N where N would do. It mattered more when every one of
+// those rounds also took a process-global semaphore; that is gone, and the batch
+// is still the cheaper shape.
 func (a APIKey) Enforce(ctx context.Context, objectAction rbac.ObjectAction) (bool, error) {
 	return a.enforcer.EnforceEvery(
 		ctx,
