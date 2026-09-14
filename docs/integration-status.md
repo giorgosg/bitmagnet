@@ -91,7 +91,7 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#75](https://github.com/giorgosg/bitmagnet/pull/75) | Let a cancelled import shut down instead of deadlocking                     | local — review finding 0003                                          | Import and Close both hung for good; two tests observed red    |
 | [#76](https://github.com/giorgosg/bitmagnet/pull/76) | Wait for the crawler to stop, and write the batches it still holds          | local — review finding 0011                                          | Buffered batch never written; two stages never stopped         |
 | [#77](https://github.com/giorgosg/bitmagnet/pull/77) | Revoke sessions on logout, and expose `self.updatePassword`                 | local — review finding 06                                            | A logged-out token still answered as its user; seven red       |
-| [#78](https://github.com/giorgosg/bitmagnet/pull/78) | Lease queue jobs instead of running them inside the claiming transaction    | local — review finding 0004                                          | Handler could not touch its own row; four regressions red      |
+| [#80](https://github.com/giorgosg/bitmagnet/pull/80) | Lease queue jobs instead of running them inside the claiming transaction    | local — review finding 0004                                          | Handler could not touch its own row; four regressions red      |
 
 ## In flight
 
