@@ -258,12 +258,92 @@ func (h *serverHandler) start(ctx context.Context) {
 	}
 }
 
+// leaseSlack is added to a handler's job timeout to get the lease a claim takes
+// out. handler.Exec returns within JobTimeout whatever the job does, so the
+// slack only has to cover writing the outcome afterwards.
+const leaseSlack = 30 * time.Second
+
+// handleJob claims one job, runs it, and records what happened. The three steps
+// are deliberately not one transaction: the job used to run inside the
+// transaction that claimed it, which pinned a database connection `idle in
+// transaction` and held the row lock for the whole run -- for the classification
+// queue, a batch of up to a hundred torrents, some of them making HTTP calls.
+//
+// What the claiming transaction's rollback used to provide is now the lease: a
+// worker that dies mid-job leaves the row pending with a locked_until that
+// expires, and the next fetch picks it up. Retries are still counted only when
+// an outcome is written, so an abandoned job is retried without consuming one --
+// as it was before.
 func (h *serverHandler) handleJob(
 	ctx context.Context,
 	conds ...gen.Condition,
 ) (jobID string, processed bool, err error) {
+	job, lease, claimed, err := h.claimJob(ctx, conds...)
+	if err != nil {
+		h.logger.Errorw("error claiming job", "error", err)
+
+		return "", false, err
+	}
+
+	if !claimed {
+		return "", false, nil
+	}
+
+	jobID = job.ID
+
+	var jobErr error
+
+	if job.Deadline.Valid && job.Deadline.Time.Before(time.Now()) {
+		jobErr = ErrJobExceededDeadline
+
+		h.logger.Debugw("job deadline is in the past, skipping", "job_id", job.ID)
+	} else {
+		jobErr = handler.Exec(ctx, h.Handler, job)
+	}
+
+	job.RanAt = sql.NullTime{Time: time.Now(), Valid: true}
+
+	if jobErr != nil {
+		h.logger.Errorw("job failed", "error", jobErr)
+
+		if job.Retries < job.MaxRetries {
+			job.Status = model.QueueJobStatusRetry
+			job.RunAfter = queue.CalculateBackoff(job.Retries)
+		} else {
+			job.Status = model.QueueJobStatusFailed
+		}
+
+		job.Error = model.NewNullString(jobErr.Error())
+	} else {
+		job.Status = model.QueueJobStatusProcessed
+		processed = true
+	}
+
+	if err = h.completeJob(ctx, job, lease); err != nil {
+		h.logger.Errorw("error handling job", "error", err)
+
+		return jobID, false, err
+	}
+
+	if processed {
+		h.logger.Debugw("job processed", "job_id", jobID)
+	}
+
+	return jobID, processed, nil
+}
+
+// claimJob takes the next runnable job and leases it, in a transaction short
+// enough to be measured in milliseconds. FOR UPDATE SKIP LOCKED still separates
+// workers racing for the same row inside this transaction; the lease is what
+// separates them for the duration of the run, once it has committed.
+func (h *serverHandler) claimJob(
+	ctx context.Context,
+	conds ...gen.Condition,
+) (job model.QueueJob, lease time.Time, claimed bool, err error) {
+	lease = time.Now().Add(h.JobTimeout + leaseSlack)
+
 	err = h.query.Transaction(func(tx *dao.Query) error {
-		job, findErr := tx.QueueJob.WithContext(ctx).Where(
+		found, findErr := tx.QueueJob.WithContext(ctx).Where(
 			append(
 				conds,
 				h.query.QueueJob.Queue.Eq(h.Queue),
@@ -272,6 +352,13 @@ func (h *serverHandler) handleJob(
 					string(model.QueueJobStatusRetry),
 				),
 				h.query.QueueJob.RunAfter.Lte(time.Now()),
+				// Not claimed, or claimed by a worker that is no longer coming
+				// back. Nothing else reaps those: the expiry is the reaping.
+				tx.QueueJob.Where(
+					tx.QueueJob.Where(h.query.QueueJob.LockedUntil.IsNull()),
+				).Or(
+					h.query.QueueJob.LockedUntil.Lte(sql.NullTime{Time: time.Now(), Valid: true}),
+				),
 			)...,
 		).Order(
 			h.query.QueueJob.Status.Eq(string(model.QueueJobStatusRetry)),
@@ -289,51 +376,54 @@ func (h *serverHandler) handleJob(
 			return findErr
 		}
 
-		jobID = job.ID
-
-		var jobErr error
-		if job.Deadline.Valid && job.Deadline.Time.Before(time.Now()) {
-			jobErr = ErrJobExceededDeadline
-
-			h.logger.Debugw("job deadline is in the past, skipping", "job_id", job.ID)
-		} else {
-			// check if the job is being retried and increment retry count accordingly
-			if job.Status != model.QueueJobStatusPending {
-				job.Retries++
-			}
-			// execute the queue handler of this job
-			jobErr = handler.Exec(ctx, h.Handler, *job)
+		// A job being retried consumes one of its retries. Counted here and
+		// written with the outcome, exactly as before.
+		if found.Status != model.QueueJobStatusPending {
+			found.Retries++
 		}
 
-		job.RanAt = sql.NullTime{Time: time.Now(), Valid: true}
-
-		if jobErr != nil {
-			h.logger.Errorw("job failed", "error", jobErr)
-
-			if job.Retries < job.MaxRetries {
-				job.Status = model.QueueJobStatusRetry
-				job.RunAfter = queue.CalculateBackoff(job.Retries)
-			} else {
-				job.Status = model.QueueJobStatusFailed
-			}
-
-			job.Error = model.NewNullString(jobErr.Error())
-		} else {
-			job.Status = model.QueueJobStatusProcessed
-			processed = true
+		if _, updateErr := tx.QueueJob.WithContext(ctx).
+			Where(tx.QueueJob.ID.Eq(found.ID)).
+			UpdateSimple(tx.QueueJob.LockedUntil.Value(sql.NullTime{Time: lease, Valid: true})); updateErr != nil {
+			return updateErr
 		}
 
-		_, updateErr := tx.QueueJob.WithContext(ctx).Updates(job)
+		job, claimed = *found, true
 
-		return updateErr
+		return nil
 	})
+
+	return job, lease, claimed, err
+}
+
+// completeJob writes the outcome, but only while this worker still holds the
+// lease it claimed under. A job that overran its lease has already been handed
+// to somebody else, and the late outcome would otherwise overwrite theirs -- and
+// mark as processed a job whose second run has not finished.
+func (h *serverHandler) completeJob(ctx context.Context, job model.QueueJob, lease time.Time) error {
+	info, err := h.query.QueueJob.WithContext(ctx).Where(
+		h.query.QueueJob.ID.Eq(job.ID),
+		h.query.QueueJob.LockedUntil.Eq(sql.NullTime{Time: lease, Valid: true}),
+	).UpdateSimple(
+		h.query.QueueJob.Status.Value(string(job.Status)),
+		h.query.QueueJob.Retries.Value(job.Retries),
+		h.query.QueueJob.RunAfter.Value(job.RunAfter),
+		h.query.QueueJob.RanAt.Value(job.RanAt),
+		h.query.QueueJob.Error.Value(job.Error),
+		// Released either way: a job sent back for a retry has to be claimable at
+		// its backoff time, not held until the lease would have expired.
+		h.query.QueueJob.LockedUntil.Null(),
+	)
 	if err != nil {
-		h.logger.Error("error handling job", "error", err)
-	} else if processed {
-		h.logger.Debugw("job processed", "job_id", jobID)
+		return err
 	}
 
-	return
+	if info.RowsAffected == 0 {
+		h.logger.Warnw("job outcome discarded: the lease had already expired",
+			"job_id", job.ID, "status", job.Status)
+	}
+
+	return nil
 }
 
 var ErrJobExceededDeadline = errors.New("the job did not complete before its deadline")

@@ -42,6 +42,7 @@ func newQueueJob(db *gorm.DB, opts ...gen.DOOption) queueJob {
 	_queueJob.ArchivalDuration = field.NewField(tableName, "archival_duration")
 	_queueJob.CreatedAt = field.NewTime(tableName, "created_at")
 	_queueJob.Priority = field.NewInt(tableName, "priority")
+	_queueJob.LockedUntil = field.NewField(tableName, "locked_until")
 
 	_queueJob.fillFieldMap()
 
@@ -66,6 +67,7 @@ type queueJob struct {
 	ArchivalDuration field.Field
 	CreatedAt        field.Time
 	Priority         field.Int
+	LockedUntil      field.Field
 
 	fieldMap map[string]field.Expr
 }
@@ -96,6 +98,7 @@ func (q *queueJob) updateTableName(table string) *queueJob {
 	q.ArchivalDuration = field.NewField(table, "archival_duration")
 	q.CreatedAt = field.NewTime(table, "created_at")
 	q.Priority = field.NewInt(table, "priority")
+	q.LockedUntil = field.NewField(table, "locked_until")
 
 	q.fillFieldMap()
 
@@ -112,7 +115,7 @@ func (q *queueJob) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
 }
 
 func (q *queueJob) fillFieldMap() {
-	q.fieldMap = make(map[string]field.Expr, 14)
+	q.fieldMap = make(map[string]field.Expr, 15)
 	q.fieldMap["id"] = q.ID
 	q.fieldMap["fingerprint"] = q.Fingerprint
 	q.fieldMap["queue"] = q.Queue
@@ -127,6 +130,7 @@ func (q *queueJob) fillFieldMap() {
 	q.fieldMap["archival_duration"] = q.ArchivalDuration
 	q.fieldMap["created_at"] = q.CreatedAt
 	q.fieldMap["priority"] = q.Priority
+	q.fieldMap["locked_until"] = q.LockedUntil
 }
 
 func (q queueJob) clone(db *gorm.DB) queueJob {

@@ -425,6 +425,10 @@ func BuildGenerator(db *gorm.DB) *gen.Generator {
 			return tag
 		}),
 		gen.FieldType("ran_at", "sql.NullTime"),
+		// NULL means "not claimed", so the model has to be able to say so: a bare
+		// time.Time writes its zero value instead, which reads back as a lease
+		// taken in the year 1 and keeps the job out of the fetch for ever.
+		gen.FieldType("locked_until", "sql.NullTime"),
 		gen.FieldType("deadline", "sql.NullTime"),
 		gen.FieldGORMTag("deadline", func(tag field.GormTag) field.GormTag {
 			tag.Set("<-", "create")
