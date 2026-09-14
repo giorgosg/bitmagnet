@@ -88,6 +88,9 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#72](https://github.com/giorgosg/bitmagnet/pull/72) | Document that the bundled UI, not the cookie layer, is the shipped path     | local — review finding 08                                            | Documentation only; every claim re-checked at HEAD             |
 | [#73](https://github.com/giorgosg/bitmagnet/pull/73) | Add a fixture server command over the seeded template                       | local — test-fixtures ticket 02                                      | Corpus, registration, throttle and cleanup all driven for real |
 | [#74](https://github.com/giorgosg/bitmagnet/pull/74) | Retrieve the outstanding bootstrap invitation from the console              | local — bootstrap-invitation ticket 01                               | Create-or-return minted a second invitation; observed red      |
+| [#75](https://github.com/giorgosg/bitmagnet/pull/75) | Let a cancelled import shut down instead of deadlocking                     | local — review finding 0003                                          | Import and Close both hung for good; two tests observed red    |
+| [#76](https://github.com/giorgosg/bitmagnet/pull/76) | Wait for the crawler to stop, and write the batches it still holds          | local — review finding 0011                                          | Buffered batch never written; two stages never stopped         |
+| [#79](https://github.com/giorgosg/bitmagnet/pull/79) | Stop serialising every authorization decision behind one slot               | local — review finding 0010a                                         | A decision queued behind a role write; observed red            |
 
 ## In flight
 
