@@ -54,37 +54,63 @@ type crawler struct {
 	// soughtNodeID is a random node ID used as the target for find_node and sample_infohashes requests.
 	// It is rotated every 10 seconds.
 	soughtNodeID   *concurrency.AtomicValue[protocol.ID]
-	stopped        chan struct{}
 	persistedTotal *prometheus.CounterVec
 	logger         *zap.SugaredLogger
 	maxQueueDepth  uint
 	queueDepth     *concurrency.AtomicValue[int64]
 }
 
-func (c *crawler) start() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	// start the various pipeline workers
-	go c.rotateSoughtNodeID(ctx)
-	go c.runDiscoveredNodes(ctx)
-	go c.runPing(ctx)
-	go c.runFindNode(ctx)
-	go c.getNodesForFindNode(ctx)
-	go c.runSampleInfoHashes(ctx)
-	go c.getNodesForSampleInfoHashes(ctx)
-	go c.runInfoHashTriage(ctx)
-	go c.runGetPeers(ctx)
-	go c.runRequestMetaInfo(ctx)
-	go c.runScrape(ctx)
-	go c.reseedBootstrapNodes(ctx)
-	go c.runKTableHealthMonitor(ctx)
-	go c.runQueueDepthMonitor(ctx)
-	go c.runPersistTorrents(ctx)
-	go c.runPersistSources(ctx)
-	go c.getOldNodes(ctx)
+// start runs the crawler until ctx is cancelled, and returns only once every
+// pipeline stage has stopped and the last batches have been written. The stop
+// hook waits for it, so anything started here has to observe the context.
+func (c *crawler) start(ctx context.Context) {
+	var stages sync.WaitGroup
 
-	<-c.stopped
+	run := func(stage func(context.Context)) {
+		stages.Add(1)
+
+		go func() {
+			defer stages.Done()
+
+			stage(ctx)
+		}()
+	}
+
+	run(c.rotateSoughtNodeID)
+	run(c.runDiscoveredNodes)
+	run(c.runPing)
+	run(c.runFindNode)
+	run(c.getNodesForFindNode)
+	run(c.runSampleInfoHashes)
+	run(c.getNodesForSampleInfoHashes)
+	run(c.runInfoHashTriage)
+	run(c.runGetPeers)
+	run(c.runRequestMetaInfo)
+	run(c.runScrape)
+	run(c.reseedBootstrapNodes)
+	run(c.runKTableHealthMonitor)
+	run(c.runQueueDepthMonitor)
+	run(c.runPersistTorrents)
+	run(c.runPersistSources)
+	run(c.getOldNodes)
+
+	stages.Wait()
+
+	// Everything upstream has stopped, so what is left in the persist channels is
+	// all there is ever going to be. It gets a context of its own because ctx is
+	// cancelled by now, and a deadline because a stop that never ends is the
+	// failure this replaced.
+	drainCtx, cancelDrain := context.WithTimeout(context.WithoutCancel(ctx), persistDrainTimeout)
+	defer cancelDrain()
+
+	c.drainPersistTorrents(drainCtx)
+	c.drainPersistSources(drainCtx)
 }
+
+// persistDrainTimeout bounds the final write. It is deliberately well inside
+// fx's own StopTimeout of 15 seconds, so the drain either finishes or gives up
+// while the stop hook is still waiting for it rather than being cut off.
+const persistDrainTimeout = 10 * time.Second
 
 type nodeHasPeersForHash struct {
 	infoHash protocol.ID

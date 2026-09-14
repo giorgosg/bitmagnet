@@ -82,7 +82,9 @@ database, and it does more than its name suggests:
 - `persistTorrentBatch` de-duplicates the batch, builds `Torrent`, `TorrentFile`,
   `TorrentsTorrentSource` and optionally `TorrentPieces` rows, and creates
   `queue_jobs` rows in batches of `classifyBatchSize` (100) — all in **one transaction**.
-  On success it forwards each hash to the scrape channel.
+  On success it forwards each hash to the scrape channel. The write itself is
+  `writeTorrentBatch`; the forwarding is separate because the shutdown drain below calls
+  the write on its own, when there is no scrape stage left to forward to.
 - Files whose display path starts with `.pad/` are skipped (BEP 47 padding), while
   `FilesCount` is still derived from the full metainfo file list.
 - `SaveFilesThreshold` (default 100) caps stored file rows; exceeding it sets
@@ -94,6 +96,32 @@ database, and it does more than its name suggests:
 
 `createTorrentSourceModel` derives seeders and leechers from the BEP 33 scrape bloom
 filters' `ApproximatedSize()` — they are estimates, not counts.
+
+## Starting and stopping
+
+`OnStart` gives the crawler a context of its own, deliberately not derived from the start
+hook's — fx cancels that one as soon as startup finishes. `start` tracks all seventeen
+stages in a `WaitGroup`, and `OnStop` cancels and then **waits**, bounded by the context
+fx gives it.
+
+That wait is what makes the shutdown lose nothing. Both persist stages feed from batching
+channels that flush on a count of 1000 or after a minute, so returning from `OnStop`
+immediately — which is what it used to do — discarded up to a minute of crawled torrents
+on every restart. Once every stage has returned, `start` closes those two channels, which
+flushes whatever is queued or buffered, and writes the last batches under a fresh context
+with its own `persistDrainTimeout` (10s, inside fx's 15s `StopTimeout`), because the
+crawler's own context is cancelled by then.
+
+Two consequences worth knowing before changing anything here:
+
+- **Every stage must observe the context.** The stop hook waits for all of them, so one
+  that ignores cancellation hangs the process instead of losing a batch. Two of them did:
+  `getNodesForFindNode` and `getNodesForSampleInfoHashes` only checked the context while
+  handing a node on, and an empty routing table skips that path entirely.
+- **`BufferedConcurrentChannel.Run` does not wait for the workers it spawns.** A stage
+  returns while its in-flight handler goroutines are still finishing, so an item handed
+  over after the drain is still lost. That tail is bounded by one in-flight request per
+  concurrency slot, against a batch of up to a thousand before.
 
 ## The routing table
 

@@ -115,26 +115,24 @@ type activeImport struct {
 	errors          ImportErrors
 }
 
+// run starts the buffering loop. The context is established here, on the
+// caller's goroutine and before New hands the import out, so every later reader
+// sees it set; the loop used to take the mutex in one goroutine and release it
+// in another, which is legal but leaves the lock owned by nobody in particular.
 func (i *activeImport) run(ctx context.Context) {
-	i.mutex.Lock()
-	go (func() {
-		iCtx, cancel := context.WithCancel(ctx)
-		defer cancel()
+	iCtx, cancel := context.WithCancel(ctx)
+	i.ctx = iCtx
+	i.stop = cancel
 
-		i.ctx = iCtx
-		i.stop = cancel
-		i.mutex.Unlock()
+	go (func() {
+		defer cancel()
 
 		for {
 			select {
 			case <-iCtx.Done():
 				_ = i.Close()
 				return
-			case item, ok := <-i.itemChan:
-				if !ok {
-					return
-				}
-
+			case item := <-i.itemChan:
 				go i.buffer(item)
 			case <-time.After(i.maxWaitTime):
 				go i.flush()
@@ -303,18 +301,32 @@ func createTorrentModel(info Info, item Item) model.Torrent {
 	return t
 }
 
+// Import hands items to the buffering loop. The send must not happen under the
+// mutex: the loop's cancellation branch calls Close, which takes that same
+// mutex, so a caller parked on an unbuffered send held the lock the shutdown
+// needed and both goroutines stayed parked for good. Selecting on the import's
+// own context is what makes a send that cannot proceed terminate.
 func (i *activeImport) Import(items ...Item) error {
-	i.mutex.Lock()
-	defer i.mutex.Unlock()
+	i.mutex.RLock()
+	stopped, ctx := i.stopped, i.ctx
+	i.mutex.RUnlock()
 
-	if i.stopped {
+	if stopped {
 		return ErrImportClosed
 	}
 
-	i.wg.Add(len(items))
-
 	for _, item := range items {
-		i.itemChan <- item
+		// Counted per item, immediately before the send that hands it over, so
+		// a cancelled import leaves nothing outstanding for Drain to wait on.
+		i.wg.Add(1)
+
+		select {
+		case i.itemChan <- item:
+		case <-ctx.Done():
+			i.wg.Done()
+
+			return ErrImportClosed
+		}
 	}
 
 	return nil
@@ -338,6 +350,10 @@ func (i *activeImport) Closed() bool {
 	return i.stopped
 }
 
+// Close flushes what is buffered and stops the loop. The item channel is
+// deliberately left open: cancelling the context already ends both the loop and
+// any waiting Import, and closing a channel that an unsynchronised Import may
+// still be sending on would panic.
 func (i *activeImport) Close() error {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
@@ -347,7 +363,6 @@ func (i *activeImport) Close() error {
 	if !i.stopped {
 		i.stopped = true
 		i.stop()
-		close(i.itemChan)
 	}
 
 	return i.errors.OrNil()
