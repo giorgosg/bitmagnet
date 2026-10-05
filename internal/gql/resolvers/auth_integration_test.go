@@ -1226,3 +1226,73 @@ func TestOpenAnonymousBaselineExcludesAuthAdministration(t *testing.T) {
 		})
 	}
 }
+
+// The open baseline is the *read* surface, not every object action. It used to be
+// everything except auth, which meant an anonymous caller could delete torrents
+// and purge the queue — and with allowed_origins defaulting to "*" and
+// Content-Type: application/json allowed, any page the operator visited could do
+// it cross-origin. For a delete the side effect is the damage, so an unreadable
+// response bought nothing.
+func TestOpenAnonymousBaselineExcludesWrites(t *testing.T) {
+	t.Parallel()
+
+	server, _ := newAuthTestServer(t)
+
+	const hash = "0000000000000000000000000000000000000000"
+
+	for _, testCase := range []struct {
+		name  string
+		query string
+	}{
+		{
+			name:  "delete torrents",
+			query: `mutation { torrent { delete(infoHashes: ["` + hash + `"]) } }`,
+		},
+		{
+			name:  "tag torrents",
+			query: `mutation { torrent { putTags(infoHashes: ["` + hash + `"], tagNames: ["x"]) } }`,
+		},
+		{
+			name:  "purge the queue",
+			query: `mutation { queue { purgeJobs(input: {}) } }`,
+		},
+		{
+			name:  "reprocess torrents",
+			query: `mutation { queue { enqueueReprocessTorrentsBatch(input: {}) } }`,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			res := query(t, server, "", testCase.query)
+			require.NotEmpty(t, res.Errors, "anonymous callers must not write")
+			assert.Equal(t, "unauthorized", res.Errors[0].Message)
+		})
+	}
+}
+
+// And the reads an open installation has always served stay served, because
+// that is the whole point of the open default.
+func TestOpenAnonymousBaselineKeepsReads(t *testing.T) {
+	t.Parallel()
+
+	server, _ := newAuthTestServer(t)
+
+	for _, testCase := range []struct {
+		name  string
+		query string
+	}{
+		{name: "version", query: `{ version }`},
+		{
+			name:  "search",
+			query: `{ torrentContent { search(input: {limit: 1}) { items { infoHash } } } }`,
+		},
+		{name: "queue jobs", query: `{ queue { jobs(input: {}) { totalCount } } }`},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			requireNoGqlErrors(t, query(t, server, "", testCase.query))
+		})
+	}
+}
