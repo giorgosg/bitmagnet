@@ -1296,3 +1296,167 @@ func TestOpenAnonymousBaselineKeepsReads(t *testing.T) {
 		})
 	}
 }
+
+// The defect docs/issues/0012 recorded, through the real GraphQL path: a grant
+// written onto the anon role used to survive `auth.anonymous_access: false`,
+// because the flag withheld only its own in-memory half while role grants live in
+// the database. The flag is now a deny-override, so the stored grant is dropped
+// when the policy is compiled and the anon subject matches nothing.
+func TestAnonymousAccessOffOverridesAStoredAnonGrant(t *testing.T) {
+	t.Parallel()
+
+	cfg := authconfig.NewDefaultConfig()
+	cfg.AnonymousAccess = false
+
+	server, code := newAuthTestServerWithConfig(t, cfg)
+	token := loginAsAdmin(t, server, code)
+
+	// putRole deliberately does not special-case the anon role: an administrator
+	// may grant it anything, including a wildcard.
+	requireNoGqlErrors(t, query(t, server, token, `mutation { auth { putRole(role: "anon", objectActions: [
+		{namespace: "**", object: "**", action: "**"}
+	]) { name } } }`))
+
+	// And it does nothing at all while the override is on. The probe is a catalogue
+	// read rather than `version`, because gqlauth.Permissions grants anon `version`
+	// and `health` regardless of the flag - see TestClosedInstanceStillServesTheShell.
+	denied := query(t, server, "", `{ torrentContent { search(input: {}) { totalCount } } }`)
+	require.NotEmpty(t, denied.Errors)
+	assert.Equal(t, "unauthorized", denied.Errors[0].Message)
+
+	// The grant is still reported as configured, which is the decision the spec
+	// records: listRoles tells the truth about the role, and that the override makes
+	// it inert is for the documentation and the role screen to say.
+	roles := query(t, server, token, `{ auth { listRoles { name permissions {
+		objectAction { namespace object action }
+	} } } }`)
+	requireNoGqlErrors(t, roles)
+	assert.Contains(t, string(roles.Data), `"namespace":"**"`,
+		"a stored grant must still be reported as configured while it is overridden")
+}
+
+// Anonymous access is now administered through the role, in the running process:
+// no restart, and revocation works as well as granting. Before this, revoking
+// meant editing the configuration file, because the flag was the only thing that
+// could take the baseline away.
+//
+// The first assertion is also what proves the startup translation ran: an
+// anonymous read succeeds here only because the seed wrote the read surface into
+// role_permissions.
+func TestAnonymousGrantsAreAdministeredThroughTheRole(t *testing.T) {
+	t.Parallel()
+
+	server, code := newAuthTestServer(t)
+
+	search := `{ torrentContent { search(input: {}) { totalCount } } }`
+
+	requireNoGqlErrors(t, query(t, server, "", search))
+
+	token := loginAsAdmin(t, server, code)
+
+	// Revoke everything. An empty object action set is a revocation.
+	requireNoGqlErrors(t, query(t, server, token,
+		`mutation { auth { putRole(role: "anon", objectActions: []) { name } } }`))
+
+	denied := query(t, server, "", search)
+	require.NotEmpty(t, denied.Errors, "a revoked anon role must stop reading, in the same process")
+	assert.Equal(t, "unauthorized", denied.Errors[0].Message)
+
+	// Grant one object action back, and only that one.
+	requireNoGqlErrors(t, query(t, server, token, `mutation { auth { putRole(role: "anon", objectActions: [
+		{namespace: "graphql", object: "torrentContent", action: "query"}
+	]) { name } } }`))
+
+	requireNoGqlErrors(t, query(t, server, "", search))
+
+	narrowed := query(t, server, "", `{ queue { jobs(input: {}) { totalCount } } }`)
+	require.NotEmpty(t, narrowed.Errors, "anon holds exactly what was granted, no more")
+	assert.Equal(t, "unauthorized", narrowed.Errors[0].Message)
+}
+
+// The anon role's row must stay, so that its permissions cannot be cascaded away
+// by deleting it: role_permissions references roles on delete cascade.
+func TestAnonRoleCannotBeDeleted(t *testing.T) {
+	t.Parallel()
+
+	server, code := newAuthTestServer(t)
+	token := loginAsAdmin(t, server, code)
+
+	res := query(t, server, token, `mutation { auth { deleteRole(role: "anon") } }`)
+
+	require.NotEmpty(t, res.Errors, "deleting a core role must be refused")
+}
+
+// The deny-override is scoped to stored grants, and this is the behaviour that
+// scope exists to protect: internal/gql/auth.Permissions grants anon `version`
+// and `health` "regardless of the anonymous-access setting", because the web UI
+// shell reads them before anyone can log in. A closed instance must still serve
+// them, or the login screen is gone from the one state that most needs it.
+//
+// If the filter in rbac ever widens to the provider set, this fails.
+func TestClosedInstanceStillServesTheShell(t *testing.T) {
+	t.Parallel()
+
+	cfg := authconfig.NewDefaultConfig()
+	cfg.AnonymousAccess = false
+
+	server, code := newAuthTestServerWithConfig(t, cfg)
+
+	// `version` only; the fixture server does not wire the health service, so
+	// `health` is unreachable here for reasons that have nothing to do with auth.
+	requireNoGqlErrors(t, query(t, server, "", `{ version }`))
+
+	// Even with the role explicitly emptied, because these are not stored grants.
+	token := loginAsAdmin(t, server, code)
+	requireNoGqlErrors(t, query(t, server, token,
+		`mutation { auth { putRole(role: "anon", objectActions: []) { name } } }`))
+
+	requireNoGqlErrors(t, query(t, server, "", `{ version }`))
+
+	// The catalogue, which is a stored grant, stays closed.
+	denied := query(t, server, "", `{ torrentContent { search(input: {}) { totalCount } } }`)
+	require.NotEmpty(t, denied.Errors)
+	assert.Equal(t, "unauthorized", denied.Errors[0].Message)
+}
+
+// What self.identity reports for an anonymous caller must be what the server
+// will actually honour. listRoles shows the anon role's stored grants whether or
+// not the override honours them - role administration has to show what is
+// configured - but this field answers "what can I reach", and advertising a
+// permission every request for it is refused with is the field's purpose
+// defeated. internal/auth/identity.APIKey already states that principle; this
+// pins it for the anonymous identity under the override.
+func TestClosedInstanceDoesNotAdvertiseOverriddenPermissions(t *testing.T) {
+	t.Parallel()
+
+	cfg := authconfig.NewDefaultConfig()
+	cfg.AnonymousAccess = false
+
+	server, code := newAuthTestServerWithConfig(t, cfg)
+	token := loginAsAdmin(t, server, code)
+
+	requireNoGqlErrors(t, query(t, server, token, `mutation { auth { putRole(role: "anon", objectActions: [
+		{namespace: "graphql", object: "torrentContent", action: "query"}
+	]) { name } } }`))
+
+	// Configured, and reported as configured.
+	roles := query(t, server, token, `{ auth { listRoles { name permissions {
+		objectAction { namespace object action }
+	} } } }`)
+	requireNoGqlErrors(t, roles)
+	assert.Contains(t, string(roles.Data), `"object":"torrentContent"`)
+
+	// But not advertised to the anonymous caller as something it can do,
+	// because it cannot.
+	identified := query(t, server, "", `{ self { identity {
+		permissions { namespace object action }
+	} } }`)
+	requireNoGqlErrors(t, identified)
+	assert.NotContains(t, string(identified.Data), `"object":"torrentContent"`,
+		"an overridden grant must not be reported as effective")
+
+	// And the request itself is refused, which is what the report now agrees with.
+	denied := query(t, server, "", `{ torrentContent { search(input: {}) { totalCount } } }`)
+	require.NotEmpty(t, denied.Errors)
+	assert.Equal(t, "unauthorized", denied.Errors[0].Message)
+}

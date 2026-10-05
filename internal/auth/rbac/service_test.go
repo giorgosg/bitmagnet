@@ -27,6 +27,16 @@ func newTestHarness(t *testing.T) testHarness {
 func newTestHarnessWithTTL(t *testing.T, ttl time.Duration) testHarness {
 	t.Helper()
 
+	return newTestHarnessWithAnonymousAccess(t, ttl, true)
+}
+
+func newTestHarnessWithAnonymousAccess(
+	t *testing.T,
+	ttl time.Duration,
+	anonymousAccess bool,
+) testHarness {
+	t.Helper()
+
 	repo := rbac_mocks.NewRepository(t)
 
 	return testHarness{
@@ -38,6 +48,7 @@ func newTestHarnessWithTTL(t *testing.T, ttl time.Duration) testHarness {
 			},
 			rbac.CorePermissions,
 			rbac.CacheTTL(ttl),
+			rbac.AnonymousAccess(anonymousAccess),
 		),
 	}
 }
@@ -498,4 +509,172 @@ func TestService_filter_allowed_short_circuits_on_empty_input(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assert.Empty(t, allowed)
+}
+
+// The point of the redesign: `auth.anonymous_access: false` must withhold what
+// the database grants anon, not merely what the config used to grant in memory.
+// Before this, a stored anon permission survived the flag and the instance stayed
+// open with nothing in the configuration or the logs saying so — docs/issues/0012.
+func TestService_anonymous_access_off_denies_stored_anon_permissions(t *testing.T) {
+	t.Parallel()
+
+	test := newTestHarnessWithAnonymousAccess(t, time.Minute, false)
+
+	objAct := rbac.NewObjectAction("foo", "bar", "baz")
+
+	test.repository.EXPECT().
+		GetPermissions(t.Context()).
+		Return([]rbac.Permission{
+			rbac.NewPermission(rbac.SubjectRole{Role: rbac.RoleAnon}, objAct),
+		}, nil).
+		Once()
+
+	allow, err := test.service.Enforce(t.Context(), rbac.SubjectRole{Role: rbac.RoleAnon}, objAct)
+
+	require.NoError(t, err)
+	assert.False(t, allow, "a stored anon grant must not survive anonymous_access: false")
+}
+
+// A wildcard is the case that matters most: it is what an anonymous caller could
+// write for itself through putRole while the old baseline granted auth:mutate,
+// and it is the one a subject filter has to catch as surely as an exact grant.
+func TestService_anonymous_access_off_denies_a_stored_anon_wildcard(t *testing.T) {
+	t.Parallel()
+
+	test := newTestHarnessWithAnonymousAccess(t, time.Minute, false)
+
+	test.repository.EXPECT().
+		GetPermissions(t.Context()).
+		Return([]rbac.Permission{
+			rbac.NewPermission(
+				rbac.SubjectRole{Role: rbac.RoleAnon},
+				rbac.NewObjectAction("**", "**", "**"),
+			),
+		}, nil).
+		Once()
+
+	allow, err := test.service.Enforce(
+		t.Context(),
+		rbac.SubjectRole{Role: rbac.RoleAnon},
+		rbac.NewObjectAction("foo", "bar", "baz"),
+	)
+
+	require.NoError(t, err)
+	assert.False(t, allow, "a stored anon wildcard must not survive anonymous_access: false")
+}
+
+// The override is scoped to anon. Switching it off must not disturb any other
+// role, or it would be an outage rather than a setting.
+func TestService_anonymous_access_off_leaves_other_roles_alone(t *testing.T) {
+	t.Parallel()
+
+	test := newTestHarnessWithAnonymousAccess(t, time.Minute, false)
+
+	objAct := rbac.NewObjectAction("foo", "bar", "baz")
+
+	test.repository.EXPECT().
+		GetPermissions(t.Context()).
+		Return([]rbac.Permission{
+			rbac.NewPermission(rbac.SubjectRole{Role: rbac.RoleAnon}, objAct),
+			rbac.NewPermission(rbac.SubjectRole{Role: rbac.Role("ops")}, objAct),
+		}, nil).
+		Once()
+
+	allow, err := test.service.Enforce(t.Context(), rbac.SubjectRole{Role: rbac.Role("ops")}, objAct)
+
+	require.NoError(t, err)
+	assert.True(t, allow, "only the anon subject is filtered")
+}
+
+// Allow carries no permission set of its own any more: it defers to the role, so
+// anon may exactly what the database says and nothing besides.
+func TestService_anonymous_access_on_grants_exactly_the_stored_set(t *testing.T) {
+	t.Parallel()
+
+	test := newTestHarnessWithAnonymousAccess(t, time.Minute, true)
+
+	granted := rbac.NewObjectAction("foo", "bar", "query")
+	withheld := rbac.NewObjectAction("foo", "bar", "mutate")
+
+	test.repository.EXPECT().
+		GetPermissions(t.Context()).
+		Return([]rbac.Permission{
+			rbac.NewPermission(rbac.SubjectRole{Role: rbac.RoleAnon}, granted),
+		}, nil).
+		Once()
+
+	allow, err := test.service.Enforce(t.Context(), rbac.SubjectRole{Role: rbac.RoleAnon}, granted)
+	require.NoError(t, err)
+	assert.True(t, allow)
+
+	allow, err = test.service.Enforce(t.Context(), rbac.SubjectRole{Role: rbac.RoleAnon}, withheld)
+	require.NoError(t, err)
+	assert.False(t, allow, "allow grants the stored set, not a surface of its own")
+}
+
+// The override has to survive a reload, not just the first compile: PutRole
+// recompiles the policy, and the filter lives in both paths.
+func TestService_anonymous_access_off_survives_a_reload(t *testing.T) {
+	t.Parallel()
+
+	test := newTestHarnessWithAnonymousAccess(t, time.Minute, false)
+
+	objAct := rbac.NewObjectAction("foo", "bar", "baz")
+	anonPerms := []rbac.Permission{
+		rbac.NewPermission(rbac.SubjectRole{Role: rbac.RoleAnon}, objAct),
+	}
+
+	test.repository.EXPECT().GetPermissions(t.Context()).Return(anonPerms, nil)
+	test.repository.EXPECT().
+		PutRole(t.Context(), rbac.Role("ops"), []rbac.ObjectAction{objAct}).
+		Return(rbac.RoleInfo{Role: rbac.Role("ops")}, nil).
+		Once()
+
+	// Compile once, then force a reload through a role write.
+	_, err := test.service.Enforce(t.Context(), rbac.SubjectRole{Role: rbac.RoleAnon}, objAct)
+	require.NoError(t, err)
+
+	_, err = test.service.PutRole(t.Context(), rbac.Role("ops"), []rbac.ObjectAction{objAct})
+	require.NoError(t, err)
+
+	allow, err := test.service.Enforce(t.Context(), rbac.SubjectRole{Role: rbac.RoleAnon}, objAct)
+
+	require.NoError(t, err)
+	assert.False(t, allow, "the reloaded policy must filter anon too")
+}
+
+// Filtering by "subject is the anon role" is sufficient only because no other
+// stored subject can glob-match it: casbin's matcher is globMatch(r.sub, p.sub),
+// so the stored policy is the pattern. Role.Validate is what holds that, and this
+// test is here so that relaxing it fails loudly rather than silently reopening
+// anonymous access.
+func TestService_no_other_subject_can_glob_match_anon(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"*", "**", "an*", "anon*", "?non", "[a]non"} {
+		require.Error(t, rbac.Role(name).Validate(),
+			"a role name that could glob-match anon must be rejected: %q", name)
+	}
+
+	test := newTestHarnessWithAnonymousAccess(t, time.Minute, false)
+
+	// Even if such a subject reached the policy, it must not carry anon.
+	test.repository.EXPECT().
+		GetPermissions(t.Context()).
+		Return([]rbac.Permission{
+			rbac.NewPermission(
+				rbac.SubjectRole{Role: rbac.Role("*")},
+				rbac.NewObjectAction("foo", "bar", "baz"),
+			),
+		}, nil).
+		Once()
+
+	allow, err := test.service.Enforce(
+		t.Context(),
+		rbac.SubjectRole{Role: rbac.RoleAnon},
+		rbac.NewObjectAction("foo", "bar", "baz"),
+	)
+
+	require.NoError(t, err)
+	assert.False(t, allow, "a wildcard subject must not hand anon a permission")
 }

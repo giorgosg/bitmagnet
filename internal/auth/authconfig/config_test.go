@@ -33,13 +33,12 @@ func registered() rbac.ObjectActionProvider {
 	}
 }
 
-// actions keys the grants by "object:action", because the policy now turns on
-// the action and not only the object.
-func actions(permissions []rbac.Permission) map[string]bool {
+// actions keys the surface by "object:action", because the rule turns on the
+// action and not only the object.
+func actions(objectActions []rbac.ObjectAction) map[string]bool {
 	seen := map[string]bool{}
 
-	for _, p := range permissions {
-		oa := p.ObjectAction()
+	for _, oa := range objectActions {
 		seen[oa.Object+":"+oa.Action] = true
 	}
 
@@ -49,14 +48,14 @@ func actions(permissions []rbac.Permission) map[string]bool {
 // While anonymous access is on, an installation that never configured auth keeps
 // its *read* surface reachable without a credential. It used to keep every
 // registered object action, writes included; see
-// TestAnonymousPermissionsGrantNoWrites for why that changed.
-func TestAnonymousPermissionsGrantTheReadSurfaceWhenOpen(t *testing.T) {
+// TestAnonymousReadSurfaceHasNoWrites for why that changed.
+func TestAnonymousReadSurfaceIsTheCatalogue(t *testing.T) {
 	t.Parallel()
 
 	cfg := authconfig.NewDefaultConfig()
 	require.True(t, cfg.AnonymousAccess, "anonymous access must default to on")
 
-	granted := actions(authconfig.AnonymousPermissions(cfg, registered())())
+	granted := actions(authconfig.AnonymousReadSurface(registered()))
 
 	assert.True(t, granted["torrentContent:query"], "the catalogue stays anonymous-readable")
 	assert.True(t, granted["torrent:query"])
@@ -74,11 +73,10 @@ func TestAnonymousPermissionsGrantTheReadSurfaceWhenOpen(t *testing.T) {
 // a verb nobody anticipated is denied to anonymous callers rather than granted.
 // A read wrongly withheld reports `unauthorized` and gets noticed; a write
 // wrongly granted does not.
-func TestAnonymousPermissionsGrantNoWrites(t *testing.T) {
+func TestAnonymousReadSurfaceHasNoWrites(t *testing.T) {
 	t.Parallel()
 
-	cfg := authconfig.NewDefaultConfig()
-	granted := actions(authconfig.AnonymousPermissions(cfg, registered())())
+	granted := actions(authconfig.AnonymousReadSurface(registered()))
 
 	for _, objectAction := range []string{
 		"torrent:delete",
@@ -92,17 +90,16 @@ func TestAnonymousPermissionsGrantNoWrites(t *testing.T) {
 }
 
 // An action verb this policy has never seen is not a read until someone says so.
-func TestAnonymousPermissionsDenyUnknownActions(t *testing.T) {
+func TestAnonymousReadSurfaceExcludesUnknownActions(t *testing.T) {
 	t.Parallel()
 
-	cfg := authconfig.NewDefaultConfig()
 	provider := func() []rbac.ObjectAction {
 		return []rbac.ObjectAction{
 			rbac.NewObjectAction("graphql", "torrent", "reprocess"),
 		}
 	}
 
-	assert.Empty(t, authconfig.AnonymousPermissions(cfg, provider)(),
+	assert.Empty(t, authconfig.AnonymousReadSurface(provider),
 		"an unrecognised action must not be granted by default")
 }
 
@@ -110,24 +107,28 @@ func TestAnonymousPermissionsDenyUnknownActions(t *testing.T) {
 // persist in the database while this grant is only in memory, so a wildcard
 // written onto the anon role while the instance was open would survive turning
 // anonymous access off — a permanent bypass with nothing to show for it.
-func TestAnonymousPermissionsNeverGrantAuthAdministration(t *testing.T) {
+func TestAnonymousReadSurfaceExcludesAuthAdministration(t *testing.T) {
 	t.Parallel()
 
-	cfg := authconfig.NewDefaultConfig()
-
-	for _, permission := range authconfig.AnonymousPermissions(cfg, registered())() {
-		assert.NotEqual(t, "auth", permission.ObjectAction().Object,
+	for _, objectAction := range authconfig.AnonymousReadSurface(registered()) {
+		assert.NotEqual(t, "auth", objectAction.Object,
 			"anonymous callers must never administer auth, even in open mode")
 	}
 }
 
-func TestAnonymousPermissionsGrantNothingWhenClosed(t *testing.T) {
+// `auth.anonymous_access: false` is no longer this rule's business. The surface
+// is what an installation seeds the anon role with; withholding it is a
+// deny-override applied when the casbin policy is compiled, so the closed case
+// lives in internal/auth/rbac - see
+// TestService_anonymous_access_off_denies_stored_anon_permissions.
+//
+// What is still this package's business is that the flag exists and still
+// defaults to on, because the seed reads it once per installation.
+func TestAnonymousAccessStillDefaultsOn(t *testing.T) {
 	t.Parallel()
 
-	cfg := authconfig.NewDefaultConfig()
-	cfg.AnonymousAccess = false
-
-	assert.Empty(t, authconfig.AnonymousPermissions(cfg, registered())())
+	assert.True(t, authconfig.NewDefaultConfig().AnonymousAccess,
+		"a fresh installation stays readable without a credential, as upstream's contract expects")
 }
 
 // The default config is what an installation that has configured nothing runs
@@ -239,11 +240,10 @@ func TestConfigAcceptsPlausibleHardening(t *testing.T) {
 // None of it is the catalogue an open instance exists to serve, and the
 // difference between a LAN address and a public one is exactly the move this
 // matters for.
-func TestAnonymousPermissionsExcludeOperationalEndpoints(t *testing.T) {
+func TestAnonymousReadSurfaceExcludesOperationalEndpoints(t *testing.T) {
 	t.Parallel()
 
-	cfg := authconfig.NewDefaultConfig()
-	granted := actions(authconfig.AnonymousPermissions(cfg, registered())())
+	granted := actions(authconfig.AnonymousReadSurface(registered()))
 
 	assert.False(t, granted["pprof:query"],
 		"profiling must never be anonymous: it dumps process memory and burns CPU on demand")
@@ -258,8 +258,7 @@ func TestAnonymousPermissionsExcludeOperationalEndpoints(t *testing.T) {
 func TestAnonymousExclusionsMatchTheRealObjectActions(t *testing.T) {
 	t.Parallel()
 
-	cfg := authconfig.NewDefaultConfig()
-	granted := actions(authconfig.AnonymousPermissions(cfg, http_auth.ObjectActionProvider())())
+	granted := actions(authconfig.AnonymousReadSurface(http_auth.ObjectActionProvider()))
 
 	for _, excluded := range []rbac.ObjectAction{
 		http_auth.ObjectActionPprof,

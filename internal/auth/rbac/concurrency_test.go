@@ -64,6 +64,7 @@ func newBlockingHarness(t *testing.T) (rbac.Service, *blockingRepository) {
 		func() []rbac.ObjectAction { return nil },
 		rbac.CorePermissions,
 		rbac.CacheTTL(time.Minute),
+		rbac.AnonymousAccess(true),
 	), repo
 }
 
