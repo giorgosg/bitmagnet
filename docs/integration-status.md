@@ -93,6 +93,7 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#77](https://github.com/giorgosg/bitmagnet/pull/77) | Revoke sessions on logout, and expose `self.updatePassword`                 | local — review finding 06                                            | A logged-out token still answered as its user; seven red       |
 | [#79](https://github.com/giorgosg/bitmagnet/pull/79) | Stop serialising every authorization decision behind one slot               | local — review finding 0010a                                         | A decision queued behind a role write; observed red            |
 | [#80](https://github.com/giorgosg/bitmagnet/pull/80) | Lease queue jobs instead of running them inside the claiming transaction    | local — review finding 0004                                          | Handler could not touch its own row; four regressions red      |
+| [#81](https://github.com/giorgosg/bitmagnet/pull/81) | Make the anonymous baseline the read surface, and not the instruments       | local — review findings 01, 02, 0013                                 | Anonymous delete, import, pprof and scrape all landed; red     |
 
 ## In flight
 

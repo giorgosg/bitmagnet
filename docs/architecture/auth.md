@@ -158,6 +158,31 @@ Object actions and permissions are both collected from fx value groups
 (`auth_object_actions`, `auth_permissions`), so a module registers its own without
 `authfx` knowing about it.
 
+## What anonymous means
+
+`authconfig.AnonymousPermissions` is the whole decision, and it is deliberately in one
+place: while `anonymous_access` is on it grants the anon role the registered object actions
+whose verb is a **read**, minus an explicit set of excluded objects.
+
+Both halves of that are allow-lists on purpose. The verbs are allow-listed so an object
+action registered later with a verb nobody anticipated is **denied** rather than granted —
+a read wrongly withheld answers `unauthorized` and gets reported, while a write wrongly
+granted is silent until something is gone. The excluded objects are `auth` (role grants
+persist in the database while this grant is only in memory, so a wildcard written onto anon
+would outlive `anonymous_access: false`), and `pprof` and `metrics`, whose verbs _are_
+`query` but which are the operator's instruments rather than the catalogue.
+
+Those exclusions are string literals because this package cannot import `http_auth` —
+`http_auth` reaches `browser_session`, which imports `authconfig` back. A test in
+`authconfig_test`, which can import both, pins the literals against the real object actions
+so a rename fails loudly instead of quietly lapsing.
+
+**It grants, and does not deny.** An administrator may still `putRole("anon", …)`, which
+writes to `role_permissions` and is merged with this in-memory set — and
+`anonymous_access: false` withholds only this half, not the stored half. That asymmetry is
+recorded in `docs/issues/0012` and is the thing to settle before anyone builds a flow around
+opening anonymous access up at runtime.
+
 `rbac.Service` wraps casbin and caches the compiled policy for `RBACCacheTTL` — so a
 permission change takes up to that long to take effect.
 

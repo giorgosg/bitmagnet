@@ -12,9 +12,22 @@ you turn it on.
 
 ## Turning it on
 
-`auth.anonymous_access` defaults to `true`, which grants the `anon` role every registered
-object action except auth administration. Every existing client keeps working with no
-credentials. Set it to `false` to require authentication.
+`auth.anonymous_access` defaults to `true`, which grants the `anon` role the registered
+**read** object actions — the catalogue an open instance exists to serve. Searching,
+browsing and Torznab keep working with no credentials. Set it to `false` to require
+authentication for everything.
+
+What `true` does **not** grant, so that an open instance is readable rather than writable:
+
+| Withheld from anonymous                                             | Why                                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `torrent:delete`, `torrent:mutate`, `queue:mutate`, `import:mutate` | `allowed_origins` defaults to `*` and `Content-Type: application/json` is an allowed header, so any page the operator visited could issue these cross-origin. For a delete the side effect is the damage, so an unreadable response bought nothing. |
+| `auth:query`, `auth:mutate`                                         | Role grants persist in the database while the anonymous grant is only in memory, so a wildcard written onto the anon role would outlive `anonymous_access: false`.                                                                                  |
+| `pprof:query`                                                       | `/debug/pprof` dumps process memory structure and every stack, and `/debug/pprof/profile` runs a CPU profile for a caller-chosen `?seconds=`, as often as asked.                                                                                    |
+| `metrics:query`                                                     | The scrape discloses index size, queue depth and crawl rate.                                                                                                                                                                                        |
+
+Anything whose action verb this policy does not recognise as a read is withheld too: a new
+object action is denied to anonymous callers until someone decides otherwise.
 
 Then start the process and **read the log for the bootstrap invitation code** — or ask
 for it afterwards with `bitmagnet auth initial-invitation`, below. An
@@ -78,7 +91,7 @@ WHERE role_name = 'admin' AND created_by IS NULL AND claimed_by IS NULL;
 
 | Key                              | Default              |                                                                   |
 | -------------------------------- | -------------------- | ----------------------------------------------------------------- |
-| `auth.anonymous_access`          | `true`               | `false` enables auth; `true` grants anon all but auth admin       |
+| `auth.anonymous_access`          | `true`               | `false` requires auth for everything; `true` grants anon reads    |
 | `auth.jwt_secret`                | _(none)_             | random per process when unset, so tokens do not survive a restart |
 | `auth.jwt_duration`              | `24h`                |                                                                   |
 | `auth.browser_cookie_name`       | `__Secure-bitmagnet` | must retain the `__Secure-` prefix                                |
@@ -290,8 +303,24 @@ object actions, so a key handed to Prowlarr can be allowed Torznab and nothing e
 ## Endpoints that are not GraphQL
 
 `/import`, `/metrics` and `/debug/pprof/*` are guarded by object actions in the `http`
-namespace, so disabling anonymous access closes them — including the data-mutating
-importer and `/debug/pprof/cmdline`, which discloses the process command line.
+namespace. **None of the three is anonymous, whatever `auth.anonymous_access` is set to**
+— `/import` because it writes, and the other two because profiling and the scrape are the
+operator's instruments rather than the catalogue.
+
+That is a change for anyone whose **Prometheus scrape was unauthenticated**. Mint an API
+key scoped to `http:metrics:query` and give it to Prometheus as a bearer token:
+
+```yaml
+scrape_configs:
+  - job_name: bitmagnet
+    authorization:
+      credentials: <api key>
+    static_configs:
+      - targets: ["bitmagnet:3333"]
+```
+
+The same applies to any profiling you do by hand, which now needs a credential carrying
+`http:pprof:query`.
 
 `/import` additionally requires `Content-Type: application/json` and answers 415 otherwise.
 This is defence against the browser rather than against the operator: without it, a
