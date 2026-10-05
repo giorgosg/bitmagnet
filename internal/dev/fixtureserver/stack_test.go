@@ -74,6 +74,55 @@ type workersResponse struct {
 	Workers workersQuery `json:"workers"`
 }
 
+type queueMetricsBucket struct {
+	Queue  string `json:"queue"`
+	Status string `json:"status"`
+	Count  int    `json:"count"`
+}
+
+type queueMetricsResult struct {
+	Buckets []queueMetricsBucket `json:"buckets"`
+}
+
+type queueMetricsQuery struct {
+	Metrics queueMetricsResult `json:"metrics"`
+}
+
+type queueMetricsResponse struct {
+	Queue queueMetricsQuery `json:"queue"`
+}
+
+type torrentSourceItem struct {
+	Key  string `json:"key"`
+	Name string `json:"name"`
+}
+
+type listSourcesResult struct {
+	Sources []torrentSourceItem `json:"sources"`
+}
+
+type torrentMetricsBucket struct {
+	Source string `json:"source"`
+	Count  int    `json:"count"`
+}
+
+type torrentMetricsResult struct {
+	Buckets []torrentMetricsBucket `json:"buckets"`
+}
+
+type torrentQueryResponseBody struct {
+	ListSources listSourcesResult    `json:"listSources"`
+	Metrics     torrentMetricsResult `json:"metrics"`
+}
+
+type listSourcesResponse struct {
+	Torrent torrentQueryResponseBody `json:"torrent"`
+}
+
+type torrentMetricsResponse struct {
+	Torrent torrentQueryResponseBody `json:"torrent"`
+}
+
 type queueAgg struct {
 	Value string `json:"value"`
 	Count int    `json:"count"`
@@ -173,7 +222,7 @@ func requireNoGqlErrors(t *testing.T, res gqlResponse) {
 func build(t *testing.T, db *dbtest.DB, cfg authconfig.Config) (*fixtureserver.Stack, *httptest.Server) {
 	t.Helper()
 
-	stack, err := fixtureserver.Build(fixtureserver.Options{
+	stack, err := fixtureserver.Build(t.Context(), fixtureserver.Options{
 		Config:              cfg,
 		Provider:            daoProvider{query: db.Query},
 		Logger:              zap.NewNop().Sugar(),
@@ -206,7 +255,7 @@ func buildWithOptions(
 	}
 	adjust(&opts)
 
-	stack, err := fixtureserver.Build(opts)
+	stack, err := fixtureserver.Build(t.Context(), opts)
 	require.NoError(t, err)
 
 	server := httptest.NewServer(stack.Engine)
@@ -218,7 +267,7 @@ func buildWithOptions(
 func TestBuildRequiresAProvider(t *testing.T) {
 	t.Parallel()
 
-	_, err := fixtureserver.Build(fixtureserver.Options{Config: authconfig.NewDefaultConfig()})
+	_, err := fixtureserver.Build(t.Context(), fixtureserver.Options{Config: authconfig.NewDefaultConfig()})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "database provider is required")
 }
@@ -404,13 +453,41 @@ func TestStackAnswersWorkers(t *testing.T) {
 func TestStackAnswersQueueMetrics(t *testing.T) {
 	t.Parallel()
 
-	_, server := build(t, dbtest.New(t), authconfig.NewDefaultConfig())
+	// Seeded, because the criterion is "answers with data": an unseeded clone has
+	// no queue jobs at all, so an empty bucket list would pass an
+	// absence-of-errors assertion while telling a chart nothing.
+	_, server := buildWithOptions(t, dbtest.New(t), func(o *fixtureserver.Options) {
+		o.SeedDashboardData = true
+	})
 
 	res := query(t, server, "", `{ queue { metrics(input: {bucketDuration: hour}) {
 		buckets { queue status count }
 	} } }`)
-
 	requireNoGqlErrors(t, res)
+
+	var body queueMetricsResponse
+	require.NoError(t, json.Unmarshal(res.Data, &body))
+
+	buckets := body.Queue.Metrics.Buckets
+	require.NotEmpty(t, buckets, "the chart needs buckets")
+
+	statuses := map[string]struct{}{}
+	queues := map[string]struct{}{}
+	maxCount := 0
+
+	for _, b := range buckets {
+		statuses[b.Status] = struct{}{}
+		queues[b.Queue] = struct{}{}
+
+		if b.Count > maxCount {
+			maxCount = b.Count
+		}
+	}
+
+	assert.Len(t, statuses, 4, "every status should reach the chart")
+	assert.Len(t, queues, 2, "both queues should reach the chart")
+	assert.Greater(t, maxCount, 1,
+		"the pair seeded ten minutes apart must share an hourly bucket, or every column is 1")
 }
 
 // jobs resolves through Search rather than the metrics client, so it worked
@@ -490,6 +567,10 @@ func TestStackAnswersTorrentMetrics(t *testing.T) {
 		buckets { source bucket count }
 	} } }`)
 
+	// Answers, and on a bare database answers empty: the seed's torrent half
+	// moves existing source rows rather than inserting synthetic torrents, so
+	// there is nothing to move here. The populated case is asserted in
+	// TestSeededStackPopulatesTheStatisticsChart.
 	requireNoGqlErrors(t, res)
 }
 
@@ -500,6 +581,17 @@ func TestStackAnswersTorrentListSources(t *testing.T) {
 
 	res := query(t, server, "", `{ torrent { listSources { sources { key name } } } }`)
 	requireNoGqlErrors(t, res)
+
+	var body listSourcesResponse
+	require.NoError(t, json.Unmarshal(res.Data, &body))
+
+	// Migration 00001 seeds these two, so they are present on a bare database.
+	keys := make([]string, 0, len(body.Torrent.ListSources.Sources))
+	for _, src := range body.Torrent.ListSources.Sources {
+		keys = append(keys, src.Key)
+	}
+
+	assert.Contains(t, keys, "dht")
 }
 
 // The btm-testdb corpus carries no queue_jobs at all — its manifest lists none
@@ -511,7 +603,7 @@ func TestSeedQueueJobsCoversEveryStatus(t *testing.T) {
 	t.Parallel()
 
 	_, server := buildWithOptions(t, dbtest.New(t), func(o *fixtureserver.Options) {
-		o.SeedQueueJobs = true
+		o.SeedDashboardData = true
 	})
 
 	for _, status := range []string{"pending", "retry", "failed", "processed"} {
@@ -533,7 +625,7 @@ func TestSeedQueueJobsCoversMoreThanOneQueue(t *testing.T) {
 	t.Parallel()
 
 	_, server := buildWithOptions(t, dbtest.New(t), func(o *fixtureserver.Options) {
-		o.SeedQueueJobs = true
+		o.SeedDashboardData = true
 	})
 
 	res := query(t, server, "", `{ queue { jobs(input: {
@@ -562,4 +654,40 @@ func TestQueueJobsAreNotSeededByDefault(t *testing.T) {
 	require.NoError(t, json.Unmarshal(res.Data, &body))
 
 	assert.Zero(t, body.Queue.Jobs.TotalCount)
+}
+
+// The statistics page opens on the last hour, and the seed corpus is a snapshot
+// whose torrent source timestamps are months old — so `torrent.metrics` answered
+// with zero buckets on the view the page actually shows. The seed's torrent half
+// moves a bounded number of those rows into that window.
+//
+// This takes a seeded clone because that half updates existing rows rather than
+// inserting synthetic torrents, which would change what the search pages are
+// tested against. It shares the clone cost with nothing else, so it asserts the
+// queue half here too rather than paying for a second one.
+func TestSeededStackPopulatesTheStatisticsChart(t *testing.T) {
+	t.Parallel()
+
+	_, server := buildWithOptions(t, dbtest.NewSeeded(t), func(o *fixtureserver.Options) {
+		o.SeedDashboardData = true
+	})
+
+	res := query(t, server, "", `{ torrent { metrics(input: {bucketDuration: minute}) {
+		buckets { source count }
+	} } }`)
+	requireNoGqlErrors(t, res)
+
+	var body torrentMetricsResponse
+	require.NoError(t, json.Unmarshal(res.Data, &body))
+
+	require.NotEmpty(t, body.Torrent.Metrics.Buckets,
+		"the chart's default window must have buckets, or the page shows nothing")
+
+	total := 0
+	for _, b := range body.Torrent.Metrics.Buckets {
+		total += b.Count
+		assert.NotEmpty(t, b.Source)
+	}
+
+	assert.Positive(t, total)
 }

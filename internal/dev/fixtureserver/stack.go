@@ -14,7 +14,6 @@ package fixtureserver
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 
@@ -40,7 +39,6 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
 	"github.com/bitmagnet-io/bitmagnet/internal/metrics/queuemetrics"
 	"github.com/bitmagnet-io/bitmagnet/internal/metrics/torrentmetrics"
-	"github.com/bitmagnet-io/bitmagnet/internal/model"
 	"github.com/bitmagnet-io/bitmagnet/internal/queue/manager"
 	torznab_httpserver "github.com/bitmagnet-io/bitmagnet/internal/torznab/httpserver"
 	"github.com/bitmagnet-io/bitmagnet/internal/version"
@@ -71,15 +69,19 @@ type Options struct {
 	// AuthenticatorOverride replaces the real authenticator, for tests that need
 	// to drive a failure the real one cannot be made to produce.
 	AuthenticatorOverride identity.Authenticator
-	// SeedQueueJobs inserts queue jobs covering every status and more than one
-	// queue, spread across time buckets.
+	// SeedDashboardData gives the status, statistics and queue pages data in the
+	// recent window each of them opens on: queue jobs covering every status
+	// across two queues, and a bounded number of torrent source rows moved into
+	// the last hour. See seed.go for what each half does and why one of them
+	// needs a populated database.
 	//
-	// Off by default, and the default is the point: the btm-testdb corpus carries
-	// no queue_jobs, so a browser suite driving the queue page has nothing to
-	// render without this — while the GraphQL auth integration tests build the
-	// same stack and would have their counts changed by rows they never asked
-	// for. The caller that needs the data says so.
-	SeedQueueJobs bool
+	// This field is off unless a caller asks, which is not the same as the
+	// `dev fixture serve` default -- that command turns it on, because it exists
+	// for the browser harness. The two differ on purpose: the GraphQL auth
+	// integration tests build this same stack, and rows they never asked for
+	// would change what their counts mean. The caller that wants the data says
+	// so.
+	SeedDashboardData bool
 }
 
 // Stack is the assembled server and the services behind it.
@@ -108,7 +110,11 @@ type Stack struct {
 
 // Build assembles the stack. It registers no routes on any listener and starts
 // nothing; the caller decides whether that is an httptest server or a real one.
-func Build(opts Options) (*Stack, error) {
+//
+// The context covers the work Build itself does against the database -- the anon
+// role translation, the worker registry's start hooks, and the queue job seed --
+// so a caller that gives up waiting is not left with a half-seeded clone.
+func Build(ctx context.Context, opts Options) (*Stack, error) {
 	if opts.Provider == nil {
 		return nil, fmt.Errorf("fixtureserver: a database provider is required")
 	}
@@ -145,7 +151,7 @@ func Build(opts Options) (*Stack, error) {
 	// the anon role holds nothing and the fixture would model an instance no real
 	// deployment is in.
 	if err := authfx.TranslateAnonRole(
-		context.Background(),
+		ctx,
 		opts.Provider,
 		opts.Config,
 		objectActionProvider,
@@ -183,6 +189,11 @@ func Build(opts Options) (*Stack, error) {
 
 	cookie := browser_session.NewCookie(opts.Config)
 
+	// contextcheck sees NewChecker -> newChecker -> Start, which manufactures a
+	// context of its own. That path is not taken: WithDisabledAutostart is passed,
+	// and health.NewChecker has no context parameter to thread one through
+	// regardless. Same reason as internal/app/cli and internal/dhtcrawler.
+	//nolint:contextcheck
 	healthChecker, err := newHealthChecker(query)
 	if err != nil {
 		return nil, err
@@ -203,7 +214,7 @@ func Build(opts Options) (*Stack, error) {
 		return nil, err
 	}
 
-	workerRegistry, err := newWorkerRegistry(context.Background(), logger)
+	workerRegistry, err := newWorkerRegistry(ctx, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -232,8 +243,8 @@ func Build(opts Options) (*Stack, error) {
 		BrowserCookie:        cookie,
 	})
 
-	if opts.SeedQueueJobs {
-		if err = seedQueueJobs(context.Background(), query); err != nil {
+	if opts.SeedDashboardData {
+		if err = seedDashboardData(ctx, query); err != nil {
 			return nil, err
 		}
 	}
@@ -270,79 +281,6 @@ func Build(opts Options) (*Stack, error) {
 	}, nil
 }
 
-// seedQueueJobs inserts a small, deterministic set of queue jobs: every status,
-// two queues, and created_at spread over several hours so a chart bucketed by
-// hour has more than one column.
-//
-// The jobs are not meant to be run. This stack leaves the queue server unwired,
-// so nothing picks them up, and the pending ones stay pending for the suite to
-// look at.
-func seedQueueJobs(ctx context.Context, query *dao.Query) error {
-	now := time.Now().UTC()
-
-	type spec struct {
-		queue    string
-		status   model.QueueJobStatus
-		ageHours int
-	}
-
-	specs := make([]spec, 0, len(seededQueueNames)*4)
-
-	for i, queue := range seededQueueNames {
-		for j, status := range []model.QueueJobStatus{
-			model.QueueJobStatusPending,
-			model.QueueJobStatusRetry,
-			model.QueueJobStatusFailed,
-			model.QueueJobStatusProcessed,
-		} {
-			// Two per status per queue, an hour apart, so the chart has columns
-			// and the facet counts are not all 1.
-			specs = append(specs,
-				spec{queue: queue, status: status, ageHours: i*4 + j},
-				spec{queue: queue, status: status, ageHours: i*4 + j + 1},
-			)
-		}
-	}
-
-	jobs := make([]*model.QueueJob, 0, len(specs))
-
-	for i, sp := range specs {
-		// The payload differs per job because NewQueueJob fingerprints
-		// queue+payload, and the fingerprint is how the queue deduplicates.
-		job, err := model.NewQueueJob(sp.queue, map[string]any{"seed": i})
-		if err != nil {
-			return fmt.Errorf("fixtureserver: building a seed queue job: %w", err)
-		}
-
-		createdAt := now.Add(-time.Duration(sp.ageHours) * time.Hour)
-		job.Status = sp.status
-		job.CreatedAt = createdAt
-		job.RunAfter = createdAt
-
-		// Everything that has left pending has run, and the chart's latency comes
-		// from the gap between the two.
-		if sp.status != model.QueueJobStatusPending {
-			job.RanAt = sql.NullTime{Time: createdAt.Add(time.Second * 30), Valid: true}
-		}
-
-		if sp.status == model.QueueJobStatusFailed || sp.status == model.QueueJobStatusRetry {
-			job.Retries = 1
-			job.Error = model.NewNullString("seeded failure, so the error column has something to show")
-		}
-
-		jobs = append(jobs, &job)
-	}
-
-	if err := query.QueueJob.WithContext(ctx).CreateInBatches(jobs, 50); err != nil {
-		return fmt.Errorf("fixtureserver: seeding queue jobs: %w", err)
-	}
-
-	return nil
-}
-
-// seededQueueNames are real queue names, so the facet reads like production's.
-var seededQueueNames = []string{"process_torrent", "process_torrent_batch"}
-
 // newHealthChecker builds the checker the `health` query reports on.
 //
 // One real check, against the database this stack was handed, so the page has
@@ -361,6 +299,10 @@ func newHealthChecker(query *dao.Query) (health.Checker, error) {
 	}
 
 	return health.NewChecker(
+		// No autostart, so NewChecker neither spawns the initial-check goroutine
+		// nor manufactures a context of its own: this stack is built per test, and
+		// Checker.Check runs the synchronous checks below on demand anyway.
+		health.WithDisabledAutostart(),
 		health.WithCheck(health.Check{
 			Name:    "postgres",
 			Timeout: healthCheckTimeout,
@@ -383,6 +325,13 @@ func newHealthChecker(query *dao.Query) (health.Checker, error) {
 
 const healthCheckTimeout = time.Second * 5
 
+// lazyDB wraps the stack's gorm handle the way the metrics and queue
+// constructors want it. Three of them take one, and spelling the closure out at
+// each call site was the same four lines three times.
+func lazyDB(query *dao.Query) lazy.Lazy[*gorm.DB] {
+	return lazy.New(func() (*gorm.DB, error) { return query.UnderlyingDB(), nil })
+}
+
 // newQueueMetricsClient builds the client behind `queue.metrics`, through the
 // production constructor rather than by reaching into the package, so the
 // fixture cannot drift from what the real graph provides.
@@ -390,9 +339,7 @@ const healthCheckTimeout = time.Second * 5
 // It reads `queue_jobs` directly, so a caller pointed at a populated database
 // gets real buckets.
 func newQueueMetricsClient(query *dao.Query) (queuemetrics.Client, error) {
-	client, err := queuemetrics.New(queuemetrics.Params{
-		DB: lazy.New(func() (*gorm.DB, error) { return query.UnderlyingDB(), nil }),
-	}).Client.Get()
+	client, err := queuemetrics.New(queuemetrics.Params{DB: lazyDB(query)}).Client.Get()
 	if err != nil {
 		return nil, fmt.Errorf("fixtureserver: building the queue metrics client: %w", err)
 	}
@@ -412,7 +359,7 @@ func newQueueMetricsClient(query *dao.Query) (queuemetrics.Client, error) {
 func newQueueManager(query *dao.Query) (manager.Manager, error) {
 	queueManager, err := manager.New(manager.Params{
 		Dao: lazy.New(func() (*dao.Query, error) { return query, nil }),
-		DB:  lazy.New(func() (*gorm.DB, error) { return query.UnderlyingDB(), nil }),
+		DB:  lazyDB(query),
 	}).Manager.Get()
 	if err != nil {
 		return nil, fmt.Errorf("fixtureserver: building the queue manager: %w", err)
@@ -425,9 +372,7 @@ func newQueueManager(query *dao.Query) (manager.Manager, error) {
 // statistics page reads. Like the queue client it goes through the production
 // constructor and reads the torrent tables directly.
 func newTorrentMetricsClient(query *dao.Query) (torrentmetrics.Client, error) {
-	client, err := torrentmetrics.New(torrentmetrics.Params{
-		DB: lazy.New(func() (*gorm.DB, error) { return query.UnderlyingDB(), nil }),
-	}).Client.Get()
+	client, err := torrentmetrics.New(torrentmetrics.Params{DB: lazyDB(query)}).Client.Get()
 	if err != nil {
 		return nil, fmt.Errorf("fixtureserver: building the torrent metrics client: %w", err)
 	}
@@ -475,6 +420,14 @@ func newWorkerRegistry(ctx context.Context, logger *zap.SugaredLogger) (worker.R
 	return registry, nil
 }
 
+// The keys production registers, copied. Nothing ties these to the call sites
+// that own them -- each is a bare literal at its own worker.NewWorker, in
+// internal/httpserver, internal/dhtcrawler, internal/queue/server and
+// internal/auth/authfx -- so renaming one there leaves this list stale and the
+// tests here still green. Tying them would mean exporting a key constant from
+// each of those four packages, which is a wider change than this fixture
+// warrants; the cost of the drift is a browser suite asserting on a name
+// production no longer uses.
 var (
 	startedWorkerKeys = []string{"http_server", "auth_anon_role_translation"}
 	stoppedWorkerKeys = []string{"dht_crawler", "queue_server", "auth_initial_invitation"}
