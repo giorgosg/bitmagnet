@@ -206,7 +206,7 @@ registered later with a verb nobody anticipated is **denied** rather than grante
 wrongly withheld answers `unauthorized` and gets reported, while a write wrongly granted is
 silent until something is gone. The excluded objects are `auth` (an anonymous caller that
 can administer auth can grant anon a wildcard, and a stored grant is not something the
-setting can take back), plus `pprof` and `metrics`, whose verbs *are* `query` but which are
+setting can take back), plus `pprof` and `metrics`, whose verbs _are_ `query` but which are
 the operator's instruments rather than the catalogue.
 
 Those exclusions are string literals because `authconfig` cannot import `http_auth` —

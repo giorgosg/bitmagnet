@@ -41,12 +41,12 @@ Two consequences worth stating plainly:
 What the seeded read surface does **not** include, so that an open instance is readable
 rather than writable:
 
-| Withheld from anonymous                                             | Why                                                                                                                                                                                                                                                 |
-| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `torrent:delete`, `torrent:mutate`, `queue:mutate`, `import:mutate` | `allowed_origins` defaults to `*` and `Content-Type: application/json` is an allowed header, so any page the operator visited could issue these cross-origin. For a delete the side effect is the damage, so an unreadable response bought nothing. |
+| Withheld from anonymous                                             | Why                                                                                                                                                                                                                                                            |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `torrent:delete`, `torrent:mutate`, `queue:mutate`, `import:mutate` | `allowed_origins` defaults to `*` and `Content-Type: application/json` is an allowed header, so any page the operator visited could issue these cross-origin. For a delete the side effect is the damage, so an unreadable response bought nothing.            |
 | `auth:query`, `auth:mutate`                                         | An anonymous caller that can administer auth can grant the anon role a wildcard, and a stored grant is not something the setting can take back. This is the seed's choice, not a prohibition: an administrator may still grant it, with the consequence above. |
-| `pprof:query`                                                       | `/debug/pprof` dumps process memory structure and every stack, and `/debug/pprof/profile` runs a CPU profile for a caller-chosen `?seconds=`, as often as asked.                                                                                    |
-| `metrics:query`                                                     | The scrape discloses index size, queue depth and crawl rate.                                                                                                                                                                                        |
+| `pprof:query`                                                       | `/debug/pprof` dumps process memory structure and every stack, and `/debug/pprof/profile` runs a CPU profile for a caller-chosen `?seconds=`, as often as asked.                                                                                               |
+| `metrics:query`                                                     | The scrape discloses index size, queue depth and crawl rate.                                                                                                                                                                                                   |
 
 Anything whose action verb the seed does not recognise as a read is withheld too: a new
 object action is denied to anonymous callers until someone decides otherwise.
@@ -122,22 +122,22 @@ WHERE role_name = 'admin' AND created_by IS NULL AND claimed_by IS NULL;
 
 ## Configuration
 
-| Key                              | Default              |                                                                   |
-| -------------------------------- | -------------------- | ----------------------------------------------------------------- |
+| Key                              | Default              |                                                                                                                 |
+| -------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `auth.anonymous_access`          | `true`               | deny-override on the `anon` role: `false` denies anonymous callers whatever the role holds; `true` defers to it |
-| `auth.jwt_secret`                | _(none)_             | random per process when unset, so tokens do not survive a restart |
-| `auth.jwt_duration`              | `24h`                |                                                                   |
-| `auth.browser_cookie_name`       | `__Secure-bitmagnet` | must retain the `__Secure-` prefix                                |
-| `auth.rbac_cache_ttl`            | `1m`                 | how long a revoked permission or role change stays in force       |
-| `auth.invitation_required`       | `true`               |                                                                   |
-| `auth.email_required`            | `false`              |                                                                   |
-| `auth.email_verification`        | `false`              | inert — see Known gaps                                            |
-| `auth.password_min_entropy`      | `70`                 |                                                                   |
-| `auth.password_hashing_cost`     | bcrypt default       | applies to registration _and_ password changes                    |
-| `auth.login_requests_per_minute` | `30`                 | per bucket, not per process                                       |
-| `auth.login_request_burst`       | `5`                  | per bucket, not per process                                       |
-| `graphql.introspection`          | `false`              | `__schema` and `__type` queries; off unless asked for             |
-| `graphql.playground`             | `false`              | GraphiQL on `GET /graphql`; off means the route 404s              |
+| `auth.jwt_secret`                | _(none)_             | random per process when unset, so tokens do not survive a restart                                               |
+| `auth.jwt_duration`              | `24h`                |                                                                                                                 |
+| `auth.browser_cookie_name`       | `__Secure-bitmagnet` | must retain the `__Secure-` prefix                                                                              |
+| `auth.rbac_cache_ttl`            | `1m`                 | how long a revoked permission or role change stays in force                                                     |
+| `auth.invitation_required`       | `true`               |                                                                                                                 |
+| `auth.email_required`            | `false`              |                                                                                                                 |
+| `auth.email_verification`        | `false`              | inert — see Known gaps                                                                                          |
+| `auth.password_min_entropy`      | `70`                 |                                                                                                                 |
+| `auth.password_hashing_cost`     | bcrypt default       | applies to registration _and_ password changes                                                                  |
+| `auth.login_requests_per_minute` | `30`                 | per bucket, not per process                                                                                     |
+| `auth.login_request_burst`       | `5`                  | per bucket, not per process                                                                                     |
+| `graphql.introspection`          | `false`              | `__schema` and `__type` queries; off unless asked for                                                           |
+| `graphql.playground`             | `false`              | GraphiQL on `GET /graphql`; off means the route 404s                                                            |
 
 **Set `auth.jwt_secret` if you do not want every restart to log everyone out.** Unset, it
 is generated per process.
