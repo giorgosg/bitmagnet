@@ -8,7 +8,6 @@ import (
 
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
-	"github.com/google/uuid"
 )
 
 // seedDashboardData gives the status, statistics and queue pages something to
@@ -75,7 +74,11 @@ func seedQueueJobs(ctx context.Context, query *dao.Query, now time.Time) error {
 	// time this ran against the same database -- which `dev fixture serve` never
 	// does, because it clones a fresh template, but a caller reusing a database
 	// would have hit it.
-	run := uuid.NewString()
+	//
+	// The wall clock rather than a uuid, so this costs no dependency: two Builds
+	// would have to land in the same nanosecond to collide, and the only thing
+	// that would cost is a seed conflict on a database somebody chose to reuse.
+	run := now.UnixNano()
 
 	jobs := make([]*model.QueueJob, 0, len(seedJobs))
 
