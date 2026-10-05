@@ -95,6 +95,7 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#80](https://github.com/giorgosg/bitmagnet/pull/80) | Lease queue jobs instead of running them inside the claiming transaction    | local — review finding 0004                                          | Handler could not touch its own row; four regressions red      |
 | [#81](https://github.com/giorgosg/bitmagnet/pull/81) | Make the anonymous baseline the read surface, and not the instruments       | local — review findings 01, 02, 0013                                 | Anonymous delete, import, pprof and scrape all landed; red     |
 | [#82](https://github.com/giorgosg/bitmagnet/pull/82) | Make `anonymous_access` a deny-override on the anon role                    | local — review finding 0012                                          | A stored anon grant survived the flag; observed red            |
+| [#83](https://github.com/giorgosg/bitmagnet/pull/83) | Serve the operational pages from the fixture server                         | local — magnes dashboard ticket 01                                   | Six surfaces answered `internal system error`; observed red    |
 
 ## In flight
 

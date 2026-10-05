@@ -122,8 +122,9 @@ TEST_POSTGRES_TEMPLATE_DSN=$(cd ../btm-testdb && bin/testdb url) \
 ```
 
 It writes **one line of JSON to stdout** and nothing else — address, GraphQL endpoint,
-bootstrap invitation code, database name, and the two settings a harness branches on — so
-the harness parses it rather than scraping logs. gin is put in release mode and pointed at
+bootstrap invitation code, database name, and the three settings a harness branches on
+(`anonymousAccess`, `invitationRequired`, `seededDashboardData`) — so the harness parses it
+rather than scraping logs. gin is put in release mode and pointed at
 stderr to keep that line alone on stdout. The default address is `127.0.0.1:0`, so
 parallel runs do not collide and the assigned port comes back in the announcement.
 
@@ -132,6 +133,32 @@ own throwaway administrator instead of a password living somewhere. `--invitatio
 `--anonymous-access`, `--jwt-duration`, `--login-requests-per-minute` and
 `--login-request-burst` vary the workflows; setting the last two to `1` makes the second
 login attempt throttle, which is otherwise not reachable inside a test's patience.
+
+`--seed-dashboard-data` **defaults to on**, and gives the status, statistics and queue
+pages data in the recent window each of them opens on. Two halves, because the seed
+template is a months-old snapshot:
+
+- Queue jobs covering every `QueueJobStatus` across two queue names, paired inside hourly
+  buckets so the facet counts and the chart's columns are both above one. The template
+  carries no `queue_jobs` at all, so without this the jobs table, status facet and totals
+  chart have nothing to render.
+- A bounded number of `torrents_torrent_sources` rows moved into the last hour, because
+  `torrent.metrics` buckets on `updated_at` and the statistics page opens on the last hour
+  — so the chart was empty on the only view it shows by default. This half **updates
+  existing rows rather than inserting synthetic torrents**, so it changes nothing about what
+  the search pages serve, and does nothing at all on an empty database.
+
+Pass `--seed-dashboard-data=false` for a clone that matches the template exactly. The
+announcement reports which way it went, so a spec that needs the data can skip rather than
+fail obscurely.
+
+What the served instance answers for those pages: `health` reports one real check against
+the clone; `workers` lists the keys production registers, with the ones this stack actually
+runs marked started and the crawler, queue server and invitation worker listed and stopped;
+`queue.jobs`, `queue.metrics`, `torrent.metrics` and `torrent.listSources` all read the
+clone. The processor and the blocking manager stay unwired, as does the queue _server_ — so
+a job enqueued through `queue.purgeJobs` or `enqueueReprocessTorrentsBatch` stays in the
+table to be asserted on rather than being picked up and run.
 
 The clone is dropped when the command exits, including on `SIGINT`/`SIGTERM`. That drop
 runs from an fx `OnStop` hook rather than a `defer`, because `fx.App.Run` returns on the

@@ -88,7 +88,7 @@ func newAuthTestServerWithConfigAndAuthenticator(
 	// fixtureserver.Build is the whole stack, shared with the dev fixture
 	// command. Assembling it here as well would give that command its own copy
 	// to drift away from the one these tests cover.
-	stack, err := fixtureserver.Build(fixtureserver.Options{
+	stack, err := fixtureserver.Build(t.Context(), fixtureserver.Options{
 		Config:    cfg,
 		Provider:  daoProvider{query: db.Query},
 		Logger:    zap.NewNop().Sugar(),

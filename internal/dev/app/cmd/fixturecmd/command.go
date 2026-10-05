@@ -131,6 +131,12 @@ func flags() []cli.Flag {
 			Value: defaults.AnonymousAccess,
 		},
 		&cli.BoolFlag{
+			Name: "seed-dashboard-data",
+			Usage: "give the status, statistics and queue pages data in the recent window " +
+				"they open on; the seed corpus is a months-old snapshot with no queue jobs at all",
+			Value: true,
+		},
+		&cli.BoolFlag{
 			Name:  "invitation-required",
 			Usage: "require an invitation code to register",
 			Value: defaults.InvitationRequired,
@@ -164,6 +170,10 @@ type announcement struct {
 	Database           string `json:"database"`
 	AnonymousAccess    bool   `json:"anonymousAccess"`
 	InvitationRequired bool   `json:"invitationRequired"`
+	// SeededDashboardData tells the harness whether the status, statistics and
+	// queue pages have anything to render, so a spec that needs it can skip
+	// rather than fail obscurely.
+	SeededDashboardData bool `json:"seededDashboardData"`
 }
 
 func (c *command) serve(cliCtx *cli.Context) error {
@@ -199,11 +209,14 @@ func (c *command) serve(cliCtx *cli.Context) error {
 	c.setCleanup(db.Close)
 	defer c.runCleanup()
 
-	stack, err := fixtureserver.Build(fixtureserver.Options{
-		Config:    cfg,
-		Provider:  provider{query: db.Query},
-		Logger:    c.logger,
-		JWTSecret: cfg.JWTSecret,
+	seedDashboardData := cliCtx.Bool("seed-dashboard-data")
+
+	stack, err := fixtureserver.Build(cliCtx.Context, fixtureserver.Options{
+		Config:            cfg,
+		Provider:          provider{query: db.Query},
+		Logger:            c.logger,
+		JWTSecret:         cfg.JWTSecret,
+		SeedDashboardData: seedDashboardData,
 	})
 	if err != nil {
 		return err
@@ -225,12 +238,13 @@ func (c *command) serve(cliCtx *cli.Context) error {
 
 	base := "http://" + listener.Addr().String()
 	if err := announce(os.Stdout, announcement{
-		Address:            base,
-		GraphQLEndpoint:    base + "/graphql",
-		InvitationCode:     invitation.Code,
-		Database:           db.Name,
-		AnonymousAccess:    cfg.AnonymousAccess,
-		InvitationRequired: cfg.InvitationRequired,
+		Address:             base,
+		GraphQLEndpoint:     base + "/graphql",
+		InvitationCode:      invitation.Code,
+		Database:            db.Name,
+		AnonymousAccess:     cfg.AnonymousAccess,
+		InvitationRequired:  cfg.InvitationRequired,
+		SeededDashboardData: seedDashboardData,
 	}); err != nil {
 		_ = listener.Close()
 

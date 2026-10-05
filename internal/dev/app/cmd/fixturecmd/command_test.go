@@ -100,12 +100,13 @@ func TestAnnounceWritesOneParseableLine(t *testing.T) {
 	var buf bytes.Buffer
 
 	require.NoError(t, announce(&buf, announcement{
-		Address:            "http://127.0.0.1:41000",
-		GraphQLEndpoint:    "http://127.0.0.1:41000/graphql",
-		InvitationCode:     "abc123",
-		Database:           "bitmagnet_test_1_2",
-		AnonymousAccess:    false,
-		InvitationRequired: true,
+		Address:             "http://127.0.0.1:41000",
+		GraphQLEndpoint:     "http://127.0.0.1:41000/graphql",
+		InvitationCode:      "abc123",
+		Database:            "bitmagnet_test_1_2",
+		AnonymousAccess:     false,
+		InvitationRequired:  true,
+		SeededDashboardData: true,
 	}))
 
 	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
@@ -119,6 +120,8 @@ func TestAnnounceWritesOneParseableLine(t *testing.T) {
 	assert.Equal(t, "bitmagnet_test_1_2", decoded.Database)
 	assert.False(t, decoded.AnonymousAccess)
 	assert.True(t, decoded.InvitationRequired)
+	assert.True(t, decoded.SeededDashboardData,
+		"a spec that needs dashboard data reads this rather than failing obscurely")
 }
 
 // Without a template there is nothing to serve, and the command should say which
