@@ -106,6 +106,7 @@ func TestAnnounceWritesOneParseableLine(t *testing.T) {
 		Database:           "bitmagnet_test_1_2",
 		AnonymousAccess:    false,
 		InvitationRequired: true,
+		SeededQueueJobs:    true,
 	}))
 
 	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
@@ -119,6 +120,8 @@ func TestAnnounceWritesOneParseableLine(t *testing.T) {
 	assert.Equal(t, "bitmagnet_test_1_2", decoded.Database)
 	assert.False(t, decoded.AnonymousAccess)
 	assert.True(t, decoded.InvitationRequired)
+	assert.True(t, decoded.SeededQueueJobs,
+		"a spec that needs queue jobs reads this rather than failing obscurely")
 }
 
 // Without a template there is nothing to serve, and the command should say which

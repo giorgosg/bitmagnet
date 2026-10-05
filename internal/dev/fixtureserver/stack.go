@@ -14,6 +14,7 @@ package fixtureserver
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -38,6 +39,8 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/health"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
 	"github.com/bitmagnet-io/bitmagnet/internal/metrics/queuemetrics"
+	"github.com/bitmagnet-io/bitmagnet/internal/metrics/torrentmetrics"
+	"github.com/bitmagnet-io/bitmagnet/internal/model"
 	"github.com/bitmagnet-io/bitmagnet/internal/queue/manager"
 	torznab_httpserver "github.com/bitmagnet-io/bitmagnet/internal/torznab/httpserver"
 	"github.com/bitmagnet-io/bitmagnet/internal/version"
@@ -68,6 +71,15 @@ type Options struct {
 	// AuthenticatorOverride replaces the real authenticator, for tests that need
 	// to drive a failure the real one cannot be made to produce.
 	AuthenticatorOverride identity.Authenticator
+	// SeedQueueJobs inserts queue jobs covering every status and more than one
+	// queue, spread across time buckets.
+	//
+	// Off by default, and the default is the point: the btm-testdb corpus carries
+	// no queue_jobs, so a browser suite driving the queue page has nothing to
+	// render without this — while the GraphQL auth integration tests build the
+	// same stack and would have their counts changed by rows they never asked
+	// for. The caller that needs the data says so.
+	SeedQueueJobs bool
 }
 
 // Stack is the assembled server and the services behind it.
@@ -186,17 +198,25 @@ func Build(opts Options) (*Stack, error) {
 		return nil, err
 	}
 
+	torrentMetricsClient, err := newTorrentMetricsClient(query)
+	if err != nil {
+		return nil, err
+	}
+
 	workerRegistry, err := newWorkerRegistry(context.Background(), logger)
 	if err != nil {
 		return nil, err
 	}
 
-	// Torrent and processor metrics and the blocking manager stay nil
-	// deliberately: each drags in a subsystem this stack has no business
-	// starting, and nothing it serves asks for them. Workers, health and queue
-	// metrics used to be in that list, and should not have been — they back
-	// pages an external browser suite has to drive, and a nil interface answers
-	// them with an opaque "internal system error".
+	// The processor and the blocking manager stay nil deliberately: each drags in
+	// a subsystem this stack has no business starting, and nothing it serves asks
+	// for them. Workers, health, the queue surface and torrent metrics used to be
+	// in that list and should not have been — they back the status, statistics
+	// and queue pages an external browser suite has to drive, and a nil interface
+	// answers them with an opaque "internal system error".
+	//
+	// `queue.jobs` and `torrent.listSources` need nothing beyond Search and the
+	// dao, and answered before any of this.
 	schema := newSchema(&resolvers.Resolver{
 		Dao:                query,
 		Search:             searchService,
@@ -204,11 +224,19 @@ func Build(opts Options) (*Stack, error) {
 		Checker:            healthChecker,
 		QueueMetricsClient: queueMetricsClient,
 		QueueManager:       queueManager,
-		UserService:        userService,
-		APIKeyService:      apiKeyService,
-		RBACService:        rbacService,
-		BrowserCookie:      cookie,
+
+		TorrentMetricsClient: torrentMetricsClient,
+		UserService:          userService,
+		APIKeyService:        apiKeyService,
+		RBACService:          rbacService,
+		BrowserCookie:        cookie,
 	})
+
+	if opts.SeedQueueJobs {
+		if err = seedQueueJobs(context.Background(), query); err != nil {
+			return nil, err
+		}
+	}
 
 	engine := gin.New()
 
@@ -241,6 +269,79 @@ func Build(opts Options) (*Stack, error) {
 		ObjectActions: objectActions,
 	}, nil
 }
+
+// seedQueueJobs inserts a small, deterministic set of queue jobs: every status,
+// two queues, and created_at spread over several hours so a chart bucketed by
+// hour has more than one column.
+//
+// The jobs are not meant to be run. This stack leaves the queue server unwired,
+// so nothing picks them up, and the pending ones stay pending for the suite to
+// look at.
+func seedQueueJobs(ctx context.Context, query *dao.Query) error {
+	now := time.Now().UTC()
+
+	type spec struct {
+		queue    string
+		status   model.QueueJobStatus
+		ageHours int
+	}
+
+	specs := make([]spec, 0, len(seededQueueNames)*4)
+
+	for i, queue := range seededQueueNames {
+		for j, status := range []model.QueueJobStatus{
+			model.QueueJobStatusPending,
+			model.QueueJobStatusRetry,
+			model.QueueJobStatusFailed,
+			model.QueueJobStatusProcessed,
+		} {
+			// Two per status per queue, an hour apart, so the chart has columns
+			// and the facet counts are not all 1.
+			specs = append(specs,
+				spec{queue: queue, status: status, ageHours: i*4 + j},
+				spec{queue: queue, status: status, ageHours: i*4 + j + 1},
+			)
+		}
+	}
+
+	jobs := make([]*model.QueueJob, 0, len(specs))
+
+	for i, sp := range specs {
+		// The payload differs per job because NewQueueJob fingerprints
+		// queue+payload, and the fingerprint is how the queue deduplicates.
+		job, err := model.NewQueueJob(sp.queue, map[string]any{"seed": i})
+		if err != nil {
+			return fmt.Errorf("fixtureserver: building a seed queue job: %w", err)
+		}
+
+		createdAt := now.Add(-time.Duration(sp.ageHours) * time.Hour)
+		job.Status = sp.status
+		job.CreatedAt = createdAt
+		job.RunAfter = createdAt
+
+		// Everything that has left pending has run, and the chart's latency comes
+		// from the gap between the two.
+		if sp.status != model.QueueJobStatusPending {
+			job.RanAt = sql.NullTime{Time: createdAt.Add(time.Second * 30), Valid: true}
+		}
+
+		if sp.status == model.QueueJobStatusFailed || sp.status == model.QueueJobStatusRetry {
+			job.Retries = 1
+			job.Error = model.NewNullString("seeded failure, so the error column has something to show")
+		}
+
+		jobs = append(jobs, &job)
+	}
+
+	if err := query.QueueJob.WithContext(ctx).CreateInBatches(jobs, 50); err != nil {
+		return fmt.Errorf("fixtureserver: seeding queue jobs: %w", err)
+	}
+
+	return nil
+}
+
+// seededQueueNames are real queue names, so the facet reads like production's.
+var seededQueueNames = []string{"process_torrent", "process_torrent_batch"}
 
 // newHealthChecker builds the checker the `health` query reports on.
 //
@@ -318,6 +419,20 @@ func newQueueManager(query *dao.Query) (manager.Manager, error) {
 	}
 
 	return queueManager, nil
+}
+
+// newTorrentMetricsClient builds the client behind `torrent.metrics`, which the
+// statistics page reads. Like the queue client it goes through the production
+// constructor and reads the torrent tables directly.
+func newTorrentMetricsClient(query *dao.Query) (torrentmetrics.Client, error) {
+	client, err := torrentmetrics.New(torrentmetrics.Params{
+		DB: lazy.New(func() (*gorm.DB, error) { return query.UnderlyingDB(), nil }),
+	}).Client.Get()
+	if err != nil {
+		return nil, fmt.Errorf("fixtureserver: building the torrent metrics client: %w", err)
+	}
+
+	return client, nil
 }
 
 // newWorkerRegistry builds the registry `workers` lists, holding the keys

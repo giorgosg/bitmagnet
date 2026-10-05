@@ -74,6 +74,28 @@ type workersResponse struct {
 	Workers workersQuery `json:"workers"`
 }
 
+type queueAgg struct {
+	Value string `json:"value"`
+	Count int    `json:"count"`
+}
+
+type queueJobsAggregations struct {
+	Queue []queueAgg `json:"queue"`
+}
+
+type queueJobsResult struct {
+	TotalCount   int                   `json:"totalCount"`
+	Aggregations queueJobsAggregations `json:"aggregations"`
+}
+
+type queueJobsQuery struct {
+	Jobs queueJobsResult `json:"jobs"`
+}
+
+type queueJobsResponse struct {
+	Queue queueJobsQuery `json:"queue"`
+}
+
 type searchItem struct {
 	InfoHash string `json:"infoHash"`
 }
@@ -158,6 +180,33 @@ func build(t *testing.T, db *dbtest.DB, cfg authconfig.Config) (*fixtureserver.S
 		JWTSecret:           "fixtureserver-test-secret",
 		PasswordHashingCost: bcrypt.MinCost,
 	})
+	require.NoError(t, err)
+
+	server := httptest.NewServer(stack.Engine)
+	t.Cleanup(server.Close)
+
+	return stack, server
+}
+
+// buildWithOptions serves a stack whose Options the caller adjusts, for the
+// settings that are not part of authconfig.
+func buildWithOptions(
+	t *testing.T,
+	db *dbtest.DB,
+	adjust func(*fixtureserver.Options),
+) (*fixtureserver.Stack, *httptest.Server) {
+	t.Helper()
+
+	opts := fixtureserver.Options{
+		Config:              authconfig.NewDefaultConfig(),
+		Provider:            daoProvider{query: db.Query},
+		Logger:              zap.NewNop().Sugar(),
+		JWTSecret:           "fixtureserver-test-secret",
+		PasswordHashingCost: bcrypt.MinCost,
+	}
+	adjust(&opts)
+
+	stack, err := fixtureserver.Build(opts)
 	require.NoError(t, err)
 
 	server := httptest.NewServer(stack.Engine)
@@ -425,4 +474,92 @@ func TestStackAnswersQueueMutations(t *testing.T) {
 	reprocessed := query(t, server, token,
 		`mutation { queue { enqueueReprocessTorrentsBatch(input: {}) } }`)
 	requireNoGqlErrors(t, reprocessed)
+}
+
+// The dashboard ticket names six fields the status, statistics and queue pages
+// read. These are the two on `torrent`: metrics resolves through the torrent
+// metrics client, and listSources reads the sources table through Search. The
+// ticket asked what each one does today rather than assuming, so both are
+// asserted here.
+func TestStackAnswersTorrentMetrics(t *testing.T) {
+	t.Parallel()
+
+	_, server := build(t, dbtest.New(t), authconfig.NewDefaultConfig())
+
+	res := query(t, server, "", `{ torrent { metrics(input: {bucketDuration: hour}) {
+		buckets { source bucket count }
+	} } }`)
+
+	requireNoGqlErrors(t, res)
+}
+
+func TestStackAnswersTorrentListSources(t *testing.T) {
+	t.Parallel()
+
+	_, server := build(t, dbtest.New(t), authconfig.NewDefaultConfig())
+
+	res := query(t, server, "", `{ torrent { listSources { sources { key name } } } }`)
+	requireNoGqlErrors(t, res)
+}
+
+// The btm-testdb corpus carries no queue_jobs at all — its manifest lists none
+// and there is no queue_jobs.tsv — so the jobs table, its status facet and the
+// totals chart have nothing to render against a clone. The ticket asked for
+// jobs in every QueueJobStatus, behind a flag so the stack's other caller (the
+// auth integration tests) is not handed rows it never asked for.
+func TestSeedQueueJobsCoversEveryStatus(t *testing.T) {
+	t.Parallel()
+
+	_, server := buildWithOptions(t, dbtest.New(t), func(o *fixtureserver.Options) {
+		o.SeedQueueJobs = true
+	})
+
+	for _, status := range []string{"pending", "retry", "failed", "processed"} {
+		res := query(t, server, "", `{ queue { jobs(input: {
+			statuses: [`+status+`], totalCount: true
+		}) { totalCount } } }`)
+		requireNoGqlErrors(t, res)
+
+		var body queueJobsResponse
+		require.NoError(t, json.Unmarshal(res.Data, &body))
+
+		assert.Positive(t, body.Queue.Jobs.TotalCount,
+			"the %s facet needs at least one job to show", status)
+	}
+}
+
+// More than one queue, so the queue facet has something to discriminate.
+func TestSeedQueueJobsCoversMoreThanOneQueue(t *testing.T) {
+	t.Parallel()
+
+	_, server := buildWithOptions(t, dbtest.New(t), func(o *fixtureserver.Options) {
+		o.SeedQueueJobs = true
+	})
+
+	res := query(t, server, "", `{ queue { jobs(input: {
+		facets: {queue: {aggregate: true}}
+	}) { aggregations { queue { value count } } } } }`)
+	requireNoGqlErrors(t, res)
+
+	var body queueJobsResponse
+	require.NoError(t, json.Unmarshal(res.Data, &body))
+
+	assert.Greater(t, len(body.Queue.Jobs.Aggregations.Queue), 1,
+		"the queue facet needs more than one queue to be worth rendering")
+}
+
+// Off by default: the auth integration tests build this stack too, and a table
+// that silently grows rows would change what their assertions count.
+func TestQueueJobsAreNotSeededByDefault(t *testing.T) {
+	t.Parallel()
+
+	_, server := build(t, dbtest.New(t), authconfig.NewDefaultConfig())
+
+	res := query(t, server, "", `{ queue { jobs(input: {totalCount: true}) { totalCount } } }`)
+	requireNoGqlErrors(t, res)
+
+	var body queueJobsResponse
+	require.NoError(t, json.Unmarshal(res.Data, &body))
+
+	assert.Zero(t, body.Queue.Jobs.TotalCount)
 }

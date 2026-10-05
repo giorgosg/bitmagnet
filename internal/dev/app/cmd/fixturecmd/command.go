@@ -131,6 +131,12 @@ func flags() []cli.Flag {
 			Value: defaults.AnonymousAccess,
 		},
 		&cli.BoolFlag{
+			Name: "seed-queue-jobs",
+			Usage: "insert queue jobs covering every status and two queues; " +
+				"the seed corpus carries none, so the queue page has nothing to show without it",
+			Value: true,
+		},
+		&cli.BoolFlag{
 			Name:  "invitation-required",
 			Usage: "require an invitation code to register",
 			Value: defaults.InvitationRequired,
@@ -164,6 +170,9 @@ type announcement struct {
 	Database           string `json:"database"`
 	AnonymousAccess    bool   `json:"anonymousAccess"`
 	InvitationRequired bool   `json:"invitationRequired"`
+	// SeededQueueJobs tells the harness whether the queue pages have anything to
+	// render, so a spec that needs jobs can skip rather than fail obscurely.
+	SeededQueueJobs bool `json:"seededQueueJobs"`
 }
 
 func (c *command) serve(cliCtx *cli.Context) error {
@@ -199,11 +208,14 @@ func (c *command) serve(cliCtx *cli.Context) error {
 	c.setCleanup(db.Close)
 	defer c.runCleanup()
 
+	seedQueueJobs := cliCtx.Bool("seed-queue-jobs")
+
 	stack, err := fixtureserver.Build(fixtureserver.Options{
-		Config:    cfg,
-		Provider:  provider{query: db.Query},
-		Logger:    c.logger,
-		JWTSecret: cfg.JWTSecret,
+		Config:        cfg,
+		Provider:      provider{query: db.Query},
+		Logger:        c.logger,
+		JWTSecret:     cfg.JWTSecret,
+		SeedQueueJobs: seedQueueJobs,
 	})
 	if err != nil {
 		return err
@@ -231,6 +243,7 @@ func (c *command) serve(cliCtx *cli.Context) error {
 		Database:           db.Name,
 		AnonymousAccess:    cfg.AnonymousAccess,
 		InvitationRequired: cfg.InvitationRequired,
+		SeededQueueJobs:    seedQueueJobs,
 	}); err != nil {
 		_ = listener.Close()
 
