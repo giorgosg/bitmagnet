@@ -15,6 +15,7 @@ package fixtureserver
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/api_key"
@@ -34,10 +35,17 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/gql/directive"
 	gqlhttpserver "github.com/bitmagnet-io/bitmagnet/internal/gql/httpserver"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql/resolvers"
+	"github.com/bitmagnet-io/bitmagnet/internal/health"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
+	"github.com/bitmagnet-io/bitmagnet/internal/metrics/queuemetrics"
+	"github.com/bitmagnet-io/bitmagnet/internal/queue/manager"
 	torznab_httpserver "github.com/bitmagnet-io/bitmagnet/internal/torznab/httpserver"
+	"github.com/bitmagnet-io/bitmagnet/internal/version"
+	"github.com/bitmagnet-io/bitmagnet/internal/worker"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/fx"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // Options configures a Stack. Only Config, Provider and Logger are required.
@@ -163,17 +171,43 @@ func Build(opts Options) (*Stack, error) {
 
 	cookie := browser_session.NewCookie(opts.Config)
 
-	// Only the resolver dependencies the index and the auth workflows need are
-	// wired. Workers, health, queue and processor metrics, and the blocking
-	// manager stay nil deliberately: each drags in a subsystem this stack has no
-	// business starting, and nothing it serves is asked for them.
+	healthChecker, err := newHealthChecker(query)
+	if err != nil {
+		return nil, err
+	}
+
+	queueMetricsClient, err := newQueueMetricsClient(query)
+	if err != nil {
+		return nil, err
+	}
+
+	queueManager, err := newQueueManager(query)
+	if err != nil {
+		return nil, err
+	}
+
+	workerRegistry, err := newWorkerRegistry(context.Background(), logger)
+	if err != nil {
+		return nil, err
+	}
+
+	// Torrent and processor metrics and the blocking manager stay nil
+	// deliberately: each drags in a subsystem this stack has no business
+	// starting, and nothing it serves asks for them. Workers, health and queue
+	// metrics used to be in that list, and should not have been — they back
+	// pages an external browser suite has to drive, and a nil interface answers
+	// them with an opaque "internal system error".
 	schema := newSchema(&resolvers.Resolver{
-		Dao:           query,
-		Search:        searchService,
-		UserService:   userService,
-		APIKeyService: apiKeyService,
-		RBACService:   rbacService,
-		BrowserCookie: cookie,
+		Dao:                query,
+		Search:             searchService,
+		Workers:            workerRegistry,
+		Checker:            healthChecker,
+		QueueMetricsClient: queueMetricsClient,
+		QueueManager:       queueManager,
+		UserService:        userService,
+		APIKeyService:      apiKeyService,
+		RBACService:        rbacService,
+		BrowserCookie:      cookie,
 	})
 
 	engine := gin.New()
@@ -207,6 +241,135 @@ func Build(opts Options) (*Stack, error) {
 		ObjectActions: objectActions,
 	}, nil
 }
+
+// newHealthChecker builds the checker the `health` query reports on.
+//
+// One real check, against the database this stack was handed, so the page has
+// something true to render rather than an empty list — and so a browser suite
+// can assert a status rather than merely that the field resolved.
+//
+// It differs from production in one way, deliberately. `database/healthcheck`
+// registers its postgres check with WithPeriodicCheck, which runs it on a timer
+// in its own goroutine for the life of the process. This stack is built per
+// test, so a synchronous check is the right shape: Checker.Check runs it on
+// demand, and the response is identical either way.
+func newHealthChecker(query *dao.Query) (health.Checker, error) {
+	sqlDB, err := query.UnderlyingDB().DB()
+	if err != nil {
+		return nil, fmt.Errorf("fixtureserver: opening the sql database: %w", err)
+	}
+
+	return health.NewChecker(
+		health.WithCheck(health.Check{
+			Name:    "postgres",
+			Timeout: healthCheckTimeout,
+			Check: func(ctx context.Context) error {
+				if pingErr := sqlDB.PingContext(ctx); pingErr != nil {
+					return fmt.Errorf("failed to ping database: %w", pingErr)
+				}
+
+				return nil
+			},
+		}),
+		// Mirrors internal/version/healthcheck, which contributes the same info
+		// to the real checker.
+		health.WithInfo(map[string]any{
+			"name":    "bitmagnet",
+			"version": version.GitTag,
+		}),
+	), nil
+}
+
+const healthCheckTimeout = time.Second * 5
+
+// newQueueMetricsClient builds the client behind `queue.metrics`, through the
+// production constructor rather than by reaching into the package, so the
+// fixture cannot drift from what the real graph provides.
+//
+// It reads `queue_jobs` directly, so a caller pointed at a populated database
+// gets real buckets.
+func newQueueMetricsClient(query *dao.Query) (queuemetrics.Client, error) {
+	client, err := queuemetrics.New(queuemetrics.Params{
+		DB: lazy.New(func() (*gorm.DB, error) { return query.UnderlyingDB(), nil }),
+	}).Client.Get()
+	if err != nil {
+		return nil, fmt.Errorf("fixtureserver: building the queue metrics client: %w", err)
+	}
+
+	return client, nil
+}
+
+// newQueueManager builds the manager behind the `queue` mutations, purgeJobs and
+// enqueueReprocessTorrentsBatch.
+//
+// It is wired for the same reason the queries are: the queue page has actions,
+// and an authenticated caller clicking one reached a nil interface. The manager
+// starts nothing — it takes the dao and the gorm handle this stack already has,
+// and the queue *server* that would consume what it enqueues stays unwired, so
+// a job this creates sits in the table for the suite to assert on rather than
+// being picked up and run.
+func newQueueManager(query *dao.Query) (manager.Manager, error) {
+	queueManager, err := manager.New(manager.Params{
+		Dao: lazy.New(func() (*dao.Query, error) { return query, nil }),
+		DB:  lazy.New(func() (*gorm.DB, error) { return query.UnderlyingDB(), nil }),
+	}).Manager.Get()
+	if err != nil {
+		return nil, fmt.Errorf("fixtureserver: building the queue manager: %w", err)
+	}
+
+	return queueManager, nil
+}
+
+// newWorkerRegistry builds the registry `workers` lists, holding the keys
+// production registers.
+//
+// The started ones are the work this stack actually does: it serves HTTP, and
+// Build has already run the anon role translation. The crawler, the queue
+// server and the invitation worker are listed and stopped, because this stack
+// genuinely does not run them — which is both honest and what a browser suite
+// needs, since a page rendering worker state wants both states present.
+//
+// Their hooks are empty, so starting one does nothing but mark it started.
+func newWorkerRegistry(ctx context.Context, logger *zap.SugaredLogger) (worker.Registry, error) {
+	keys := append(append([]string{}, startedWorkerKeys...), stoppedWorkerKeys...)
+	workers := make([]worker.Worker, 0, len(keys))
+
+	for _, key := range keys {
+		workers = append(workers, worker.NewWorker(key, fx.Hook{}))
+	}
+
+	result, err := worker.NewRegistry(worker.RegistryParams{
+		Shutdowner: noopShutdowner{},
+		Workers:    workers,
+		Logger:     logger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("fixtureserver: building the worker registry: %w", err)
+	}
+
+	registry := result.Registry
+
+	if err = registry.Enable(startedWorkerKeys...); err != nil {
+		return nil, fmt.Errorf("fixtureserver: enabling workers: %w", err)
+	}
+
+	if err = registry.Start(ctx); err != nil {
+		return nil, fmt.Errorf("fixtureserver: starting workers: %w", err)
+	}
+
+	return registry, nil
+}
+
+var (
+	startedWorkerKeys = []string{"http_server", "auth_anon_role_translation"}
+	stoppedWorkerKeys = []string{"dht_crawler", "queue_server", "auth_initial_invitation"}
+)
+
+// noopShutdowner stands in for fx's. The registry takes one so a worker can
+// bring the process down; nothing this stack starts has a hook that could.
+type noopShutdowner struct{}
+
+func (noopShutdowner) Shutdown(...fx.ShutdownOption) error { return nil }
 
 // newSearch builds the search service the same way searchfx does, through its
 // own constructor rather than by reaching into the package.

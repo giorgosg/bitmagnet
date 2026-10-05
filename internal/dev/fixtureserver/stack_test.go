@@ -42,6 +42,38 @@ type gqlResponse struct {
 	Errors []gqlError      `json:"errors"`
 }
 
+type healthCheckItem struct {
+	Key    string  `json:"key"`
+	Status string  `json:"status"`
+	Error  *string `json:"error"`
+}
+
+type healthQuery struct {
+	Status string            `json:"status"`
+	Checks []healthCheckItem `json:"checks"`
+}
+
+type healthResponse struct {
+	Health healthQuery `json:"health"`
+}
+
+type workerItem struct {
+	Key     string `json:"key"`
+	Started bool   `json:"started"`
+}
+
+type workersListAll struct {
+	Workers []workerItem `json:"workers"`
+}
+
+type workersQuery struct {
+	ListAll workersListAll `json:"listAll"`
+}
+
+type workersResponse struct {
+	Workers workersQuery `json:"workers"`
+}
+
 type searchItem struct {
 	InfoHash string `json:"infoHash"`
 }
@@ -101,6 +133,18 @@ func query(t *testing.T, server *httptest.Server, token, document string) gqlRes
 	require.NoError(t, json.NewDecoder(res.Body).Decode(&decoded))
 
 	return decoded
+}
+
+// requireNoGqlErrors fails with the GraphQL errors rather than on a decode of an
+// empty data field, which is what a nil resolver dependency produces.
+func requireNoGqlErrors(t *testing.T, res gqlResponse) {
+	t.Helper()
+
+	for _, e := range res.Errors {
+		t.Logf("graphql error: %s", e.Message)
+	}
+
+	require.Empty(t, res.Errors)
 }
 
 // build assembles a stack over the given database and serves it.
@@ -239,4 +283,146 @@ func TestLoginThrottleIsProvokable(t *testing.T) {
 
 	assert.Contains(t, codes, "LOGIN_THROTTLED",
 		"a burst of 1 at 1/minute must throttle within three attempts")
+}
+
+// The operational pages are the other half of what an external browser suite
+// needs to drive, and the stack used to leave all three unwired: Workers,
+// Checker and QueueMetricsClient stayed nil, so `workers`, `health` and
+// `queue.metrics` each panicked on a nil interface and surfaced as an opaque
+// "internal system error". A browser suite cannot cover a page the fixture
+// cannot answer.
+//
+// `queue.jobs` is the exception that already worked — it resolves through
+// Search, not the metrics client — and is asserted below so the distinction
+// stays visible.
+
+func TestStackAnswersHealth(t *testing.T) {
+	t.Parallel()
+
+	_, server := build(t, dbtest.New(t), authconfig.NewDefaultConfig())
+
+	res := query(t, server, "", `{ health { status checks { key status error } } }`)
+	requireNoGqlErrors(t, res)
+
+	var body healthResponse
+	require.NoError(t, json.Unmarshal(res.Data, &body))
+
+	// A real check against the database behind this stack, so the page has
+	// something true to render rather than an empty list.
+	assert.Equal(t, "up", body.Health.Status)
+	require.NotEmpty(t, body.Health.Checks)
+
+	keys := make(map[string]string, len(body.Health.Checks))
+	for _, check := range body.Health.Checks {
+		keys[check.Key] = check.Status
+	}
+
+	assert.Equal(t, "up", keys["postgres"], "the database check must report on the real connection")
+}
+
+func TestStackAnswersWorkers(t *testing.T) {
+	t.Parallel()
+
+	_, server := build(t, dbtest.New(t), authconfig.NewDefaultConfig())
+
+	res := query(t, server, "", `{ workers { listAll { workers { key started } } } }`)
+	requireNoGqlErrors(t, res)
+
+	var body workersResponse
+	require.NoError(t, json.Unmarshal(res.Data, &body))
+
+	workers := body.Workers.ListAll.Workers
+	require.NotEmpty(t, workers, "the page needs workers to list")
+
+	started := 0
+	stopped := 0
+
+	for _, w := range workers {
+		assert.NotEmpty(t, w.Key)
+
+		if w.Started {
+			started++
+		} else {
+			stopped++
+		}
+	}
+
+	// Both states present, so a browser test can cover how each renders.
+	assert.Positive(t, started, "at least one worker must report started")
+	assert.Positive(t, stopped, "at least one worker must report stopped")
+}
+
+func TestStackAnswersQueueMetrics(t *testing.T) {
+	t.Parallel()
+
+	_, server := build(t, dbtest.New(t), authconfig.NewDefaultConfig())
+
+	res := query(t, server, "", `{ queue { metrics(input: {bucketDuration: hour}) {
+		buckets { queue status count }
+	} } }`)
+
+	requireNoGqlErrors(t, res)
+}
+
+// jobs resolves through Search rather than the metrics client, so it worked
+// before the other three were wired. Asserted so a future change that routes it
+// through the client does not break it silently.
+func TestStackAnswersQueueJobs(t *testing.T) {
+	t.Parallel()
+
+	_, server := build(t, dbtest.New(t), authconfig.NewDefaultConfig())
+
+	res := query(t, server, "", `{ queue { jobs(input: {}) { totalCount } } }`)
+	requireNoGqlErrors(t, res)
+}
+
+// adminToken registers the first administrator through the bootstrap invitation
+// and returns a bearer token for it. The authenticated surfaces need one, and
+// doing it by hand in each test buries what the test is actually about.
+func adminToken(t *testing.T, stack *fixtureserver.Stack, server *httptest.Server) string {
+	t.Helper()
+
+	invitation, err := stack.UserService.CreateInitialInvitation(t.Context())
+	require.NoError(t, err)
+	require.NotEmpty(t, invitation.Code)
+
+	const password = "correct-horse-battery-staple-9271"
+
+	registered := query(t, server, "", `mutation { self { register(input:{
+		username:"queue-admin",
+		password:"`+password+`",
+		invitationCode:"`+invitation.Code+`"
+	}) { user { role } } } }`)
+	requireNoGqlErrors(t, registered)
+
+	loggedIn := query(t, server, "", `mutation { self { login(
+		username:"queue-admin",
+		password:"`+password+`"
+	) { token } } }`)
+	requireNoGqlErrors(t, loggedIn)
+
+	var login loginResponse
+	require.NoError(t, json.Unmarshal(loggedIn.Data, &login))
+	require.NotEmpty(t, login.Self.Login.Token)
+
+	return login.Self.Login.Token
+}
+
+// The queue page has actions, not only readings, and both mutations resolve
+// through the queue manager. A nil manager answered an authenticated click with
+// an opaque "internal system error" — the same failure as the three queries,
+// reached by a browser suite that has logged in rather than one that has not.
+func TestStackAnswersQueueMutations(t *testing.T) {
+	t.Parallel()
+
+	stack, server := build(t, dbtest.New(t), authconfig.NewDefaultConfig())
+	token := adminToken(t, stack, server)
+
+	purged := query(t, server, token,
+		`mutation { queue { purgeJobs(input: {queues: ["test_queue"]}) } }`)
+	requireNoGqlErrors(t, purged)
+
+	reprocessed := query(t, server, token,
+		`mutation { queue { enqueueReprocessTorrentsBatch(input: {}) } }`)
+	requireNoGqlErrors(t, reprocessed)
 }
