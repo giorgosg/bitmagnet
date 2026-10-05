@@ -13,11 +13,13 @@
 package fixtureserver
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/api_key"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/authconfig"
+	"github.com/bitmagnet-io/bitmagnet/internal/auth/authfx"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/browser_session"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/http_auth"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/identity"
@@ -117,6 +119,21 @@ func Build(opts Options) (*Stack, error) {
 
 	apiKeyService := api_key.NewService(api_key.NewRepository(opts.Provider), objectActionProvider)
 
+	// What an anonymous caller may do now lives in role_permissions, written once
+	// per installation by the translation that authfx runs as a startup worker.
+	// This stack is assembled by hand, so it runs the same translation: without it
+	// the anon role holds nothing and the fixture would model an instance no real
+	// deployment is in.
+	if err := authfx.TranslateAnonRole(
+		context.Background(),
+		opts.Provider,
+		opts.Config,
+		objectActionProvider,
+		logger,
+	); err != nil {
+		return nil, fmt.Errorf("fixtureserver: translating the anon role: %w", err)
+	}
+
 	rbacService := rbac.NewService(
 		rbac.NewRepository(opts.Provider),
 		objectActionProvider,
@@ -124,9 +141,9 @@ func Build(opts Options) (*Stack, error) {
 			rbac.CorePermissions,
 			rbac.VerbatimPermissions(objectActionProvider),
 			gqlauth.Permissions,
-			authconfig.AnonymousPermissions(opts.Config, objectActionProvider),
 		),
 		rbac.CacheTTL(opts.Config.RBACCacheTTL),
+		rbac.AnonymousAccess(opts.Config.AnonymousAccess),
 	)
 
 	authenticator := identity.NewAuthenticator(jwtService, userService, apiKeyService, rbacService)

@@ -134,67 +134,45 @@ var anonymousActions = map[string]struct{}{
 	"query": {},
 }
 
-// AnonymousPermissions grants the anon role the registered *read* object actions
-// while anonymous access is enabled, preserving the open behaviour of an
-// installation that has never configured authentication. On next this decision
-// is distributed across plugins, each granting its own object actions to anon;
-// without a plugin registry the same effect is achieved centrally.
+// Anonymous access is a deny-override, not a source of grants. The anon role's
+// permissions live in role_permissions like any other role's, an administrator
+// edits them through putRole, and `auth.anonymous_access: false` drops them when
+// the casbin policy is compiled. See rbac.AnonymousAccess and docs/auth.md.
 //
-// Writes are deliberately excluded. The baseline used to be every registered
-// object action except those on auth, which meant it carried torrent:delete,
-// torrent:mutate, queue:mutate and import:mutate — and because
-// http_server.cors.allowed_origins still defaults to "*" with Content-Type:
-// application/json among the allowed headers, any page the operator visited
-// could issue those cross-origin against a reachable instance. For a delete the
-// side effect is the damage, so it never mattered that the response was
-// unreadable.
+// There used to be an AnonymousPermissions provider here, which granted anon the
+// read surface from the flag alone and held it in memory. That left two sources of
+// anonymous permission - the flag's and the database's - unioned, so the flag
+// withheld only its own half and a grant written through putRole survived being
+// switched off, with nothing in the configuration or the logs disagreeing. That
+// was docs/issues/0012.
 //
-// Nothing an open installation served before authentication existed is lost:
-// reads stay anonymous, and the write surfaces were reachable only because this
-// lineage had no authentication at all to put in front of them. An operator who
-// wants anonymous writes grants them to the anon role explicitly.
+// AnonymousReadSurface is the set of registered object actions an open
+// installation grants anonymous callers: the read verbs, minus the objects an
+// anonymous caller never reaches. See AnonymousPermissions for why each
+// exclusion is there.
 //
-// Auth administration is excluded on top of that, and for a different reason.
-// Granting it made the open default a trapdoor rather than a starting point: an
-// anonymous caller could call putRole to give the anon role a wildcard
-// permission, and because role grants live in the database while this grant is
-// only in memory, that survived setting anonymous_access to false — the instance
-// stayed wide open with no outward sign. The same access also listed the
-// bootstrap invitation, so an anonymous caller could claim the first
-// administrator account.
-//
-// The read surface is the catalogue, not the operator's instruments:
-// anonymousExcludedObjects also withholds /debug/pprof and /metrics, whose
-// object actions carry the "query" verb but are not what an open instance exists
-// to serve.
-//
-// Bootstrapping does not need any of it: the first administrator registers with
-// the invitation code through self.register, and the top-level self boundary is
-// outside the object-action model entirely.
-func AnonymousPermissions(cfg Config, provider rbac.ObjectActionProvider) rbac.PermissionProvider {
-	return func() []rbac.Permission {
-		if !cfg.AnonymousAccess {
-			return nil
+// It is deliberately separate from AnonymousPermissions, because the two have
+// different lifetimes. The permission provider above is the in-memory grant that
+// `auth.anonymous_access` used to carry, and it goes away once the flag becomes a
+// deny-override. This function is the rule itself, and it stays: it is what seeds
+// the anon role on a fresh installation, and what translates the flag's old
+// meaning into stored rows on an existing one. Sharing it is what keeps the
+// baseline and the seed from drifting apart while both exist.
+func AnonymousReadSurface(provider rbac.ObjectActionProvider) []rbac.ObjectAction {
+	objectActions := provider()
+	surface := make([]rbac.ObjectAction, 0, len(objectActions))
+
+	for _, objectAction := range objectActions {
+		if _, ok := anonymousExcludedObjects[objectAction.Object]; ok {
+			continue
 		}
 
-		objectActions := provider()
-		permissions := make([]rbac.Permission, 0, len(objectActions))
-
-		for _, objectAction := range objectActions {
-			if _, ok := anonymousExcludedObjects[objectAction.Object]; ok {
-				continue
-			}
-
-			if _, ok := anonymousActions[objectAction.Action]; !ok {
-				continue
-			}
-
-			permissions = append(permissions, rbac.NewPermission(
-				rbac.SubjectRole{Role: rbac.RoleAnon},
-				objectAction,
-			))
+		if _, ok := anonymousActions[objectAction.Action]; !ok {
+			continue
 		}
 
-		return permissions
+		surface = append(surface, objectAction)
 	}
+
+	return surface
 }

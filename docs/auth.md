@@ -12,22 +12,55 @@ you turn it on.
 
 ## Turning it on
 
-`auth.anonymous_access` defaults to `true`, which grants the `anon` role the registered
-**read** object actions — the catalogue an open instance exists to serve. Searching,
-browsing and Torznab keep working with no credentials. Set it to `false` to require
-authentication for everything.
+`auth.anonymous_access` defaults to `true`, and a new installation seeds the `anon` role
+with the registered **read** object actions — the catalogue an open instance exists to
+serve. Searching, browsing and Torznab keep working with no credentials. Set it to `false`
+to require authentication for everything.
 
-What `true` does **not** grant, so that an open instance is readable rather than writable:
+The setting is a **deny-override over a role**, not a permission set of its own:
 
-| Withheld from anonymous                                             | Why                                                                                                                                                                                                                                                 |
-| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `torrent:delete`, `torrent:mutate`, `queue:mutate`, `import:mutate` | `allowed_origins` defaults to `*` and `Content-Type: application/json` is an allowed header, so any page the operator visited could issue these cross-origin. For a delete the side effect is the damage, so an unreadable response bought nothing. |
-| `auth:query`, `auth:mutate`                                         | Role grants persist in the database while the anonymous grant is only in memory, so a wildcard written onto the anon role would outlive `anonymous_access: false`.                                                                                  |
-| `pprof:query`                                                       | `/debug/pprof` dumps process memory structure and every stack, and `/debug/pprof/profile` runs a CPU profile for a caller-chosen `?seconds=`, as often as asked.                                                                                    |
-| `metrics:query`                                                     | The scrape discloses index size, queue depth and crawl rate.                                                                                                                                                                                        |
+- `true` means anonymous callers get exactly what the `anon` role holds in the database.
+  An administrator changes that through `putRole`, in the running process, with no restart
+  and no configuration edit.
+- `false` means anonymous callers get nothing, whatever the role holds. The role's stored
+  permissions are dropped when the authorization policy is compiled, so they are inert
+  rather than deleted, and switching the setting back restores them.
 
-Anything whose action verb this policy does not recognise as a read is withheld too: a new
+Two consequences worth stating plainly:
+
+- **The `anon` role's grants take effect only while `auth.anonymous_access` allows it.** An
+  administrator who grants the anon role permissions while the setting is `false` has
+  configured something that does nothing yet. `listRoles` reports the grant, because it is
+  genuinely configured; it is simply not honoured.
+- **Granting the `anon` role the `auth` object hands the instance away.** An anonymous
+  caller that can call `putRole` can give the anon role a wildcard, and because the grant
+  is stored there is no taking it back short of editing the database. Nothing in the server
+  stops an administrator doing this, deliberately: the place to refuse it is the screen
+  where the decision is made.
+
+What the seeded read surface does **not** include, so that an open instance is readable
+rather than writable:
+
+| Withheld from anonymous                                             | Why                                                                                                                                                                                                                                                            |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `torrent:delete`, `torrent:mutate`, `queue:mutate`, `import:mutate` | `allowed_origins` defaults to `*` and `Content-Type: application/json` is an allowed header, so any page the operator visited could issue these cross-origin. For a delete the side effect is the damage, so an unreadable response bought nothing.            |
+| `auth:query`, `auth:mutate`                                         | An anonymous caller that can administer auth can grant the anon role a wildcard, and a stored grant is not something the setting can take back. This is the seed's choice, not a prohibition: an administrator may still grant it, with the consequence above. |
+| `pprof:query`                                                       | `/debug/pprof` dumps process memory structure and every stack, and `/debug/pprof/profile` runs a CPU profile for a caller-chosen `?seconds=`, as often as asked.                                                                                               |
+| `metrics:query`                                                     | The scrape discloses index size, queue depth and crawl rate.                                                                                                                                                                                                   |
+
+Anything whose action verb the seed does not recognise as a read is withheld too: a new
 object action is denied to anonymous callers until someone decides otherwise.
+
+The seed runs **once per installation**, recorded by the `auth.anon_role_translated` key in
+`key_values`, and it logs what it did. After that the setting is never read for seeding
+again, so an administrator who revokes anonymous access through the role does not have it
+handed back on the next restart. Upgrading an existing installation translates whatever
+`auth.anonymous_access` meant for it into stored rows, so neither an open nor a closed
+instance changes behaviour across the upgrade.
+
+Two object actions are outside all of this. `version:query` and `health:query` are granted
+to anonymous callers regardless of the setting, because the web UI shell reads them before
+anyone can log in — a closed instance still has to be able to show a login screen.
 
 Then start the process and **read the log for the bootstrap invitation code** — or ask
 for it afterwards with `bitmagnet auth initial-invitation`, below. An
@@ -89,22 +122,22 @@ WHERE role_name = 'admin' AND created_by IS NULL AND claimed_by IS NULL;
 
 ## Configuration
 
-| Key                              | Default              |                                                                   |
-| -------------------------------- | -------------------- | ----------------------------------------------------------------- |
-| `auth.anonymous_access`          | `true`               | `false` requires auth for everything; `true` grants anon reads    |
-| `auth.jwt_secret`                | _(none)_             | random per process when unset, so tokens do not survive a restart |
-| `auth.jwt_duration`              | `24h`                |                                                                   |
-| `auth.browser_cookie_name`       | `__Secure-bitmagnet` | must retain the `__Secure-` prefix                                |
-| `auth.rbac_cache_ttl`            | `1m`                 | how long a revoked permission or role change stays in force       |
-| `auth.invitation_required`       | `true`               |                                                                   |
-| `auth.email_required`            | `false`              |                                                                   |
-| `auth.email_verification`        | `false`              | inert — see Known gaps                                            |
-| `auth.password_min_entropy`      | `70`                 |                                                                   |
-| `auth.password_hashing_cost`     | bcrypt default       | applies to registration _and_ password changes                    |
-| `auth.login_requests_per_minute` | `30`                 | per bucket, not per process                                       |
-| `auth.login_request_burst`       | `5`                  | per bucket, not per process                                       |
-| `graphql.introspection`          | `false`              | `__schema` and `__type` queries; off unless asked for             |
-| `graphql.playground`             | `false`              | GraphiQL on `GET /graphql`; off means the route 404s              |
+| Key                              | Default              |                                                                                                                 |
+| -------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `auth.anonymous_access`          | `true`               | deny-override on the `anon` role: `false` denies anonymous callers whatever the role holds; `true` defers to it |
+| `auth.jwt_secret`                | _(none)_             | random per process when unset, so tokens do not survive a restart                                               |
+| `auth.jwt_duration`              | `24h`                |                                                                                                                 |
+| `auth.browser_cookie_name`       | `__Secure-bitmagnet` | must retain the `__Secure-` prefix                                                                              |
+| `auth.rbac_cache_ttl`            | `1m`                 | how long a revoked permission or role change stays in force                                                     |
+| `auth.invitation_required`       | `true`               |                                                                                                                 |
+| `auth.email_required`            | `false`              |                                                                                                                 |
+| `auth.email_verification`        | `false`              | inert — see Known gaps                                                                                          |
+| `auth.password_min_entropy`      | `70`                 |                                                                                                                 |
+| `auth.password_hashing_cost`     | bcrypt default       | applies to registration _and_ password changes                                                                  |
+| `auth.login_requests_per_minute` | `30`                 | per bucket, not per process                                                                                     |
+| `auth.login_request_burst`       | `5`                  | per bucket, not per process                                                                                     |
+| `graphql.introspection`          | `false`              | `__schema` and `__type` queries; off unless asked for                                                           |
+| `graphql.playground`             | `false`              | GraphiQL on `GET /graphql`; off means the route 404s                                                            |
 
 **Set `auth.jwt_secret` if you do not want every restart to log everyone out.** Unset, it
 is generated per process.

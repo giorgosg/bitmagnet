@@ -48,6 +48,7 @@ func newScopeStack(t *testing.T) scopeStack {
 		rbac.NewRepository(provider), objectActions,
 		rbac.PermissionProviders(rbac.CorePermissions, rbac.VerbatimPermissions(objectActions)),
 		rbac.CacheTTL(time.Minute),
+		rbac.AnonymousAccess(true),
 	)
 
 	return scopeStack{

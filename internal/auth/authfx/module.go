@@ -30,6 +30,9 @@ func New() fx.Option {
 			func(c authconfig.Config) jwt.Secret { return jwt.Secret(c.JWTSecret) },
 			func(c authconfig.Config) jwt.Duration { return jwt.Duration(c.JWTDuration) },
 			func(c authconfig.Config) rbac.CacheTTL { return rbac.CacheTTL(c.RBACCacheTTL) },
+			func(c authconfig.Config) rbac.AnonymousAccess {
+				return rbac.AnonymousAccess(c.AnonymousAccess)
+			},
 
 			newUserService,
 			browser_session.NewCookie,
@@ -47,6 +50,7 @@ func New() fx.Option {
 			),
 
 			newBootstrapWorker,
+			newAnonRoleWorker,
 
 			// Object actions and permissions are collected from value groups so
 			// that other modules can contribute their own without this module
@@ -63,10 +67,6 @@ func New() fx.Option {
 			),
 			fx.Annotate(
 				rbac.VerbatimPermissions,
-				fx.ResultTags(`group:"auth_permissions"`),
-			),
-			fx.Annotate(
-				authconfig.AnonymousPermissions,
 				fx.ResultTags(`group:"auth_permissions"`),
 			),
 			fx.Annotate(
@@ -105,12 +105,14 @@ func newRBACService(
 	objectActions rbac.ObjectActionProvider,
 	permissions rbac.PermissionProvider,
 	ttl rbac.CacheTTL,
+	anonymousAccess rbac.AnonymousAccess,
 ) rbacService {
 	return rbac.NewService(
 		rbac.NewRepository(dao),
 		objectActions,
 		permissions,
 		ttl,
+		anonymousAccess,
 	)
 }
 

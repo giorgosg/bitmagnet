@@ -12,6 +12,7 @@ import (
 
 	"github.com/bitmagnet-io/bitmagnet/internal/slice"
 	"github.com/casbin/casbin/v2"
+	"github.com/casbin/casbin/v2/util"
 )
 
 type Enforcer interface {
@@ -53,12 +54,14 @@ func NewService(
 	objectActionProvider ObjectActionProvider,
 	permissionProvider PermissionProvider,
 	ttl CacheTTL,
+	anonymousAccess AnonymousAccess,
 ) Service {
 	return &service{
 		repository:           repository,
 		objectActionProvider: objectActionProvider,
 		permissionProvider:   permissionProvider,
 		ttl:                  time.Duration(ttl),
+		anonymousAccess:      bool(anonymousAccess),
 	}
 }
 
@@ -86,6 +89,9 @@ type service struct {
 	repository           Repository
 	permissionProvider   PermissionProvider
 	objectActionProvider ObjectActionProvider
+	// anonymousAccess is read only when the policy is compiled or reloaded, never
+	// on the decision path. It cannot change without a restart.
+	anonymousAccess bool
 	// roleMutex guards roleCache and roleCachedAt. It is separate from sem so a
 	// role lookup does not queue behind a casbin decision, and vice versa.
 	roleMutex    sync.RWMutex
@@ -459,7 +465,7 @@ func (s *service) compilePermissions(ctx context.Context) (*casbinDeps, error) {
 	}
 
 	adapterDynamic := &casbinAdapter{
-		permissions: append(s.permissionProvider(), permissions...),
+		permissions: append(s.permissionProvider(), s.withoutOverriddenAnonymous(permissions)...),
 	}
 
 	eCasbin, err := newCasbinEnforcer(adapterDynamic)
@@ -530,7 +536,7 @@ func (s *service) getPermissions(ctx context.Context) ([]Permission, error) {
 		perms[subj][perm.ObjectAction()] = perm
 	}
 
-	for _, perm := range repoPerms {
+	for _, perm := range s.withoutOverriddenAnonymous(repoPerms) {
 		applyPerm(perm)
 	}
 
@@ -549,6 +555,57 @@ func (s *service) getPermissions(ctx context.Context) ([]Permission, error) {
 	sortPermissions(finalPerms)
 
 	return finalPerms, nil
+}
+
+// anonSubject is the policy subject an anonymous caller enforces as.
+var anonSubject = subjectString(SubjectRole{Role: RoleAnon})
+
+// withoutOverriddenAnonymous drops every *stored* permission that could grant the
+// anon subject, when `auth.anonymous_access` is off.
+//
+// Stored is the whole scope, and it is deliberate. The flag is a deny-override
+// over the anon role an administrator edits - "anon holds nothing, whatever the
+// database says" - not a kill switch over every provider in the graph.
+// internal/gql/auth.Permissions grants anon `version` and `health` explicitly
+// "regardless of the anonymous-access setting", because the web UI shell reads
+// them before anyone can log in; filtering the provider set too would take the
+// login screen away from a closed instance, which is the one state that most
+// needs it. There is a test pinning that, so this scope fails loudly if it moves.
+//
+// This is where the deny-override lives, rather than at the decision. Enforce,
+// EnforceAny, EnforceEvery and FilterAllowed are the hot path - the @auth
+// directive fires per field of every query - and they were reworked in #79 to run
+// concurrently holding no service lock. A branch there would be evaluated per
+// field for a value that cannot change without a restart. Filtering once per
+// policy compile is the same answer for a fraction of the work, and the existing
+// TTL and reload machinery already recompiles on the same schedule as any other
+// permission change.
+//
+// The question asked is casbin's own, not name equality. The matcher is
+// globMatch(r.sub, p.sub), so the *stored* value is the pattern: a policy subject
+// of "role::*" would match an anonymous request even though it is not spelled
+// "role::anon". Role.Validate (#63) forbids glob metacharacters in a role name,
+// so such a subject should not be storable - but asking the matcher means this
+// filter stays correct if that ever relaxes, rather than silently reopening
+// anonymous access. A pattern casbin cannot parse is treated as matching, because
+// the safe direction for an authorization filter is to withhold.
+func (s *service) withoutOverriddenAnonymous(permissions []Permission) []Permission {
+	if s.anonymousAccess {
+		return permissions
+	}
+
+	// Clone first: DeleteFunc compacts in place and zeroes the tail, and the slice
+	// here belongs to the repository. Mutating it corrupted a caller that returned
+	// the same slice to two compiles - the zeroed tail became nil Permissions, and
+	// the next pass panicked reading a subject off one.
+	return slices.DeleteFunc(slices.Clone(permissions), func(perm Permission) bool {
+		matched, err := util.GlobMatch(anonSubject, subjectString(perm))
+		if err != nil {
+			return true
+		}
+
+		return matched
+	})
 }
 
 func subjectString(sub Subject) string {

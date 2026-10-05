@@ -160,28 +160,82 @@ Object actions and permissions are both collected from fx value groups
 
 ## What anonymous means
 
-`authconfig.AnonymousPermissions` is the whole decision, and it is deliberately in one
-place: while `anonymous_access` is on it grants the anon role the registered object actions
-whose verb is a **read**, minus an explicit set of excluded objects.
+**The anon role is an ordinary database role, and `anonymous_access` is a deny-override on
+it.** There is one source of anonymous permission — `role_permissions` — and one switch that
+either honours it or does not:
 
-Both halves of that are allow-lists on purpose. The verbs are allow-listed so an object
-action registered later with a verb nobody anticipated is **denied** rather than granted —
-a read wrongly withheld answers `unauthorized` and gets reported, while a write wrongly
-granted is silent until something is gone. The excluded objects are `auth` (role grants
-persist in the database while this grant is only in memory, so a wildcard written onto anon
-would outlive `anonymous_access: false`), and `pprof` and `metrics`, whose verbs _are_
-`query` but which are the operator's instruments rather than the catalogue.
+- `true`: anonymous callers get exactly what the anon role holds. `putRole` is how that
+  changes, in the running process.
+- `false`: `rbac.service.withoutOverriddenAnonymous` drops every stored permission that
+  could grant the anon subject when the policy is compiled, so casbin never sees them.
 
-Those exclusions are string literals because this package cannot import `http_auth` —
+### Why the deny is at compile and not at the decision
+
+`Enforce`, `EnforceAny`, `EnforceEvery` and `FilterAllowed` are the hot path — the `@auth`
+directive fires per field of every query — and they hold no service lock. A branch there
+would be evaluated per field for a value that cannot change without a restart. The TTL and
+reload machinery already recompiles the policy, so the override takes effect on the same
+schedule as any other permission change.
+
+### The invariant that makes a subject filter sufficient
+
+casbin's matcher is `globMatch(r.sub, p.sub)`: the **stored** value is the pattern, not the
+request. So a policy subject of `role::*` would match an anonymous request without being
+spelled `role::anon`. `Role.Validate` forbids glob metacharacters in a role name, which is
+what stops `putRole("*", …)` granting to every role — but the filter asks casbin's own
+matcher rather than comparing names, so it stays correct if that ever relaxes. A pattern
+casbin cannot parse is treated as matching, because the safe direction for an authorization
+filter is to withhold. `rbac.service_test` pins both halves.
+
+### What the override does not reach
+
+Its scope is **stored** permissions, deliberately. `internal/gql/auth.Permissions` grants
+anon `version:query` and `health:query` regardless of the setting, because the web UI shell
+reads them before anyone can log in; filtering the provider set as well would take the login
+screen away from a closed instance, which is the state that most needs one. There is an
+integration test pinning that, so the scope fails loudly if it moves.
+
+### Seeding, and what the setting used to be
+
+A fresh installation still has to be readable out of the box, so the anon role is seeded
+with the registered object actions whose verb is a **read**, minus the objects `auth`,
+`pprof` and `metrics`. `authconfig.AnonymousReadSurface` is that rule, in one place.
+
+Both halves are allow-lists on purpose. The verbs are allow-listed so an object action
+registered later with a verb nobody anticipated is **denied** rather than granted — a read
+wrongly withheld answers `unauthorized` and gets reported, while a write wrongly granted is
+silent until something is gone. The excluded objects are `auth` (an anonymous caller that
+can administer auth can grant anon a wildcard, and a stored grant is not something the
+setting can take back), plus `pprof` and `metrics`, whose verbs _are_ `query` but which are
+the operator's instruments rather than the catalogue.
+
+Those exclusions are string literals because `authconfig` cannot import `http_auth` —
 `http_auth` reaches `browser_session`, which imports `authconfig` back. A test in
 `authconfig_test`, which can import both, pins the literals against the real object actions
 so a rename fails loudly instead of quietly lapsing.
 
-**It grants, and does not deny.** An administrator may still `putRole("anon", …)`, which
-writes to `role_permissions` and is merged with this in-memory set — and
-`anonymous_access: false` withholds only this half, not the stored half. That asymmetry is
-recorded in `docs/issues/0012` and is the thing to settle before anyone builds a flow around
-opening anonymous access up at runtime.
+The seed is a startup hook (`authfx.TranslateAnonRole`) and not a migration, because the
+registered object actions come from the GraphQL schema's `@auth` directives and from
+`http_auth` at runtime, so no SQL can enumerate them. It runs **once per installation**,
+guarded by the `auth.anon_role_translated` key in `key_values`, inserting rather than
+replacing so an administrator's existing grants survive. Idempotency is on the marker alone
+and never on "does anon hold any rows", because zero rows is a legitimate state somebody
+chose. On an upgrade this translates whatever `anonymous_access` meant for that installation
+into stored rows, so neither an open nor a closed instance changes behaviour.
+
+There used to be an `authconfig.AnonymousPermissions` provider that granted the read surface
+from the setting alone, held in memory. That left **two** sources of anonymous permission,
+unioned — the setting's and the database's — so the setting withheld only its own half and a
+grant written through `putRole` survived being switched off, with nothing in the
+configuration or the logs disagreeing. That was `docs/issues/0012`.
+
+### What reporting shows
+
+`GetRole` reports stored grants truthfully whether or not the setting honours them, because
+role administration has to show what is **configured** — so `listRoles` shows an overridden
+grant. `identity.Anon.EffectivePermissions` answers the different question "what can this
+caller reach", and routes through `FilterAllowed` so that it agrees with `Enforce` rather
+than advertising a permission every request for which is refused.
 
 `rbac.Service` wraps casbin and caches the compiled policy for `RBACCacheTTL` — so a
 permission change takes up to that long to take effect.

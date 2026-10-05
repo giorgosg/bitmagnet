@@ -60,6 +60,7 @@ func newTestStack(t *testing.T) testStack {
 		objectActions,
 		rbac.CorePermissions,
 		rbac.CacheTTL(time.Minute),
+		rbac.AnonymousAccess(true),
 	)
 
 	return testStack{
@@ -244,6 +245,7 @@ func TestExpiredTokenFallsBackToAnonymous(t *testing.T) {
 		rbac.NewRepository(provider), objectActions,
 		rbac.PermissionProviders(rbac.CorePermissions, rbac.VerbatimPermissions(objectActions)),
 		rbac.CacheTTL(time.Minute),
+		rbac.AnonymousAccess(true),
 	)
 	authenticator := identity.NewAuthenticator(jwtService, userService, apiKeyService, rbacService)
 
