@@ -333,6 +333,15 @@ resolved.
 Issue an API key from the web UI's account section. Keys can be scoped to individual
 object actions, so a key handed to Prowlarr can be allowed Torznab and nothing else.
 
+**Keys issued before this version keep working, and there is nothing to run.** How a key's
+secret is hashed changed — bcrypt was costing ~57 ms of CPU per request that presented a
+key, before any authorization check, which made a guessable key id a way for anyone who
+could reach the port to burn a core. Existing keys are re-hashed automatically the first
+time they are used, so an \*arr client polling Torznab migrates its own key within
+seconds. A key that is never used again keeps the old hash and the old cost; if you have
+dormant keys you do not need, deleting them is the whole of the cleanup. The reasoning is
+in [docs/architecture/auth.md](architecture/auth.md#why-an-api-keys-hash-is-fast).
+
 ## Endpoints that are not GraphQL
 
 `/import`, `/metrics` and `/debug/pprof/*` are guarded by object actions in the `http`
