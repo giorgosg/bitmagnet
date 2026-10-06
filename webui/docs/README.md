@@ -35,9 +35,11 @@ Write one if it is missing. What it needs to answer:
 [serving-and-testing.md](serving-and-testing.md) covers the general shape of all of that —
 the three ways to serve, what each requires, and the failure modes worth recognising.
 
-`src/Magnes/Api/` was regenerated against the fork on 2026-08-24 and carries the auth
-types; it is committed, so a checkout builds without a live schema. Regenerate it again
-only when the fork's schema changes.
+`src/Magnes/Api/` is committed, so a checkout builds without a live schema. It was last
+regenerated on 2026-09-03, for ticket 11, from the fork's SDL. As of 2026-10-05 it matches
+bitmagnet `trunk` except for `self.updatePassword`, which ticket 20 adds. Regenerate it
+only when the fork's schema changes; see
+[serving-and-testing.md](serving-and-testing.md#regenerating-the-client).
 
 ## Where the truth lives
 
@@ -68,7 +70,17 @@ instance now runs: the error-code table, the two browser mutations, and the shap
 `listInvitations`, `listRoles`, `invite` and `deleteInvitation` — the last four by sending
 them anonymously and confirming they reach authorization rather than failing validation.
 
-Nothing behind a credential has been verified. Every probe has been anonymous or
-deliberately refused, so registration, login, API keys and the whole `auth` namespace are
-read off the source and confirmed only as far as their refusals. Closing that is
-`.scratch/identity-and-permissions/issues/16-build-credentialed-e2e-harness.md`.
+Since 2026-09-03, the credentialed end-to-end suite (`e2e/README.md`) has exercised
+registration, login, sign-out and API keys against a real, disposable bitmagnet. The rest
+of the `auth` namespace (User, Invitation and Role administration) is still confirmed by
+the browser only as far as its pages loading; that is ticket 21.
+
+Checked again on **2026-10-05** against `trunk` at `3d0f85d63`, and on **2026-10-06** at
+`0b6feb025`, by reading the source. The homeserver could not be reached on the first of
+those days. Since 2026-09-03, trunk has:
+
+- added `self.updatePassword`;
+- made sign-out end every session for the account;
+- narrowed Anonymous access to read actions;
+- made Anonymous access a deny-override over a stored `anon` Role. `auth-api.md` records all three, and the spec's
+"Cross-repository state" section records what each one means for Magnes.

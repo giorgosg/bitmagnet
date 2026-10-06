@@ -180,9 +180,12 @@ instance, which weakens the case further. Do not start on it without raising tha
 
 ## Turning authentication on
 
-Authentication is off by default: `auth.anonymous_access` defaults to `true`, which grants
-the anonymous identity every registered object action except the two in the `auth`
-namespace. Requiring a User for search needs:
+Authentication is off by default. `auth.anonymous_access` defaults to `true`, which lets
+the anonymous identity have whatever the `anon` Role holds. A new installation seeds that
+Role with the registered read actions, withholding `auth`, `pprof` and `metrics`. Setting
+it to `false` denies anonymous callers everything except `version` and `health`, whatever
+the Role holds; see [auth-api.md](auth-api.md#the-shape-of-it). Requiring a User for search
+needs:
 
 ```yaml
 auth:
@@ -200,7 +203,9 @@ token — which during development means constantly, and looks like a client bug
 
 The first administrator registers with the invitation code the `auth_initial_invitation`
 startup worker writes to the log. It is idempotent: a restart finds the unclaimed
-invitation rather than issuing another.
+invitation rather than issuing another. The code is logged only once, when it is created.
+If that line was missed, `bitmagnet auth initial-invitation` (bitmagnet `532f94b21`) prints
+the outstanding code from a console on that machine.
 
 If bitmagnet runs behind anything that proxies, set `http_server.trusted_proxies` to that
 proxy's CIDR — otherwise every request is attributed to the proxy and shares one login
@@ -222,14 +227,32 @@ instance changes what every other client of that instance can do. See `e2e/READM
 
 ## Regenerating the client
 
+The simplest way needs no running instance and no introspection. Read the fork's committed
+SDL directly, taking it from `trunk` rather than from whatever branch `../bitmagnet` has
+checked out:
+
+```bash
+(cd ../bitmagnet && for f in $(git ls-tree --name-only trunk graphql/schema/ | grep '\.graphqls$'); do git show "trunk:$f"; echo; done) > /tmp/bitmagnet.graphql
+npx elm-graphql --schema-file /tmp/bitmagnet.graphql --base Magnes.Api --output src
+npm run format
+```
+
+Ticket 11 regenerated the committed client this way. It was re-run on 2026-10-05 into a
+scratch directory, and the only difference from the committed client was
+`self.updatePassword`, which is ticket 20. `ScalarCodecs.elm` is preserved when it already
+exists, so the custom scalar mappings survive.
+
+Against a live instance instead:
+
 ```bash
 BITMAGNET_URL=http://your-bitmagnet:3333 npm run codegen
 npm run format
 ```
 
 Be explicit about the URL rather than relying on the `http://localhost:3333` default, and
-generate against the target fork. Confirm before committing: the schema should introspect
-to include `Self`, `User`, `Role`, `APIKey`, `Invitation`, `AuthQuery` and `AuthMutation`.
+generate against the target fork. That path needs `graphql.introspection` on; see below.
+Confirm before committing: the schema should include `Self`, `User`, `Role`, `APIKey`,
+`Invitation`, `AuthQuery` and `AuthMutation`.
 
 Commit the result — a checkout should build without reaching an instance.
 

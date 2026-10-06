@@ -11,13 +11,17 @@ its own UI; Magnes is a second one, built against the same GraphQL API.
 Runs. Search, sort, facet filters, infinite scroll, row expansion down to a file tree and
 `/torrent/<hash>` are built.
 
-Identity and permissions are most of the way in, against
-[the bitmagnet fork](https://github.com/giorgosg/bitmagnet)'s browser-cookie contract:
-registration through an Invitation, sign-in, a User overview with sign-out, Invitation
-administration, User administration, and a header menu that offers only the pages the
-current Identity may reach. API keys and the Role administration screen are still
-placeholders, and none of the signed-in half has been exercised end to end in a browser
-— that needs a disposable instance rather than someone's real password.
+Identity and permissions are in, against
+[the bitmagnet fork](https://github.com/giorgosg/bitmagnet)'s browser-cookie contract. That
+covers registration through an Invitation, sign-in, a User overview with sign-out, API-key
+management, and administration of Users, Invitations and Roles. The header menu offers
+only the pages the current Identity may reach. A credentialed end-to-end suite drives the
+signed-in half in a real browser, against a disposable bitmagnet it starts itself, so no
+real password is involved.
+
+Still to do: password change, which the fork has offered since 2026-09-14, browser
+coverage of the administration screens, and the status, statistics and queue pages that
+the fork's Angular UI has under `/dashboard`.
 
 See [docs/plan.md](docs/plan.md) for the completed first milestone and
 [docs/accounts-plan.md](docs/accounts-plan.md) for the current phase; the working notes
@@ -63,7 +67,8 @@ reaching an instance. Regenerate against one when bitmagnet is upgraded:
 BITMAGNET_URL=http://your-bitmagnet:3333 npm run codegen
 ```
 
-That reads the schema by introspection, which bitmagnet keeps off by default; see
+That reads the schema by introspection, which bitmagnet keeps off by default. The client
+can also be generated offline from the fork's committed SDL, with no instance at all; see
 [Regenerating the client](docs/serving-and-testing.md#regenerating-the-client).
 
 ## Design decisions
@@ -83,8 +88,9 @@ the fork already provides. Raise that decision before adding a server. See
 ### Anonymous access is a permission set
 
 `auth.anonymous_access` decides what an unauthenticated identity may reach. When enabled,
-bitmagnet grants that identity its configured object actions; when disabled, search waits
-for login. The UI derives its navigation and controls from `self.identity.permissions`,
+that identity gets what bitmagnet's `anon` Role holds. A new installation seeds the Role
+with the read object actions, so search works and nothing can be changed. When disabled,
+the identity gets nothing beyond version and health, and search waits for login. The UI derives its navigation and controls from `self.identity.permissions`,
 while the server enforces the same permissions regardless of what the UI draws.
 
 ### Search state lives in the URL
