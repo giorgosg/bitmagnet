@@ -21,9 +21,15 @@ Everything is driven by [`Taskfile.yml`](../Taskfile.yml) (go-task, not `make`).
 targets worth knowing that AGENTS.md doesn't list:
 
 ```bash
-task serve-webui     # Angular dev server on :3334, proxying a running bitmagnet
+task serve-webui     # Angular dev server on :3334, calling bitmagnet cross-origin
 task serve-docsite   # the Jekyll site under bitmagnet.io/
 ```
+
+`serve-webui` has no proxy: `webui/src/environments/environment.ts` points at an absolute
+`http://localhost:3333/graphql`, so the browser makes a cross-origin request and it works
+only because `http_server.cors.allowed_origins` defaults to `*`. The production build
+replaces that file with `environment.embedded.ts`, which derives the endpoint from
+`window.location` and is therefore same-origin.
 
 The web UI has no standalone test target. Its former Karma specs only instantiated each
 component and asserted that it existed, so they duplicated the production build while
