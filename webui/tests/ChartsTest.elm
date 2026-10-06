@@ -25,25 +25,35 @@ midnight =
     1791072000000
 
 
+minute : Int
+minute =
+    60000
+
+
 hour : Int
 hour =
-    3600000
+    60 * minute
+
+
+day : Int
+day =
+    24 * hour
 
 
 {-| Hourly buckets from midnight on 4 October, UTC.
 -}
 hourly : Int -> List Bucket
-hourly =
-    every hour midnight
+hourly count =
+    every { step = hour, from = midnight, count = count }
 
 
-{-| Buckets `step` apart from `start`, with made-up counts.
+{-| `count` buckets `step` apart from `from`, with made-up counts.
 -}
-every : Int -> Int -> Int -> List Bucket
-every step start count =
+every : { step : Int, from : Int, count : Int } -> List Bucket
+every { step, from, count } =
     List.map
         (\i ->
-            { at = Time.millisToPosix (start + i * step)
+            { at = Time.millisToPosix (from + i * step)
             , created = 40 + modBy 7 i
             , processed = 30 + modBy 5 i
             , failed = modBy 3 i
@@ -111,7 +121,7 @@ image =
 
 
 {-| Every colour `terezka/elm-charts` 5.0.0 writes when it is not given one: the label,
-grid, axis and tick greys, the white label halo and dot border, the tooltip's border, and
+grid, axis and tick greys, the white label halo, the tooltip's white and its border, and
 the palette it cycles through for series. All of them are light-theme colours, so none
 may reach the page (ADR 0007). Taken from the package source, not from its docs.
 -}
@@ -251,7 +261,7 @@ suite =
                                 ]
                 , test "give a row per bucket, with its time and counts" <|
                     \_ ->
-                        [ { at = Time.millisToPosix (midnight + 14 * hour + 5 * 60000)
+                        [ { at = Time.millisToPosix (midnight + 14 * hour + 5 * minute)
                           , created = 12040
                           , processed = 7
                           , failed = 0
@@ -296,14 +306,37 @@ suite =
                             |> timeline
                             |> image
                             |> Expect.all
-                                [ Query.has [ Selector.text "4 Oct 00:00" ]
+                                [ Query.has [ Selector.text "2026-10-04 00:00" ]
                                 , Query.findAll [ Selector.tag "tspan", Selector.text "00:00" ]
                                     >> Query.count (Expect.equal 1)
+                                ]
+                , test "over a couple of minutes, names each bucket's minute once" <|
+                    \_ ->
+                        -- Too short a span for minute ticks: intervals would tick the
+                        -- seconds, and every one of them reads as the same minute.
+                        every { step = minute, from = midnight + 14 * hour, count = 2 }
+                            |> timeline
+                            |> image
+                            |> Expect.all
+                                [ Query.findAll [ Selector.tag "tspan", Selector.text "14:00" ]
+                                    >> Query.count (Expect.equal 1)
+                                , Query.findAll [ Selector.tag "tspan", Selector.text "14:01" ]
+                                    >> Query.count (Expect.equal 1)
+                                ]
+                , test "across New Year, gives the year where it turns" <|
+                    \_ ->
+                        -- Three weeks of days from 22 December.
+                        every { step = day, from = midnight + 79 * day, count = 21 }
+                            |> timeline
+                            |> image
+                            |> Expect.all
+                                [ Query.has [ Selector.text "2027" ]
+                                , Query.hasNot [ Selector.text "2026" ]
                                 ]
                 , test "over an hour and a half, gives clock times to the minute" <|
                     \_ ->
                         -- From 14:00.
-                        every 60000 (midnight + 14 * hour) 90
+                        every { step = minute, from = midnight + 14 * hour, count = 90 }
                             |> timeline
                             |> image
                             |> Expect.all
@@ -313,7 +346,7 @@ suite =
                                 ]
                 , test "over a year, names the months and the year where it turns" <|
                     \_ ->
-                        every (24 * hour) midnight 365
+                        every { step = day, from = midnight, count = 365 }
                             |> timeline
                             |> image
                             |> Expect.all

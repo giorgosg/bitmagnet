@@ -81,13 +81,14 @@ type alias StackedBars data =
 
 {-| One datum per time bucket, in time order. The time axis is labelled at the moments
 `terezka/intervals` picks for the span shown: clock times within a day, the date where a
-day turns, month names across months, and the year where one turns.
+day turns, month names across months, and the year where one turns. A span of a few
+minutes labels each bucket instead, and a single moment is labelled once, in full.
 -}
 timeline : Timeline data -> List data -> Html msg
 timeline config data =
     let
-        sole =
-            soleMoment (List.map config.time data)
+        axis =
+            timeAxis config.zone (List.map config.time data)
     in
     chartFigure config.title data <|
         [ plot
@@ -97,15 +98,15 @@ timeline config data =
                     |> List.concatMap (\datum -> List.map (\series -> series.value datum) config.series)
                     |> List.maximum
                     |> Maybe.withDefault 0
-            , range = Maybe.map centredOn sole |> Maybe.withDefault []
+            , range = axis.range
             }
-            [ timeAxis config.zone sole
-            , C.series (config.time >> Time.posixToMillis >> toFloat)
-                (List.map (line (sole /= Nothing)) config.series)
+            (C.series (config.time >> Time.posixToMillis >> toFloat)
+                (List.map (line axis.dotted) config.series)
                 data
-            ]
+                :: axis.labels
+            )
         , ul [ class "chart-legend" ]
-            (List.map (\series -> legendEntry (lineSwatch (linePaint series.ink)) series.label) config.series)
+            (List.map (\series -> legendEntry (lineSwatch (paint series.ink).line) series.label) config.series)
         , numbers
             { rowHeading = "Time"
             , rowLabel = config.time >> Format.dateTime config.zone
@@ -130,11 +131,11 @@ stackedBars config data =
                     |> Maybe.withDefault 0
             , range = []
             }
-            [ C.binLabels config.category (CA.moveDown 20 :: labelInk)
+            [ C.binLabels config.category (CA.moveDown 20 :: labelStyle)
             , C.bars [ CA.margin 0.3 ] [ C.stacked (List.map segment config.segments) ] data
             ]
         , ul [ class "chart-legend" ]
-            (List.map (\series -> legendEntry (barSwatch (barPaint series.ink)) series.label) config.segments)
+            (List.map (\series -> legendEntry (barSwatch (paint series.ink).bar) series.label) config.segments)
         , numbers
             { rowHeading = config.categoryHeading
             , rowLabel = config.category
@@ -195,27 +196,35 @@ chartFigure title data body =
         )
 
 
-{-| A series' line. A line through a single moment draws nothing, so there, and only
-there, each point is also marked with a dot.
+{-| A series' line. A line through a single moment draws nothing, so when `dotted`, each
+point is also marked with a dot.
 -}
 line : Bool -> Series data -> C.Property data CS.Interpolation CS.Dot
-line single series =
+line dotted series =
     let
-        paint =
-            linePaint series.ink
+        { stroke, width, dashes } =
+            (paint series.ink).line
     in
     C.interpolated (series.value >> toFloat)
-        [ CA.color paint.stroke, CA.width paint.width, CA.dashed paint.dashes ]
-        (if single then
-            [ CA.circle, CA.size 24, CA.color paint.stroke, CA.border paint.stroke, CA.borderWidth 0 ]
+        [ CA.color stroke, CA.width width, CA.dashed dashes ]
+        (if dotted then
+            [ CA.circle, CA.size 24, CA.color stroke, CA.border stroke, CA.borderWidth 0 ]
 
          else
             []
         )
 
 
-{-| How a series' line is drawn, in one place for both the chart and its legend.
--}
+segment : Series data -> C.Property data inter CS.Bar
+segment series =
+    let
+        { fill, edge, edgeWidth } =
+            (paint series.ink).bar
+    in
+    C.bar (series.value >> toFloat)
+        [ CA.color fill, CA.border edge, CA.borderWidth edgeWidth ]
+
+
 type alias LinePaint =
     { stroke : String
     , width : Float
@@ -223,38 +232,6 @@ type alias LinePaint =
     }
 
 
-linePaint : Ink -> LinePaint
-linePaint ink =
-    case ink of
-        Accent ->
-            { stroke = "var(--accent)", width = 2, dashes = [] }
-
-        AccentSoft ->
-            { stroke = "var(--accent)", width = 1.5, dashes = [ 4, 3 ] }
-
-        Strong ->
-            { stroke = "var(--fg)", width = 1.5, dashes = [] }
-
-        Muted ->
-            { stroke = "var(--dim)", width = 1.5, dashes = [ 4, 3 ] }
-
-        Faint ->
-            { stroke = "var(--dim)", width = 1, dashes = [ 1, 3 ] }
-
-
-segment : Series data -> C.Property data inter CS.Bar
-segment series =
-    let
-        paint =
-            barPaint series.ink
-    in
-    C.bar (series.value >> toFloat)
-        [ CA.color paint.fill, CA.border paint.edge, CA.borderWidth paint.edgeWidth ]
-
-
-{-| How a bar segment is drawn, in one place for both the chart and its legend. A solid
-segment names its fill as its edge too, rather than leave the edge to elm-charts.
--}
 type alias BarPaint =
     { fill : String
     , edge : String
@@ -262,23 +239,37 @@ type alias BarPaint =
     }
 
 
-barPaint : Ink -> BarPaint
-barPaint ink =
+{-| How each ink draws a line and a bar segment, side by side so the two read as the same
+series. The chart and its legend both draw from here. A solid segment names its fill as
+its edge too, rather than leave the edge to elm-charts.
+-}
+paint : Ink -> { line : LinePaint, bar : BarPaint }
+paint ink =
     case ink of
         Accent ->
-            { fill = "var(--accent)", edge = "var(--accent)", edgeWidth = 0 }
+            { line = { stroke = "var(--accent)", width = 2, dashes = [] }
+            , bar = { fill = "var(--accent)", edge = "var(--accent)", edgeWidth = 0 }
+            }
 
         AccentSoft ->
-            { fill = "var(--accent-soft)", edge = "var(--accent)", edgeWidth = 1 }
+            { line = { stroke = "var(--accent)", width = 1.5, dashes = [ 4, 3 ] }
+            , bar = { fill = "var(--accent-soft)", edge = "var(--accent)", edgeWidth = 1 }
+            }
 
         Strong ->
-            { fill = "var(--fg)", edge = "var(--fg)", edgeWidth = 0 }
+            { line = { stroke = "var(--fg)", width = 1.5, dashes = [] }
+            , bar = { fill = "var(--fg)", edge = "var(--fg)", edgeWidth = 0 }
+            }
 
         Muted ->
-            { fill = "var(--dim)", edge = "var(--dim)", edgeWidth = 0 }
+            { line = { stroke = "var(--dim)", width = 1.5, dashes = [ 4, 3 ] }
+            , bar = { fill = "var(--dim)", edge = "var(--dim)", edgeWidth = 0 }
+            }
 
         Faint ->
-            { fill = "var(--faint)", edge = "var(--edge)", edgeWidth = 1 }
+            { line = { stroke = "var(--dim)", width = 1, dashes = [ 1, 3 ] }
+            , bar = { fill = "var(--faint)", edge = "var(--edge)", edgeWidth = 1 }
+            }
 
 
 legendEntry : Svg.Svg msg -> String -> Html msg
@@ -287,32 +278,32 @@ legendEntry swatch label =
 
 
 lineSwatch : LinePaint -> Svg.Svg msg
-lineSwatch paint =
+lineSwatch { stroke, width, dashes } =
     swatchFrame
         [ Svg.line
             [ SA.x1 "0"
             , SA.y1 "5"
             , SA.x2 "20"
             , SA.y2 "5"
-            , SA.stroke paint.stroke
-            , SA.strokeWidth (String.fromFloat paint.width)
-            , SA.strokeDasharray (String.join " " (List.map String.fromFloat paint.dashes))
+            , SA.stroke stroke
+            , SA.strokeWidth (String.fromFloat width)
+            , SA.strokeDasharray (String.join " " (List.map String.fromFloat dashes))
             ]
             []
         ]
 
 
 barSwatch : BarPaint -> Svg.Svg msg
-barSwatch paint =
+barSwatch { fill, edge, edgeWidth } =
     swatchFrame
         [ Svg.rect
             [ SA.x "1"
             , SA.y "1"
             , SA.width "18"
             , SA.height "8"
-            , SA.fill paint.fill
-            , SA.stroke paint.edge
-            , SA.strokeWidth (String.fromFloat paint.edgeWidth)
+            , SA.fill fill
+            , SA.stroke edge
+            , SA.strokeWidth (String.fromFloat edgeWidth)
             ]
             []
         ]
@@ -353,62 +344,73 @@ numbers config data =
         ]
 
 
-{-| Times along the bottom, at the "nice" moments `terezka/intervals` picks for the span
-shown, written the way Magnes writes them rather than in elm-charts' US-style `10/4`.
+{-| How the time axis is drawn for the moments the data falls at: the span it covers,
+the labels along it, and whether each point needs a dot to be seen at all.
+-}
+type alias TimeAxis data msg =
+    { range : List (CA.Attribute CS.Axis)
+    , labels : List (C.Element data msg)
+    , dotted : Bool
+    }
 
-Data at a single moment is labelled once, in full. elm-charts widens a span of nothing to
-10 ms, and the moments picked across that would all read as the same minute.
+
+{-| Times along the bottom, written the way Magnes writes them rather than in elm-charts'
+US-style `10/4`. Usually they are the "nice" moments `terezka/intervals` picks for the
+span: the ticks `C.generate (C.times zone)` would give, taken from intervals directly so
+that their unit can be seen before they are used. Two spans need something else, because
+buckets are a minute apart at the finest:
+
+  - **One moment.** elm-charts widens it to 10 ms against the count axis, and labels that
+    with the same minute over and over. It is centred and labelled once, in full, and its
+    points are dotted, since a line through one point draws nothing.
+  - **A few minutes.** Intervals ticks the seconds, which all read as the same minute. Each
+    bucket's own minute is labelled instead.
 
 -}
-timeAxis : Time.Zone -> Maybe Time.Posix -> C.Element data msg
-timeAxis zone sole =
-    case sole of
-        Just at ->
-            timeLabelAt at (date zone at ++ " " ++ clock zone at)
-
-        Nothing ->
-            C.generate 8 (C.times zone) .x [] <|
-                \_ tick -> [ timeLabelAt tick.timestamp (timeLabel tick) ]
-
-
-{-| A time range with `at` in the middle, for data that all falls at one moment: left
-to elm-charts, it would sit against the count axis.
--}
-centredOn : Time.Posix -> List (CA.Attribute CS.Axis)
-centredOn at =
+timeAxis : Time.Zone -> List Time.Posix -> TimeAxis data msg
+timeAxis zone moments =
     let
         millis =
-            toFloat (Time.posixToMillis at)
+            List.map (Time.posixToMillis >> toFloat) moments
+
+        plain labels =
+            { range = [], labels = labels, dotted = False }
     in
-    [ CA.lowest (millis - 1) CA.exactly, CA.highest (millis + 1) CA.exactly ]
-
-
-{-| The one moment every datum falls at, when they all do.
--}
-soleMoment : List Time.Posix -> Maybe Time.Posix
-soleMoment moments =
-    case moments of
-        first :: rest ->
-            if List.all ((==) first) rest then
-                Just first
+    case ( List.minimum millis, List.maximum millis ) of
+        ( Just first, Just last ) ->
+            if first == last then
+                { range = [ CA.lowest (first - 1) CA.exactly, CA.highest (first + 1) CA.exactly ]
+                , labels = [ timeLabel first (Format.dateTime zone (Time.millisToPosix (round first))) ]
+                , dotted = True
+                }
 
             else
-                Nothing
+                let
+                    ticks =
+                        Intervals.times zone 8 { min = first, max = last }
+                in
+                if List.any (\tick -> List.member tick.unit [ Intervals.Millisecond, Intervals.Second ]) ticks then
+                    plain (List.map (\at -> timeLabel (toFloat (Time.posixToMillis at)) (Format.time zone at)) moments)
 
-        [] ->
-            Nothing
+                else
+                    plain (List.map (\tick -> timeLabel (toFloat (Time.posixToMillis tick.timestamp)) (tickText tick)) ticks)
+
+        _ ->
+            plain []
 
 
-timeLabelAt : Time.Posix -> String -> C.Element data msg
-timeLabelAt at label =
-    C.xLabel (CA.x (toFloat (Time.posixToMillis at)) :: labelInk) [ Svg.text label ]
+timeLabel : Float -> String -> C.Element data msg
+timeLabel x label =
+    C.xLabel (CA.x x :: labelStyle) [ Svg.text label ]
 
 
-{-| The clock time within a day, and the date where the day turns, so a reader can always
-tell which day a stretch of the line belongs to.
+{-| A tick's label, by the unit intervals stepped in and what changed since the tick
+before: the clock time within a day, the date where a day turns, the month across months,
+and the year, alone or after the date, where a year turns. A reader can always tell which
+day, and which year, a stretch of the line belongs to.
 -}
-timeLabel : Intervals.Time -> String
-timeLabel tick =
+tickText : Intervals.Time -> String
+tickText tick =
     let
         zone =
             tick.zone
@@ -418,45 +420,45 @@ timeLabel tick =
 
         year =
             String.fromInt (Time.toYear zone at)
+
+        yearTurned =
+            tick.change == Just Intervals.Year
+
+        dated =
+            if yearTurned then
+                shortDate zone at ++ " " ++ year
+
+            else
+                shortDate zone at
     in
     case tick.unit of
         Intervals.Year ->
             year
 
         Intervals.Month ->
-            if tick.change == Just Intervals.Year then
+            if yearTurned then
                 year
 
             else
                 monthName (Time.toMonth zone at)
 
         Intervals.Day ->
-            date zone at
+            dated
 
         _ ->
             if List.member tick.change [ Just Intervals.Day, Just Intervals.Month, Just Intervals.Year ] then
-                date zone at
+                dated
 
             else
-                clock zone at
+                Format.time zone at
 
 
 {-| `5 Oct`: short, and with the month named, not ambiguous between day-first and
 month-first readers.
 -}
-date : Time.Zone -> Time.Posix -> String
-date zone at =
+shortDate : Time.Zone -> Time.Posix -> String
+shortDate zone at =
     String.fromInt (Time.toDay zone at) ++ " " ++ monthName (Time.toMonth zone at)
-
-
-clock : Time.Zone -> Time.Posix -> String
-clock zone at =
-    pad (Time.toHour zone at) ++ ":" ++ pad (Time.toMinute zone at)
-
-
-pad : Int -> String
-pad n =
-    String.padLeft 2 '0' (String.fromInt n)
 
 
 monthName : Time.Month -> String
@@ -507,9 +509,9 @@ countAxis : C.Element data msg
 countAxis =
     C.generate 5 C.ints .y [] <|
         \_ n ->
-            [ C.yLabel (CA.y (toFloat n) :: CA.withGrid :: labelInk) [ Svg.text (Format.count n) ] ]
+            [ C.yLabel (CA.y (toFloat n) :: CA.withGrid :: labelStyle) [ Svg.text (Format.count n) ] ]
 
 
-labelInk : List (CA.Attribute { a | color : String, border : String, borderWidth : Float, fontSize : Maybe Int })
-labelInk =
+labelStyle : List (CA.Attribute { a | color : String, border : String, borderWidth : Float, fontSize : Maybe Int })
+labelStyle =
     [ CA.color "var(--dim)", CA.border "var(--bg)", CA.borderWidth 0, CA.fontSize 12 ]

@@ -22,6 +22,17 @@ suite =
                     Format.date Time.utc moment
                         |> Expect.equal "2026-08-25"
             ]
+        , describe "time"
+            [ test "is the clock time to the minute" <|
+                \_ ->
+                    Format.time Time.utc moment
+                        |> Expect.equal "14:03"
+            , test "pads a single-digit hour and minute" <|
+                \_ ->
+                    -- 2026-08-25T04:07:00Z
+                    Format.time Time.utc (Time.millisToPosix 1787630820000)
+                        |> Expect.equal "04:07"
+            ]
         , describe "dateTime"
             [ test "adds the clock time to the date" <|
                 \_ ->

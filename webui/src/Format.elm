@@ -1,4 +1,4 @@
-module Format exposing (bytes, count, date, dateTime, forCount, plural)
+module Format exposing (bytes, count, date, dateTime, forCount, plural, time)
 
 {-| Human-readable numbers and dates: sizes and counts for the row, dates and times
 wherever a moment is shown to a person.
@@ -26,11 +26,15 @@ compared against "was that me?".
 -}
 dateTime : Time.Zone -> Time.Posix -> String
 dateTime zone posix =
-    date zone posix
-        ++ " "
-        ++ pad (Time.toHour zone posix)
-        ++ ":"
-        ++ pad (Time.toMinute zone posix)
+    date zone posix ++ " " ++ time zone posix
+
+
+{-| `14:03`, the clock time on its own, for where the day is already plain: a chart's time
+axis within a day.
+-}
+time : Time.Zone -> Time.Posix -> String
+time zone posix =
+    pad (Time.toHour zone posix) ++ ":" ++ pad (Time.toMinute zone posix)
 
 
 pad : Int -> String
