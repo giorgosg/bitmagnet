@@ -336,11 +336,25 @@ object actions, so a key handed to Prowlarr can be allowed Torznab and nothing e
 **Keys issued before this version keep working, and there is nothing to run.** How a key's
 secret is hashed changed — bcrypt was costing ~57 ms of CPU per request that presented a
 key, before any authorization check, which made a guessable key id a way for anyone who
-could reach the port to burn a core. Existing keys are re-hashed automatically the first
-time they are used, so an \*arr client polling Torznab migrates its own key within
-seconds. A key that is never used again keeps the old hash and the old cost; if you have
-dormant keys you do not need, deleting them is the whole of the cleanup. The reasoning is
-in [docs/architecture/auth.md](architecture/auth.md#why-an-api-keys-hash-is-fast).
+could reach the port to burn a core with no credential at all. Existing keys are re-hashed
+automatically the first time the right secret is presented, so an \*arr client polling
+Torznab migrates its own key within seconds, and so does a key whose owner is disabled or
+whose expiry has passed.
+
+**One thing is worth five minutes if this instance has been running a while.** A key that
+is never used again is never re-hashed, and until it is, _that key's id still carries the
+old problem_ — not a cost to its owner, but the original hole, open to anyone who can
+reach the port. Nothing in the UI or the API reports which keys those are, so ask the
+database:
+
+```sql
+select id, name, user_id, created_at from api_keys where length(hash) = 60;
+```
+
+Every row it returns is a key that has not been used since the upgrade. Use each one once,
+or delete it; either closes it. An empty result means there is nothing left to do. The
+reasoning is in
+[docs/architecture/auth.md](architecture/auth.md#why-an-api-keys-hash-is-fast).
 
 ## Endpoints that are not GraphQL
 

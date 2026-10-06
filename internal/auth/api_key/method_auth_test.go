@@ -204,13 +204,17 @@ func TestAuthSucceedsWhenTheUpgradeWriteFails(t *testing.T) {
 	assert.Equal(t, 7, apiKey.ID)
 }
 
-// An expired key is refused, and its legacy hash is not rewritten on the way:
-// upgrading it would be a write on behalf of a credential that cannot be used,
-// and it would happen on every request the expired key keeps making.
-func TestAuthRefusesAnExpiredKeyWithoutUpgradingIt(t *testing.T) {
+// A refused credential's row is still re-hashed, and the refusal still stands.
+//
+// This is the case the first version of this change got backwards. Upgrading
+// only after the expiry and enabled checks looks tidier - no write on behalf of
+// a credential that cannot be used - but those are exactly the rows that would
+// otherwise go on paying 57 ms per attempt indefinitely: an expired key an
+// *arr client keeps polling, or the keys of an account disabled today and
+// enabled next week. The write grants nothing, because it replaces a hash of a
+// secret with another hash of the same secret.
+func TestAuthUpgradesARefusedKeyAndStillRefusesIt(t *testing.T) {
 	t.Parallel()
-
-	h := newTestHarness(t)
 
 	secret, err := api_key.NewSecret()
 	require.NoError(t, err)
@@ -218,13 +222,35 @@ func TestAuthRefusesAnExpiredKeyWithoutUpgradingIt(t *testing.T) {
 	legacy, err := bcrypt.GenerateFromPassword(secret.Secret, bcrypt.MinCost)
 	require.NoError(t, err)
 
-	expired := storedKey(7, legacy)
-	expired.ExpiresAt = sql.NullTime{Time: time.Now().Add(-time.Hour), Valid: true}
+	for name, tt := range map[string]struct {
+		mutate  func(*model.APIKey)
+		wantErr error
+	}{
+		"expired": {
+			mutate: func(k *model.APIKey) {
+				k.ExpiresAt = sql.NullTime{Time: time.Now().Add(-time.Hour), Valid: true}
+			},
+			wantErr: api_key.ErrExpired,
+		},
+		"owner disabled": {
+			mutate:  func(k *model.APIKey) { k.User.Enabled = false },
+			wantErr: api_key.ErrDisabled,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	h.repository.EXPECT().Get(t.Context(), 7).Return(expired, nil).Once()
+			h := newTestHarness(t)
 
-	_, err = h.service.Auth(t.Context(), encodedKey(t, 7, secret.Secret))
-	require.Error(t, err)
-	require.ErrorIs(t, err, api_key.ErrExpired)
-	h.repository.AssertNotCalled(t, "UpdateHash")
+			key := storedKey(7, legacy)
+			tt.mutate(&key)
+
+			h.repository.EXPECT().Get(t.Context(), 7).Return(key, nil).Once()
+			h.repository.EXPECT().UpdateHash(t.Context(), 7, secret.Hash).Return(nil).Once()
+
+			_, err := h.service.Auth(t.Context(), encodedKey(t, 7, secret.Secret))
+			require.Error(t, err)
+			require.ErrorIs(t, err, tt.wantErr)
+		})
+	}
 }

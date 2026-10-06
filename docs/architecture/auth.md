@@ -370,12 +370,28 @@ else goes to bcrypt — and **not** bcrypt's `$2` prefix, which is the obvious c
 wrong: a digest is 32 uniformly random bytes, so one in 65,536 of them begins with the
 bytes `$2` and would be sent down the bcrypt path, permanently breaking that key.
 
-**What that leaves open.** The rewrite needs a _successful_ verification, and attack
-traffic never supplies one. So a legacy key that is never used again — a dormant key, or
-an expired one still being polled — keeps its bcrypt hash and keeps paying for it. Active
-keys self-heal on first use, which for an \*arr client polling Torznab is immediate. The
-residual is bounded by how many unused pre-change keys an instance has, and it closes for
-good whenever those are deleted.
+**The rewrite runs before the expiry and enabled checks, deliberately.** Doing it after
+them is tidier — no write on behalf of a credential being refused — and it was the first
+version of this change, and it was wrong. Those are exactly the rows that would otherwise
+go on paying 57 ms per attempt forever: an expired key an \*arr client keeps polling, the
+keys of an account disabled today and enabled next week. The write grants nothing, because
+it replaces a hash of a secret with another hash of the same secret, and the refusal that
+follows is unaffected by it.
+
+**What that leaves open, stated as the vector and not as a cost.** The rewrite needs a
+_successful_ verification, and attack traffic never supplies one — an attacker varies the
+secret, so every attempt misses. So for a key whose correct secret is never presented
+again, **the original unauthenticated CPU-exhaustion path is intact**: the row keeps its
+bcrypt hash, and anyone who aims at that id spends 57 ms of server CPU per request with no
+credential. Since `api_keys.id` is a `serial`, the id an attacker tries first is `1`.
+
+That is not "a dormant key costs its owner something". It is the whole vulnerability,
+surviving against however many pre-change keys an instance never uses again — which for an
+instance whose keys are all in active use is none, and for one with an abandoned key is
+one. Active keys self-heal on first use, immediately for an \*arr client polling Torznab.
+Which rows remain is a question nothing in the API answers, because `List` nils `Hash`
+before returning; it is a `length(hash) = 60` query against the table, and
+[docs/auth.md](../auth.md) gives it to the operator.
 
 **The timing oracle this does _not_ close.** `repository.Get` runs before the comparison,
 so response time still distinguishes "no such key id" from "wrong secret". The
@@ -384,8 +400,14 @@ of hashing, which a decoy hash could absorb, but what is left is the difference 
 `First()` that misses and one that hits and runs three preloads — milliseconds of database
 work that no decoy comparison can equalise. What the oracle now reveals is how many API
 keys exist, against ids that were already guessable, and the exhaustion path that made
-knowing one worth anything is what this change removed. A decoy here would look like a
-control and be none.
+knowing one worth anything is what this change removed. A decoy comparison here would look
+like a control and be none.
+
+Equalising it properly would mean a decoy _lookup_ — a second query shaped like the real
+one, issued on the miss path — which doubles the database cost of every API-key request to
+hide a count of how many keys exist, against ids that are sequential anyway. That is the
+trade, and it is not worth making; it is written down here so the next reader reaches the
+same answer without rediscovering it.
 
 ## First administrator
 
