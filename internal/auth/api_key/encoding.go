@@ -6,8 +6,6 @@ import (
 	"math/big"
 	"strings"
 	"unicode"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 const (
@@ -26,32 +24,21 @@ type Secret struct {
 	Hash   []byte
 }
 
-// NewSecret generates an API key secret and its hash.
+// NewSecret generates an API key secret and the hash stored against it. Why
+// that hash is a plain SHA-256 is in hash.go, with what it trades.
 //
-// bcrypt's default cost is deliberate here and is not the configured password
-// cost: the secret is 12 uniformly random bytes, so an offline attack against
-// the hash is infeasible at any work factor, and the cost is paid on every
-// request that presents a key.
-//
-// The errors are returned rather than dropped. Discarding the bcrypt error
-// yielded a zero-valued hash that would be stored as the credential.
+// The error from rand.Read is returned rather than dropped: under Go's older
+// signature, discarding it left the buffer zeroed, minting an all-zero
+// credential with nothing to say so. See docs/adr/0001.
 func NewSecret() (Secret, error) {
 	bytes := make([]byte, secretLength)
 	if _, err := rand.Read(bytes); err != nil {
 		return Secret{}, err
 	}
 
-	hash, err := bcrypt.GenerateFromPassword(
-		bytes,
-		bcrypt.DefaultCost,
-	)
-	if err != nil {
-		return Secret{}, err
-	}
-
 	return Secret{
 		Secret: bytes,
-		Hash:   hash,
+		Hash:   hashSecret(bytes),
 	}, nil
 }
 

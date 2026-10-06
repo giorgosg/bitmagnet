@@ -1,12 +1,12 @@
 package api_key_test
 
 import (
+	"crypto/sha256"
 	"testing"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/api_key"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/bcrypt"
 )
 
 func TestEncoding(t *testing.T) {
@@ -15,7 +15,8 @@ func TestEncoding(t *testing.T) {
 	secret, err := api_key.NewSecret()
 	require.NoError(t, err)
 
-	require.NoError(t, bcrypt.CompareHashAndPassword(secret.Hash, secret.Secret))
+	digest := sha256.Sum256(secret.Secret)
+	require.Equal(t, digest[:], secret.Hash)
 
 	apiKeyID := 12345
 

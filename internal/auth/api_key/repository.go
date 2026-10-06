@@ -24,6 +24,11 @@ type Repository interface {
 		expiresAt time.Time,
 	) (id int, err error)
 	Get(ctx context.Context, id int) (model.APIKey, error)
+	// UpdateHash rewrites one key's stored hash, and exists for a single
+	// caller: a key still stored as bcrypt is re-hashed the first time it
+	// verifies. That is the only moment the server legitimately holds the
+	// plaintext secret, so it is the only moment the row can be migrated.
+	UpdateHash(ctx context.Context, id int, hash []byte) error
 	List(ctx context.Context, req ListRequest) (ListResult, error)
 	Delete(ctx context.Context, req DeleteRequest) error
 }
@@ -106,6 +111,27 @@ func (r repository) Get(ctx context.Context, id int) (model.APIKey, error) {
 	}
 
 	return *apiKey, nil
+}
+
+func (r repository) UpdateHash(ctx context.Context, id int, hash []byte) error {
+	dao, err := r.dao.Dao()
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrRepository, err)
+	}
+
+	info, err := dao.APIKey.
+		WithContext(ctx).
+		Where(dao.APIKey.ID.Eq(id)).
+		UpdateSimple(dao.APIKey.Hash.Value(hash))
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrRepository, err)
+	}
+
+	if info.RowsAffected < 1 {
+		return fmt.Errorf("%w: %w", ErrRepository, ErrNotFound)
+	}
+
+	return nil
 }
 
 func (r repository) List(ctx context.Context, req ListRequest) (ListResult, error) {
