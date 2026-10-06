@@ -1292,3 +1292,74 @@ main {
   border-radius: 6px;
   background: var(--accent-soft);
 }
+
+/* Charts, drawn by src/Charts.elm (ADR 0007). Every mark, label and gridline is coloured
+   in Elm with a var() token, so nothing here colours the drawing; this is the figure
+   around it. */
+
+.chart {
+  margin: 1.5rem 0 2rem;
+}
+
+/* A chart is layout, not a field, so it takes the panel's whole width rather than the
+   22rem `.panel > *` gives a field. Two classes, so it wins on specificity wherever it is
+   written. */
+.panel > .chart {
+  max-width: none;
+}
+
+.chart h2 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+/* The drawing scales rather than reflows, so below this width its labels would shrink out
+   of reading. A narrow screen scrolls it sideways instead. */
+.chart-plot {
+  overflow-x: auto;
+}
+
+.chart-plot > * {
+  min-width: 44rem;
+}
+
+.chart-empty {
+  margin: 0;
+  color: var(--dim);
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--dim);
+  font-size: 0.85rem;
+}
+
+/* Drawn by Elm with the same paint as the series it names, so the two cannot drift. Overflow
+   is visible so a bordered swatch keeps its edge. */
+.chart-swatch {
+  width: 1.25rem;
+  height: 0.625rem;
+  margin-right: 0.4rem;
+  overflow: visible;
+  vertical-align: middle;
+}
+
+/* Out of sight but not out of the accessibility tree: the chart's numbers, for a screen
+   reader. `display: none` would hide them from it too. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
