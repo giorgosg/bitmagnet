@@ -20,7 +20,7 @@ import Chart.Attributes as CA
 import Chart.Svg as CS
 import Format
 import Html exposing (Html, div, figcaption, figure, h2, li, p, table, tbody, td, text, th, thead, tr, ul)
-import Html.Attributes exposing (attribute, class)
+import Html.Attributes exposing (attribute, class, style)
 import Intervals
 import Svg
 import Svg.Attributes as SA
@@ -93,6 +93,7 @@ timeline config data =
     chartFigure config.title data <|
         [ plot
             { description = config.description
+            , width = 920
             , top =
                 data
                     |> List.concatMap (\datum -> List.map (\series -> series.value datum) config.series)
@@ -124,6 +125,15 @@ stackedBars config data =
     chartFigure config.title data <|
         [ plot
             { description = config.description
+            , width =
+                let
+                    labelWidth =
+                        data
+                            |> List.map (config.category >> String.length >> (\length -> 7 * length + 24))
+                            |> List.maximum
+                            |> Maybe.withDefault 0
+                in
+                max 920 (96 + List.length data * labelWidth)
             , top =
                 data
                     |> List.map (\datum -> List.sum (List.map (\series -> series.value datum) config.segments))
@@ -159,13 +169,25 @@ margins: the left one is as wide as the largest count, `top`, written out.
 
 -}
 plot :
-    { description : String, top : Int, range : List (CA.Attribute CS.Axis) }
+    { description : String, width : Int, top : Int, range : List (CA.Attribute CS.Axis) }
     -> List (C.Element data msg)
     -> Html msg
-plot { description, top, range } elements =
+plot { description, width, top, range } elements =
     div [ class "chart-plot" ]
         [ C.chart
-            [ CA.width 920
+            [ CA.width (toFloat width)
+            , CA.htmlAttrs
+                [ style "min-width"
+                    (String.fromInt
+                        (if width > 920 then
+                            width
+
+                         else
+                            704
+                        )
+                        ++ "px"
+                    )
+                ]
             , CA.height 260
             , CA.margin
                 { top = 12

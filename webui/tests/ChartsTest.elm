@@ -375,6 +375,11 @@ suite =
                             [ Selector.attribute
                                 (Html.Attributes.attribute "aria-label" "Stacked bar chart: jobs in each queue by status.")
                             ]
+            , test "gives many categories enough horizontal room for their labels" <|
+                \_ ->
+                    List.repeat 12 { queue = "process_torrent_batch", pending = 1, retry = 2, failed = 3, processed = 4 }
+                        |> stackedBars
+                        |> Query.has [ Selector.style "min-width" "2148px" ]
             , test "names each bar by its category" <|
                 \_ ->
                     stackedBars totals
