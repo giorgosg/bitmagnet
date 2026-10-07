@@ -26,6 +26,9 @@
         flags: {
           apiUrl: window.MAGNES_API_URL || "/graphql",
           basePath: window.MAGNES_BASE_PATH || "",
+          // Elm hears visibility only when it changes, so a tab opened in the
+          // background would otherwise poll as though it were showing.
+          hidden: document.hidden,
         },
       });
 

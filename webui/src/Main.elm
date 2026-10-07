@@ -11,6 +11,7 @@ import Facet
 import FileTree
 import Format
 import Graphql.Http
+import Health
 import Html exposing (Attribute, Html, a, button, div, form, h1, header, input, main_, p, span, text)
 import Html.Attributes exposing (attribute, class, classList, href, id, placeholder, spellcheck, type_, value)
 import Html.Events exposing (on, onClick, onInput, onSubmit, stopPropagationOn)
@@ -55,6 +56,7 @@ works against any instance and at either the origin root or a static subpath.
 type alias Flags =
     { apiUrl : String
     , basePath : String
+    , hidden : Bool
     }
 
 
@@ -145,6 +147,18 @@ type alias Model =
     -- Bumping the epoch here would strand an in-flight page — the reply would be dropped
     -- while `fetching` stayed true, and infinite scroll would quietly stop.
     , typing : Int
+
+    -- bitmagnet's health, as the header and the status page both show it: one answer,
+    -- so the two never disagree. Polled while the tab is visible.
+    , health : Health.State
+
+    -- Separate counter for the health report's fetches. A poll that answers after a newer
+    -- one was asked, or after the Identity changed what may be asked, is dropped.
+    , healthEpoch : Int
+
+    -- Whether the tab is showing. Polling stops while it is not; the browser reports only
+    -- changes, so the starting value comes in with the flags.
+    , visible : Bool
     }
 
 
@@ -282,6 +296,16 @@ scoringDebounceMs =
     500
 
 
+{-| How often the health report is asked for while the tab is visible. bitmagnet runs its
+checks on timers of its own — Postgres every 30 seconds, TMDB every five minutes — and
+answers `health` from their last results, so asking more often than its fastest check
+mostly reads the same answer again.
+-}
+healthPollMs : Float
+healthPollMs =
+    30000
+
+
 init : Flags -> Url -> Nav.Key -> ( Model, Cmd Msg )
 init flags url key =
     let
@@ -322,6 +346,9 @@ init flags url key =
       , epoch = 0
       , scoring = 0
       , typing = 0
+      , health = Health.Unasked
+      , healthEpoch = 0
+      , visible = not flags.hidden
       }
     , Cmd.batch
         [ Identity.fetch flags.apiUrl (GotIdentity 0)
@@ -372,6 +399,11 @@ subscriptions model =
         , Browser.Events.onVisibilityChange VisibilityChanged
         , authenticationChanges (\_ -> AuthenticationChanged)
         , menuDismissal model
+        , if model.visible then
+            Time.every healthPollMs (\_ -> HealthPollDue)
+
+          else
+            Sub.none
         ]
 
 
@@ -513,6 +545,8 @@ type Msg
     | GotSignOut (Result (Graphql.Http.Error ()) ())
     | AuthenticationChangedHere Refresh
     | AuthenticationChanged
+    | HealthPollDue
+    | GotHealth Int (Result (Graphql.Http.Error Health.Report) Health.Report)
     | Ignored
 
 
@@ -1329,10 +1363,43 @@ update msg model =
             ( refreshing, Cmd.batch [ authenticationChanged (), refresh ] )
 
         VisibilityChanged Browser.Events.Visible ->
-            ( model, Identity.fetch model.apiUrl (GotIdentity model.identityEpoch) )
+            -- Polling stopped while the tab was away, so the header is as old as the
+            -- moment it was hidden. Ask now rather than at the next poll.
+            let
+                ( refreshed, healthCmd ) =
+                    refreshHealth { model | visible = True }
+            in
+            ( refreshed
+            , Cmd.batch [ Identity.fetch model.apiUrl (GotIdentity model.identityEpoch), healthCmd ]
+            )
 
         VisibilityChanged Browser.Events.Hidden ->
-            ( model, Cmd.none )
+            ( { model | visible = False }, Cmd.none )
+
+        HealthPollDue ->
+            if model.visible then
+                refreshHealth model
+
+            else
+                ( model, Cmd.none )
+
+        GotHealth healthEpoch result ->
+            if healthEpoch /= model.healthEpoch then
+                ( model, Cmd.none )
+
+            else
+                case result of
+                    Ok report ->
+                        ( { model | health = Health.Reported report }, Cmd.none )
+
+                    Err error ->
+                        onRequestFailure error
+                            model
+                            (\_ current ->
+                                ( { current | health = Health.Unavailable (ApiError.fromError error) }
+                                , Cmd.none
+                                )
+                            )
 
         GotIdentity identityEpoch result ->
             if identityEpoch /= model.identityEpoch then
@@ -1346,7 +1413,12 @@ update msg model =
                                 refreshFailure model.identityRefresh
                                     (ApiError.toMessage (ApiError.fromError error))
                         in
-                        ( { model | identity = Identity.Failed message, results = Failed message }
+                        ( { model
+                            | identity = Identity.Failed message
+                            , results = Failed message
+                            , health = Health.Unasked
+                            , healthEpoch = model.healthEpoch + 1
+                          }
                         , Cmd.none
                         )
 
@@ -1442,10 +1514,19 @@ update msg model =
                             , epoch = epoch
                             , infiniteList = InfiniteList.init
                         }
+
+                    -- The status page is opened to see how bitmagnet is now, not at the last
+                    -- poll, which may be up to half a minute old.
+                    ( arrived, healthCmd ) =
+                        if route == Route.Status then
+                            refreshHealth navigated
+
+                        else
+                            ( navigated, Cmd.none )
                 in
-                ( navigated
+                ( arrived
                 , Cmd.batch
-                    [ cmd, scrollListToTop, focusIfFormAppeared model navigated ]
+                    [ cmd, scrollListToTop, focusIfFormAppeared model navigated, healthCmd ]
                 )
 
         FieldChanged field ->
@@ -1778,6 +1859,25 @@ onRequestFailure error model toFailed =
         toFailed (ApiError.toMessage failure) model
 
 
+{-| Ask for the health report again, under a fresh epoch so that only the newest answer
+lands. Which fields are asked for depends on the Identity, so nothing is asked until it is
+known, and an Identity that may not read health has nothing to show.
+-}
+refreshHealth : Model -> ( Model, Cmd Msg )
+refreshHealth model =
+    if Identity.can (Identity.graphql "health" "query") model.identity then
+        let
+            healthEpoch =
+                model.healthEpoch + 1
+        in
+        ( { model | healthEpoch = healthEpoch }
+        , Health.fetch model.apiUrl model.identity (GotHealth healthEpoch)
+        )
+
+    else
+        ( { model | health = Health.Unasked, healthEpoch = model.healthEpoch + 1 }, Cmd.none )
+
+
 {-| Refetch the User listing under a fresh epoch, so only the answer to this very
 question is applied. Every trigger goes through here: the search, a page turn, and the
 refetch an act performs once the server has accepted it.
@@ -2073,6 +2173,9 @@ routeNeedsSearch route =
         Route.AdminInvitations ->
             False
 
+        Route.Status ->
+            False
+
         Route.NotFound ->
             False
 
@@ -2119,6 +2222,11 @@ beginIdentityRefresh reason model =
         -- And a pending search-debounce is spent: the timer it would fire belongs to a
         -- screen that no longer holds the search it was typed into.
         , userTyping = model.userTyping + 1
+
+        -- The health report was asked for under the old Identity, and may show workers
+        -- the new one may not see. It is asked for again once the Identity is known.
+        , health = Health.Unasked
+        , healthEpoch = model.healthEpoch + 1
         , results = pendingResults model.route
         , epoch = epoch
         , infiniteList = InfiniteList.init
@@ -2149,15 +2257,21 @@ identityApplied identity model =
             let
                 ( results, cmd ) =
                     guardedLoad model identity model.epoch model.route
+
+                ( refreshed, healthCmd ) =
+                    refreshHealth { model | identity = identity, results = results }
             in
-            ( { model | identity = identity, results = results }, cmd )
+            ( refreshed, Cmd.batch [ cmd, healthCmd ] )
 
         Identity.Failed _ ->
             let
                 ( results, cmd ) =
                     guardedLoad model identity model.epoch model.route
+
+                ( refreshed, healthCmd ) =
+                    refreshHealth { model | identity = identity, results = results }
             in
-            ( { model | identity = identity, results = results }, cmd )
+            ( refreshed, Cmd.batch [ cmd, healthCmd ] )
 
         previous ->
             if previous == identity then
@@ -2170,14 +2284,20 @@ identityApplied identity model =
 
                     ( results, cmd ) =
                         guardedLoad model identity epoch model.route
+
+                    -- A different Identity may read different fields: workers, for one.
+                    ( refreshed, healthCmd ) =
+                        refreshHealth
+                            { model
+                                | identity = identity
+                                , health = Health.Unasked
+                                , results = results
+                                , epoch = epoch
+                                , infiniteList = InfiniteList.init
+                            }
                 in
-                ( { model
-                    | identity = identity
-                    , results = results
-                    , epoch = epoch
-                    , infiniteList = InfiniteList.init
-                  }
-                , Cmd.batch [ cmd, scrollListToTop ]
+                ( refreshed
+                , Cmd.batch [ cmd, scrollListToTop, healthCmd ]
                 )
 
 
@@ -2226,6 +2346,11 @@ load identity apiUrl epochs route =
 
         Route.AdminInvitations ->
             ( Blank, Invitations.fetch apiUrl 0 (GotInvitations epochs.identity) )
+
+        -- The health report is the header's as well as this page's, so it is fetched
+        -- and polled on its own rather than here: see `refreshHealth`.
+        Route.Status ->
+            ( Blank, Cmd.none )
 
         Route.NotFound ->
             ( Blank, Cmd.none )
@@ -2376,6 +2501,7 @@ view model =
                 [ a [ class "wordmark", href (Route.toHref model.basePath (Route.Search Route.emptySearch)) ]
                     [ h1 [] [ text "magnes" ] ]
                 , searchBox model
+                , Health.indicator model.basePath model.health
                 , IdentityMenu.view model.basePath
                     identityMenuMessages
                     model.identity
@@ -2428,6 +2554,9 @@ documentTitle model =
 
         Route.AdminInvitations ->
             "Invitations — magnes"
+
+        Route.Status ->
+            "status — magnes"
 
         Route.NotFound ->
             "not found — magnes"
@@ -2696,6 +2825,9 @@ viewAllowedRoute model =
 
         Route.AdminInvitations ->
             Invitations.view model.basePath model.zone invitationsMessages model.identity model.invitations
+
+        Route.Status ->
+            Health.view model.zone model.health
 
         Route.NotFound ->
             p [ class "notice" ] [ text "No such page." ]

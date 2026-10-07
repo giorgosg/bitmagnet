@@ -108,3 +108,16 @@ All of these are now a spec away rather than a harness away.
   `e2e/credentialed/`, which has one.
 - Shared helpers live in `e2e/support/`, not beside a spec: the credential-store recorder is
   used by both suites, because the refusal paths need no credential and the success paths do.
+
+## What the fixture serves the operational pages
+
+The fixture server from bitmagnet PR #83 supplies health, workers, queue queries and
+mutations, and torrent metrics. Health runs a real Postgres check against the cloned
+database. The worker registry lists production worker keys, with the fixture's HTTP
+worker started and the crawler and queue workers stopped; it does not start crawlers or
+process queued jobs.
+
+`dev fixture serve` enables `--seed-dashboard-data` by default: jobs in every status
+across two queues, and a bounded set of torrent-source timestamps moved into the recent
+metrics window. `torrent.listSources` reads the cloned database. The status spec checks
+Anonymous access, administrator and ordinary User views, and visibility-aware polling.
