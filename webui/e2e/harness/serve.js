@@ -207,19 +207,26 @@ function startFixtureServer(binary, templateDSN) {
     child.stdout.on("data", (chunk) => {
       buffered += chunk;
 
-      const newline = buffered.indexOf("\n");
-      if (newline < 0) return;
+      // Startup diagnostics may precede the JSON announcement on stdout. Keep
+      // consuming complete lines until the handshake arrives, even in one chunk.
+      let newline;
+      while ((newline = buffered.indexOf("\n")) >= 0) {
+        const line = buffered.slice(0, newline).trim();
+        buffered = buffered.slice(newline + 1);
+        if (!line.startsWith("{")) continue;
 
-      const line = buffered.slice(0, newline);
-      buffered = buffered.slice(newline + 1);
-      child.stdout.removeAllListeners("data");
-
-      clearTimeout(deadline);
-
-      try {
-        resolve(JSON.parse(line));
-      } catch (error) {
-        reject(new Error(`the fixture server announced something unreadable: ${line}`));
+        try {
+          const announcement = JSON.parse(line);
+          if (!announcement.graphqlEndpoint || !announcement.address) continue;
+          child.stdout.removeAllListeners("data");
+          clearTimeout(deadline);
+          resolve(announcement);
+          return;
+        } catch {
+          clearTimeout(deadline);
+          reject(new Error("the fixture server announcement was not valid JSON"));
+          return;
+        }
       }
     });
 

@@ -26,6 +26,7 @@ type Route
     | AdminUsers
     | AdminRoles
     | AdminInvitations
+    | Status
     | NotFound
 
 
@@ -100,6 +101,7 @@ parser =
         , Parser.map AdminUsers (s "admin" </> s "users")
         , Parser.map AdminRoles (s "admin" </> s "roles")
         , Parser.map AdminInvitations (s "admin" </> s "invitations")
+        , Parser.map Status (s "status")
         ]
 
 
@@ -224,6 +226,9 @@ toHref (BasePath prefix) route =
                 AdminInvitations ->
                     Builder.absolute [ "admin", "invitations" ] []
 
+                Status ->
+                    Builder.absolute [ "status" ] []
+
                 NotFound ->
                     Builder.absolute [] []
            )
@@ -316,18 +321,21 @@ guard mount identity route =
             Refused message
 
         Identity.Anonymous _ ->
-            anonymousAccess mount route
+            anonymousAccess mount identity route
 
         Identity.APIKeyAuthenticated _ _ _ ->
-            anonymousAccess mount route
+            anonymousAccess mount identity route
 
         Identity.UserAuthenticated _ _ ->
             userAccess identity route
 
 
-anonymousAccess : BasePath -> Route -> Access
-anonymousAccess mount route =
+anonymousAccess : BasePath -> Identity.Identity -> Route -> Access
+anonymousAccess mount identity route =
     case route of
+        Status ->
+            requireHealth identity
+
         UserOverview ->
             loginRedirect mount route
 
@@ -370,8 +378,25 @@ userAccess identity route =
         AdminInvitations ->
             requireAdministration identity
 
+        Status ->
+            requireHealth identity
+
         _ ->
             Allowed
+
+
+{-| Refused rather than sent to sign in, whoever is asking. `health::query` is in the
+baseline of the `anon` and `user` Roles, so Anonymous always holds it and signing in would
+not change the answer. An Identity without it is one whose Role was given less: `editor`
+holds nothing until an administrator grants it.
+-}
+requireHealth : Identity.Identity -> Access
+requireHealth identity =
+    if Identity.can (Identity.graphql "health" "query") identity then
+        Allowed
+
+    else
+        Refused "Your Identity does not permit reading bitmagnet's health."
 
 
 requireAdministration : Identity.Identity -> Access

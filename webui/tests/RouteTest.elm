@@ -32,6 +32,25 @@ suite =
             \_ ->
                 Route.guard mount adminIdentity Route.AdminRoles
                     |> Expect.equal Route.Allowed
+        , describe "status"
+            [ test "is open to an Anonymous Identity holding health::query" <|
+                \_ ->
+                    Route.guard mount (Identity.Anonymous [ Identity.graphql "health" "query" ]) Route.Status
+                        |> Expect.equal Route.Allowed
+            , test "is open to a User holding health::query" <|
+                \_ ->
+                    Route.guard mount (Identity.UserAuthenticated user [ Identity.graphql "health" "query" ]) Route.Status
+                        |> Expect.equal Route.Allowed
+            , test "is refused, not redirected, to an Identity without health::query" <|
+                \_ ->
+                    ( Route.guard mount (Identity.Anonymous []) Route.Status
+                    , Route.guard mount userIdentity Route.Status
+                    )
+                        |> Expect.equal
+                            ( Route.Refused "Your Identity does not permit reading bitmagnet's health."
+                            , Route.Refused "Your Identity does not permit reading bitmagnet's health."
+                            )
+            ]
         , test "Unknown waits and bootstrap failure remains a refusal" <|
             \_ ->
                 ( Route.guard mount Identity.Unknown Route.UserOverview
@@ -109,6 +128,7 @@ routes =
     , Route.AdminUsers
     , Route.AdminRoles
     , Route.AdminInvitations
+    , Route.Status
     ]
 
 
