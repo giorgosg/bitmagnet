@@ -25,7 +25,7 @@ to fx because `next` assembles it through a plugin registry this lineage does no
 | `auth/identity`             | Resolving a credential to an `Identity` — the authenticator chain    |
 | `auth/rbac`                 | Permissions, roles, object actions; casbin behind a repository       |
 | `auth/user`                 | Accounts, registration, login, password rules, the login throttle    |
-| `auth/api_key`              | Machine credentials: base62 encoding, bcrypt hashes, CRUD            |
+| `auth/api_key`              | Machine credentials: base62 encoding, SHA-256 hashes, CRUD           |
 | `auth/jwt`                  | Signing and parsing session tokens                                   |
 | `auth/http_auth`            | The gin middleware, and the `Guard` non-GraphQL handlers use         |
 | `gql/auth`, `gql/directive` | The `@auth` directive and the GraphQL permission baseline            |
@@ -301,6 +301,10 @@ key was minted, and reporting the selection alone claimed authority the enforcer
 are how anyone gets credentials — and both do bcrypt work. They are the two endpoints an
 unauthenticated caller can aim at.
 
+There was a third, and it was worse than either, because it needed no endpoint of its own:
+presenting an API key hashed a caller-supplied secret before checking anything. See **Why
+an API key's hash is fast** below for what that cost and what replaced it.
+
 **Login is throttled per bucket, and refuses rather than queues.** `next` used one
 process-wide `rate.Limiter` and called `Wait` on it; both halves are wrong. The budget is
 shared, so five wrong guesses against usernames that do not exist lock out every account
@@ -324,6 +328,86 @@ codes that were never going to work.
 **Login compares against a decoy hash when the account does not exist**, so a miss costs
 what a hit costs. Returning early was a username-enumeration oracle even with identical
 error text.
+
+## Why an API key's hash is fast
+
+API key secrets are stored as a plain SHA-256, with no salt, no pepper and no work
+factor. For a password that would be indefensible. For this credential it is the correct
+choice, and the reason is worth keeping, because the thing that makes it safe is not in
+the hashing code.
+
+**bcrypt was not slowing an attack down, it was the attack.** Measured on a Ryzen 5 2600,
+2026-10-06: `bcrypt.CompareHashAndPassword` at cost 10 answers in **57.6 ms**, about 18
+verifications per second per core. `api_key.Auth` runs that comparison **before any
+authorization check**, on a secret an unauthenticated caller supplies, and `api_keys.id`
+is a `serial` — so `1` is a valid key id. Anyone who could reach the port could encode id
+1 with a random secret and spend 57 ms of server CPU per request, with no credential at
+all; twelve concurrent requests saturated a twelve-core box. SHA-256 plus a constant-time
+compare answers the same question in **118 ns**.
+
+**A work factor only buys something when the input space can be enumerated.** That is
+true of passwords and false here: the secret is `secretLength` bytes from `crypto/rand`,
+96 bits, which nobody searches — salted, peppered or neither. An HMAC under a persisted
+server key was considered and rejected for the same reason: it would have bought nothing
+for this secret while costing a secret with its own generation, rotation and backup story,
+whose loss invalidates every key at once. An in-memory cache of verified secrets was
+rejected because it does not address the exhaustion path at all — a wrong secret is always
+a cache miss, so the attack pays full price every time.
+
+**What this moves, and where it is pinned.** bcrypt would still have protected a _weak_
+secret. From here, safety rests entirely on `secretLength` and `crypto/rand` staying as
+they are, and on no caller ever supplying a secret. That is not visible from the hashing
+code, so it is pinned by a test — `TestSecretLengthIsPinnedBecauseTheHashIsFast` — whose
+failure message points back at this section. Shortening the secret is a security change,
+not a parameter change.
+
+**Two hash formats are accepted, and the width tells them apart.** A bcrypt hash cannot be
+turned into a SHA-256 of the same secret without the plaintext, and the plaintext exists
+only in whatever the key's holder saved. So there is no migration: a legacy row is
+rewritten the first time it verifies, which is the one moment the server legitimately
+holds the secret. The discriminator is the stored width — 32 bytes is a digest, anything
+else goes to bcrypt — and **not** bcrypt's `$2` prefix, which is the obvious check and is
+wrong: a digest is 32 uniformly random bytes, so one in 65,536 of them begins with the
+bytes `$2` and would be sent down the bcrypt path, permanently breaking that key.
+
+**The rewrite runs before the expiry and enabled checks, deliberately.** Doing it after
+them is tidier — no write on behalf of a credential being refused — and it was the first
+version of this change, and it was wrong. Those are exactly the rows that would otherwise
+go on paying 57 ms per attempt forever: an expired key an \*arr client keeps polling, the
+keys of an account disabled today and enabled next week. The write grants nothing, because
+it replaces a hash of a secret with another hash of the same secret, and the refusal that
+follows is unaffected by it.
+
+**What that leaves open, stated as the vector and not as a cost.** The rewrite needs a
+_successful_ verification, and attack traffic never supplies one — an attacker varies the
+secret, so every attempt misses. So for a key whose correct secret is never presented
+again, **the original unauthenticated CPU-exhaustion path is intact**: the row keeps its
+bcrypt hash, and anyone who aims at that id spends 57 ms of server CPU per request with no
+credential. Since `api_keys.id` is a `serial`, the id an attacker tries first is `1`.
+
+That is not "a dormant key costs its owner something". It is the whole vulnerability,
+surviving against however many pre-change keys an instance never uses again — which for an
+instance whose keys are all in active use is none, and for one with an abandoned key is
+one. Active keys self-heal on first use, immediately for an \*arr client polling Torznab.
+Which rows remain is a question nothing in the API answers, because `List` nils `Hash`
+before returning; it is a `length(hash) = 60` query against the table, and
+[docs/auth.md](../auth.md) gives it to the operator.
+
+**The timing oracle this does _not_ close.** `repository.Get` runs before the comparison,
+so response time still distinguishes "no such key id" from "wrong secret". The
+decoy-comparison technique Login uses does not help here: under bcrypt the gap was 57 ms
+of hashing, which a decoy hash could absorb, but what is left is the difference between a
+`First()` that misses and one that hits and runs three preloads — milliseconds of database
+work that no decoy comparison can equalise. What the oracle now reveals is how many API
+keys exist, against ids that were already guessable, and the exhaustion path that made
+knowing one worth anything is what this change removed. A decoy comparison here would look
+like a control and be none.
+
+Equalising it properly would mean a decoy _lookup_ — a second query shaped like the real
+one, issued on the miss path — which doubles the database cost of every API-key request to
+hide a count of how many keys exist, against ids that are sequential anyway. That is the
+trade, and it is not worth making; it is written down here so the next reader reaches the
+same answer without rediscovering it.
 
 ## First administrator
 
@@ -371,9 +455,10 @@ first. See [../auth.md](../auth.md) for the operator-facing description.
   this path. The operator-facing consequence is in `docs/auth.md` under Known gaps.
 
 - **API keys** are `secret(12 random bytes) || uint32 id`, base62-encoded to 22 chars,
-  bcrypt-hashed in the database. Two fixed defects are recorded in the comments: a
-  decoded-length formula borrowed from base32 that rejected one key in 256, and a dropped
-  bcrypt error that would have stored a zero hash as the credential.
+  stored as a plain SHA-256 of the secret — see **Why an API key's hash is fast** above.
+  Two fixed defects are recorded in the comments: a decoded-length formula borrowed from
+  base32 that rejected one key in 256, and a dropped hashing error that would have stored
+  a zero hash as the credential.
 - **Invitations** are single-use 128-bit codes — the bootstrap one grants admin and never
   expires.
 - **All of them come from `auth.GenerateRandomString`**, and that is why the module
