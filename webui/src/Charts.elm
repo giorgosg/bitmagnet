@@ -101,7 +101,7 @@ timeline config data =
             , range = axis.range
             }
             (C.series (config.time >> Time.posixToMillis >> toFloat)
-                (List.map (line axis.dotted) config.series)
+                (List.map (line axis.showPointMarkers) config.series)
                 data
                 :: axis.labels
             )
@@ -196,18 +196,18 @@ chartFigure title data body =
         )
 
 
-{-| A series' line. A line through a single moment draws nothing, so when `dotted`, each
-point is also marked with a dot.
+{-| A series' line. A line through a single moment draws nothing, so `showPointMarkers` adds
+a dot at each point.
 -}
 line : Bool -> Series data -> C.Property data CS.Interpolation CS.Dot
-line dotted series =
+line showPointMarkers series =
     let
         { stroke, width, dashes } =
             (paint series.ink).line
     in
     C.interpolated (series.value >> toFloat)
         [ CA.color stroke, CA.width width, CA.dashed dashes ]
-        (if dotted then
+        (if showPointMarkers then
             [ CA.circle, CA.size 24, CA.color stroke, CA.border stroke, CA.borderWidth 0 ]
 
          else
@@ -350,7 +350,7 @@ the labels along it, and whether each point needs a dot to be seen at all.
 type alias TimeAxis data msg =
     { range : List (CA.Attribute CS.Axis)
     , labels : List (C.Element data msg)
-    , dotted : Bool
+    , showPointMarkers : Bool
     }
 
 
@@ -362,7 +362,7 @@ buckets are a minute apart at the finest:
 
   - **One moment.** elm-charts widens it to 10 ms against the count axis, and labels that
     with the same minute over and over. It is centred and labelled once, in full, and its
-    points are dotted, since a line through one point draws nothing.
+    points are marked with dots, since a line through one point draws nothing.
   - **A few minutes.** Intervals ticks the seconds, which all read as the same minute. Each
     bucket's own minute is labelled instead.
 
@@ -374,14 +374,14 @@ timeAxis zone moments =
             List.map (Time.posixToMillis >> toFloat) moments
 
         plain labels =
-            { range = [], labels = labels, dotted = False }
+            { range = [], labels = labels, showPointMarkers = False }
     in
     case ( List.minimum millis, List.maximum millis ) of
         ( Just first, Just last ) ->
             if first == last then
                 { range = [ CA.lowest (first - 1) CA.exactly, CA.highest (first + 1) CA.exactly ]
                 , labels = [ timeLabel first (Format.dateTime zone (Time.millisToPosix (round first))) ]
-                , dotted = True
+                , showPointMarkers = True
                 }
 
             else
@@ -424,6 +424,13 @@ tickText tick =
         yearTurned =
             tick.change == Just Intervals.Year
 
+        clockTick =
+            if List.member tick.change [ Just Intervals.Day, Just Intervals.Month, Just Intervals.Year ] then
+                dated
+
+            else
+                Format.time zone at
+
         dated =
             if yearTurned then
                 shortDate zone at ++ " " ++ year
@@ -445,12 +452,17 @@ tickText tick =
         Intervals.Day ->
             dated
 
-        _ ->
-            if List.member tick.change [ Just Intervals.Day, Just Intervals.Month, Just Intervals.Year ] then
-                dated
+        Intervals.Hour ->
+            clockTick
 
-            else
-                Format.time zone at
+        Intervals.Minute ->
+            clockTick
+
+        Intervals.Second ->
+            clockTick
+
+        Intervals.Millisecond ->
+            clockTick
 
 
 {-| `5 Oct`: short, and with the month named, not ambiguous between day-first and
