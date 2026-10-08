@@ -109,7 +109,7 @@ All of these are now a spec away rather than a harness away.
 ### Each worker has its own User, because sign-out ends all of a User's sessions
 
 Since bitmagnet `77f3fd9e3` (2026-09-14), `logoutBrowser` and `updatePassword` end **every**
-session for the account, on every device. While every test signed in as one administrator,
+session the User has, on every device. While every test signed in as one administrator,
 under `fullyParallel`, a test that signed out ended the sessions of every other test running
 at that moment, along with any bearer token `mintInvitation` held. Observed 2026-10-05
 against a `trunk` export: three parallel runs each failed one or two tests, a different test
@@ -127,9 +127,10 @@ bitmagnet `trunk` at `30e8d486b`, at the default worker count, 28 of 28 each tim
 contexts, which share no cookie and stand for two devices, and signing out in one ends the
 session in the other.
 
-A test that disables, deletes or demotes a User, or that needs an ordinary one, still
-registers a User of its own with `registerUser`, so that the worker's administrator stays
-the one acting.
+A test that changes a password, disables, deletes or demotes a User, or needs an ordinary
+one, still registers a User of its own with `registerUser`. Changing the worker's
+administrator's password would leave its later tests signing in with the old one, and the
+rest would take away what they sign in as.
 
 ## Conventions
 

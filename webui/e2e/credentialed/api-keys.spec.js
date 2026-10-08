@@ -3,7 +3,7 @@
 // a defect every unit test had passed through, and this screen — a value shown once, a
 // revoke that must revoke — is where an unverified one would cost the most.
 //
-// The User is the run's throwaway administrator, so the registry is reachable and the whole
+// The User is the worker's own administrator, so the registry is reachable and the whole
 // permission grid is offered. See e2e/README.md.
 
 import { signIn, expect, test } from "../support/credentialed.js";

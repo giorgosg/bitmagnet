@@ -2,7 +2,8 @@
 //
 // Everything here was previously covered only up to the point of being refused, or against
 // a stubbed endpoint that proved the client's own behaviour and nothing about the server's.
-// The User is registered per run against a disposable bitmagnet — see e2e/README.md.
+// Each worker signs in as an administrator of its own, registered against a disposable
+// bitmagnet — see e2e/README.md.
 
 import { signIn, expect, test } from "../support/credentialed.js";
 
@@ -45,7 +46,7 @@ test.describe("a successful sign-in", () => {
   });
 
   test("makes the administration screens reachable", async ({ page, credentials }) => {
-    // The bootstrap Invitation makes its User an administrator, so a refusal here means
+    // The worker's User registered through an `admin` Invitation, so a refusal here means
     // the guard and the Permissions disagree rather than that this User is ordinary.
     await page.goto("/login");
     await signIn(page, credentials);
@@ -100,9 +101,9 @@ test.describe("signing out", () => {
   test("returns to Anonymous", async ({ page, credentials }) => {
     await signOut(page, credentials);
 
-    // The header is the visible half. bitmagnet expired the cookie, and since bitmagnet
-    // 77f3fd9e3 it also revoked every other session the User has; Magnes refetched
-    // self.identity. Nothing local was erased, because Magnes never held the credential.
+    // The header is the visible half. bitmagnet ended every session the User has, this
+    // one included, and Magnes refetched self.identity. Nothing local was erased, because
+    // Magnes never held the credential.
     await expect(page.getByRole("link", { name: "Sign in" })).toBeVisible();
     await expect(page.getByRole("button", { name: credentials.username })).toHaveCount(0);
   });
@@ -120,19 +121,18 @@ test.describe("signing out", () => {
     // A second browser context shares nothing with the first, the cookie included, so it
     // stands for another device. The other-tab test below says nothing about this: tabs in
     // one context share a cookie, and one expiring takes the other's with it.
-    const device = await browser.newContext({
-      baseURL: new URL(page.url()).origin,
-      ignoreHTTPSErrors: true,
-    });
+    const device = await browser.newContext();
     try {
       const elsewhere = await device.newPage();
       await elsewhere.goto("/login");
       await signIn(elsewhere, credentials);
 
       await signOut(page, credentials);
+      // Waited for so the reload below cannot reach bitmagnet before the sign-out has.
+      await expect(page.getByRole("link", { name: "Sign in" })).toBeVisible();
 
       // Nothing tells the other device. Its next request carries a cookie bitmagnet has
-      // revoked, since signing out ends every session for the User (bitmagnet 77f3fd9e3).
+      // revoked, since signing out ends every session the User has.
       await elsewhere.reload();
       await expect(elsewhere.getByRole("link", { name: "Sign in" })).toBeVisible();
       await expect(elsewhere.getByRole("button", { name: credentials.username })).toHaveCount(0);

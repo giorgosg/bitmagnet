@@ -1,13 +1,9 @@
 // The test-side half of the credentialed harness: where a spec gets a User from.
 //
-// Every worker has an administrator of its own. bitmagnet ends every session for a User when
-// that User signs out (bitmagnet 77f3fd9e3), so a User shared across parallel workers had
-// its sessions revoked by whichever test signed out, mid-way through other workers' tests.
-// Now a sign-out can only reach later tests in its own worker, which sign in again anyway.
-//
-// The User e2e/harness/serve.js registered through the bootstrap Invitation is the issuer:
-// it mints the Invitations the workers register through, over the API, and never signs in
-// through a browser, so no test can sign it out. Its credentials are read from the file
+// Each worker signs in as an administrator of its own, because signing out ends every
+// session a User has: see "Each worker has its own User" in e2e/README.md. The User
+// e2e/harness/serve.js registered through the bootstrap Invitation is the issuer, which only
+// mints the Invitations they register through. Its credentials are read from the file
 // serve.js wrote before it started the dev server Playwright waited on. Nothing is committed
 // and nothing is asked of a person; every User goes away with the database when the run ends.
 
@@ -18,8 +14,8 @@ import fs from "fs";
 export { expect };
 
 export const test = base.extend({
-  // The harness's administrator. Only for minting Invitations: a test that signs in as it
-  // could sign it out, and that would revoke the bearer token every other worker mints with.
+  // The harness's administrator. Only for minting Invitations: no test signs in as it, so
+  // nothing can end the sessions it mints with.
   issuer: [
     async ({}, use) => {
       const file = process.env.MAGNES_E2E_CREDENTIALS;
@@ -44,29 +40,29 @@ export const test = base.extend({
   // the issuer mints. What a test signs in as.
   credentials: [
     async ({ issuer, playwright }, use, workerInfo) => {
+      const user = newUser(`e2e-w${workerInfo.workerIndex}`);
       const request = await playwright.request.newContext();
+      let role;
       try {
         const code = await mintInvitation(request, issuer, "admin");
-        const user = newUser(`e2e-w${workerInfo.workerIndex}`);
         const registered = await call(request, issuer.graphqlEndpoint, {
           query:
             "mutation Register($input: RegisterInput!) " +
             "{ self { register(input: $input) { user { role } } } }",
           variables: { input: { invitationCode: code, ...user } },
         });
-
-        const role = registered.self.register.user.role;
-        if (role !== "admin") {
-          // Every credentialed spec assumes administration is reachable. Finding out here
-          // says which assumption broke; finding out in a test says only that a screen was
-          // refused.
-          throw new Error(`an admin Invitation produced a ${role}, not an admin`);
-        }
-
-        await use({ ...user, graphqlEndpoint: issuer.graphqlEndpoint });
+        role = registered.self.register.user.role;
       } finally {
         await request.dispose();
       }
+
+      // Checked here for the reason serve.js checks the issuer: a test would only report
+      // that a screen was refused, not that the User it signed in as was ordinary.
+      if (role !== "admin") {
+        throw new Error(`an admin Invitation produced a ${role}, not an admin`);
+      }
+
+      await use(user);
     },
     { scope: "worker" },
   ],
@@ -116,8 +112,8 @@ export async function registerUser(page, request, issuer, prefix) {
 // test that wants one is the registration, and driving the administration screen to get there
 // would make an unrelated screen's markup a reason for it to fail.
 //
-// Always as the issuer, never as a worker's User: a worker that signs its own User out would
-// otherwise revoke the token this is using. The run's bootstrap Invitation is already spent —
+// Always as the issuer, never as a worker's User, whose sessions any of that worker's tests
+// may end by signing out. The run's bootstrap Invitation is already spent —
 // e2e/harness/serve.js claimed it to create the issuer — so there is no other way to get one.
 export async function mintInvitation(request, issuer, role) {
   const login = await call(request, issuer.graphqlEndpoint, {
