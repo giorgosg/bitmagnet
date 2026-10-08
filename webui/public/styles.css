@@ -268,10 +268,20 @@ main {
   border-top: 1px solid var(--faint);
 }
 
+/* min-width: 0 lets the field give up width when the bar is tight. Without it the form
+   cannot shrink below its contents' natural widths, the input's ~266px included, and the
+   bar pushes past the edge of the window instead. */
 .search {
   flex: 1;
+  min-width: 0;
   display: flex;
   align-items: stretch;
+  gap: 0.75rem;
+}
+
+.search-adjust {
+  flex: none;
+  display: flex;
   gap: 0.75rem;
 }
 
@@ -345,6 +355,38 @@ main {
 .search .filters-toggle.open,
 .search .filters-toggle.active {
   color: var(--accent);
+}
+
+/* The bar on a narrow screen. On one line it needs about 30rem besides the field, so below
+   this width the field would be left with less than 16rem. Instead the wordmark, health and
+   Identity keep the first line and the search takes the next one whole.
+
+   That reorders the bar visually only: the search still comes before the health and Identity
+   in the document, and so in tab order. Keeping that order right on the desktop, where the
+   keyboard gets used, is why this is `order` rather than a rearranged view. */
+@media (max-width: 46rem) {
+  header .bar {
+    flex-wrap: wrap;
+    row-gap: 1rem;
+  }
+
+  .wordmark {
+    margin-right: auto;
+  }
+
+  .search {
+    order: 1;
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+
+  /* The basis decides what shares the field's line. 14rem and the hint fit on a phone, the
+     sort and filters toggle besides them do not, so those two drop under the field together
+     and come back up beside it once the screen is wide enough for all four. */
+  .search input {
+    flex-basis: 14rem;
+  }
 }
 
 /* Facets ------------------------------------------------------------------ */

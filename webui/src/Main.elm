@@ -2583,8 +2583,14 @@ searchBox model =
             ]
             []
         , syntaxHint
-        , sortMenu (currentSort model)
-        , filtersButton model
+
+        -- One box, so a narrow screen wraps the two under the field together rather than
+        -- stranding the filters toggle on a line of its own. See the narrow-screen rules
+        -- in public/styles.css.
+        , div [ class "search-adjust" ]
+            [ sortMenu (currentSort model)
+            , filtersButton model
+            ]
         ]
 
 
