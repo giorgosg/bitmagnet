@@ -58,9 +58,12 @@ What happens, in order, from `e2e/harness/serve.js`:
    2026-10-08 against `trunk` at `51a7c2895`.
 2. **A throwaway administrator is registered** through that Invitation, with a password
    generated for the run. The first registration through a bootstrap Invitation is always an
-   `admin`, which is what makes the administration screens reachable.
+   `admin`. This is the issuer: it only mints Invitations, and no test signs in as it.
 3. **The credentials are written** to `.dev/e2e-credentials.json`, which is gitignored, and
-   read from there by the `credentials` fixture in `e2e/support/credentialed.js`.
+   read from there by the `issuer` fixture in `e2e/support/credentialed.js`. Each worker
+   then registers an administrator of its own through an `admin` Invitation the issuer
+   mints; that is the `credentials` fixture tests sign in as. See "Each worker has its own
+   User" below.
 4. **`dev.js` starts** pointed at the fixture server. It is the same development proxy a
    person uses: it terminates TLS and forwards `/graphql` with the browser's `Host` and
    `Origin` intact, which is what lets bitmagnet issue its `Secure`, `SameSite=Strict`
@@ -103,19 +106,31 @@ along with why the login throttle is not the shipped one. Change it there.
 
 All of these are now a spec away rather than a harness away.
 
-### Every test shares one User, and sign-out now ends all of its sessions
+### Each worker has its own User, because sign-out ends all of a User's sessions
 
-Every test signs in as the one administrator the harness registered, and the project runs
-`fullyParallel`. Since bitmagnet `77f3fd9e3` (2026-09-14), `logoutBrowser` ends **every**
-session for the account. So a test that signs out ends the session of every other test
-running at that moment, along with any bearer token `mintInvitation` holds. Observed on
-2026-10-05 against a `trunk` export: three parallel runs each failed one or two tests, a
-different test each time, while two serial runs passed 17 of 17. Ticket 23 in
-`.scratch/identity-and-permissions/` gives each worker its own User.
+Since bitmagnet `77f3fd9e3` (2026-09-14), `logoutBrowser` and `updatePassword` end **every**
+session the User has, on every device. While every test signed in as one administrator,
+under `fullyParallel`, a test that signed out ended the sessions of every other test running
+at that moment, along with any bearer token `mintInvitation` held. Observed 2026-10-05
+against a `trunk` export: three parallel runs each failed one or two tests, a different test
+each time, while serial runs passed.
 
-Until that lands, a test that signs out, changes a password, or disables, deletes or
-demotes a User needs a User of its own, registered through `mintInvitation`. The shared
-administrator should only ever be the one acting, never the one acted on.
+So each worker registers an administrator of its own (the `credentials` fixture), through an
+`admin` Invitation minted by the harness's administrator (the `issuer` fixture). Tests in
+one worker run one at a time and each signs in afresh, so a sign-out can only reach that
+worker's later tests, which sign in again anyway. The issuer only ever mints over the API and
+never signs in through a browser, so nothing can revoke the token it mints with. Ticket 23
+in `.scratch/identity-and-permissions/`. Verified 2026-10-08: five consecutive runs against
+bitmagnet `trunk` at `30e8d486b`, at the default worker count, 28 of 28 each time.
+
+`identity.spec.js` pins the behaviour itself: the same User signed in from two browser
+contexts, which share no cookie and stand for two devices, and signing out in one ends the
+session in the other.
+
+A test that changes a password, disables, deletes or demotes a User, or needs an ordinary
+one, still registers a User of its own with `registerUser`. Changing the worker's
+administrator's password would leave its later tests signing in with the old one, and the
+rest would take away what they sign in as.
 
 ## Conventions
 
