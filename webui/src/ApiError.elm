@@ -245,7 +245,7 @@ toMessage failure =
             "That username and password do not match."
 
         UserDisabled ->
-            "That account is disabled."
+            "That User is disabled."
 
         LoginThrottled ->
             "Too many sign-in attempts. Wait a moment and try again."

@@ -97,9 +97,10 @@ along with why the login throttle is not the shipped one. Change it there.
 
 ## What is still not covered
 
-- **The administration workflows** beyond reaching them. The suite checks that the User and
-  Role screens render a heading, and never opens the Invitation screen. That is ticket 21
-  in `.scratch/identity-and-permissions/`.
+The administration screens are driven end to end since ticket 21: `users.spec.js`,
+`invitations.spec.js` and `roles.spec.js` act through each screen, check what bitmagnet did,
+and check the effect on the User acted on from a browser context of its own.
+
 - **Anonymous access off**, which the feature spec requires the one bundle to handle, and
   **the login throttle's wait state**. Both need a fixture server configured the other way,
   which is a second set of flags and a second project rather than anything new underneath.

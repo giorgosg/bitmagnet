@@ -376,7 +376,7 @@ creationOutcome mount creation =
 
         Created entry ->
             div [ class "created", attribute "role" "status" ]
-                [ p [] [ text ("Invitation created, for a " ++ entry.role ++ ". Send this link:") ]
+                [ p [] [ text ("Invitation created, for the Role " ++ entry.role ++ ". Send this link:") ]
                 , a [ href (registrationLink mount entry) ] [ text (registrationLink mount entry) ]
                 ]
 
