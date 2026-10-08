@@ -52,7 +52,10 @@ What happens, in order, from `e2e/harness/serve.js`:
    the `../bitmagnet` checkout, serving the real Gin, auth middleware and gqlgen stack over a
    clone of the `../btm-testdb` seed template, built there as of 2026-08-29. So the index has
    ~100k real torrents in it, not three rows. It announces its address and a freshly minted
-   bootstrap Invitation as one line of JSON on stdout.
+   bootstrap Invitation as one line of JSON on stdout. bitmagnet documents that line as the
+   only thing there, but since bitmagnet #82 its logger writes to stdout as well, ahead of
+   it. The harness passes every other line on to stderr, so they are still seen. Observed
+   2026-10-08 against `trunk` at `51a7c2895`.
 2. **A throwaway administrator is registered** through that Invitation, with a password
    generated for the run. The first registration through a bootstrap Invitation is always an
    `admin`, which is what makes the administration screens reachable.
@@ -77,7 +80,8 @@ the fixture server panic with a connection error buried in a stack trace.
 
 
 - `../bitmagnet` — a checkout, and a Go toolchain to build it. Overridable with
-  `MAGNES_E2E_BITMAGNET`.
+  `MAGNES_E2E_BITMAGNET`. The harness builds whatever branch is checked out there, not
+  necessarily `trunk`, so check that before reading much into a result.
 - `../btm-testdb` — up, with a seed template loaded (`bin/testdb status`). Overridable with
   `MAGNES_E2E_TESTDB`, or bypassed entirely by setting `TEST_POSTGRES_TEMPLATE_DSN`.
 
@@ -90,14 +94,28 @@ along with why the login throttle is not the shipped one. Change it there.
 
 ## What is still not covered
 
-- **API-key management**, which is not built yet.
-- **The administration workflows** beyond reaching them: the User, Invitation and Role
-  screens are driven only as far as arriving on each.
+- **The administration workflows** beyond reaching them. The suite checks that the User and
+  Role screens render a heading, and never opens the Invitation screen. That is ticket 21
+  in `.scratch/identity-and-permissions/`.
 - **Anonymous access off**, which the feature spec requires the one bundle to handle, and
   **the login throttle's wait state**. Both need a fixture server configured the other way,
   which is a second set of flags and a second project rather than anything new underneath.
 
 All of these are now a spec away rather than a harness away.
+
+### Every test shares one User, and sign-out now ends all of its sessions
+
+Every test signs in as the one administrator the harness registered, and the project runs
+`fullyParallel`. Since bitmagnet `77f3fd9e3` (2026-09-14), `logoutBrowser` ends **every**
+session for the account. So a test that signs out ends the session of every other test
+running at that moment, along with any bearer token `mintInvitation` holds. Observed on
+2026-10-05 against a `trunk` export: three parallel runs each failed one or two tests, a
+different test each time, while two serial runs passed 17 of 17. Ticket 23 in
+`.scratch/identity-and-permissions/` gives each worker its own User.
+
+Until that lands, a test that signs out, changes a password, or disables, deletes or
+demotes a User needs a User of its own, registered through `mintInvitation`. The shared
+administrator should only ever be the one acting, never the one acted on.
 
 ## Conventions
 

@@ -3,12 +3,16 @@
 Everything Magnes needs to know about bitmagnet's authentication surface. Transcribed
 from `../bitmagnet/graphql/schema/*.graphqls` and `../bitmagnet/internal/auth/` at `trunk`
 `77fdb9de7`, and re-checked on 2026-08-24 against a live instance running that exact
-commit. See [serving-and-testing.md](serving-and-testing.md) for what an instance needs to
-have before any of this is reachable.
+commit. Updated on 2026-10-05 and 2026-10-06, from `trunk` at `0b6feb025`, by reading the
+source only. The updates cover password change, session revocation, and Anonymous access
+becoming a deny-override over a stored `anon` Role. See
+[serving-and-testing.md](serving-and-testing.md) for what an instance needs to have before
+any of this is reachable.
 
-**[verified]** marks a claim checked by request against that instance. Everything behind a
-credential — registration, login, API keys, the whole `auth` namespace — is read off the
-source only, because the probes were anonymous.
+**[verified]** marks a claim checked by request against that instance. Registration,
+login, sign-out and API keys have since been exercised by the credentialed end-to-end suite
+(`e2e/README.md`) against a disposable bitmagnet. The rest of the `auth` namespace is
+read off the source.
 
 Vocabulary is fixed in `../bitmagnet/CONTEXT.md`. Identity, User, API key, Invitation,
 Object action, Permission, Role, Anonymous access. Do not write "guest", "session",
@@ -16,9 +20,17 @@ Object action, Permission, Role, Anonymous access. Do not write "guest", "sessio
 
 ## The shape of it
 
-`auth.anonymous_access` defaults to `true`, granting the `anon` role every registered
-object action except auth administration. Magnes supports both configurations of the
-fork:
+`auth.anonymous_access` defaults to `true`. Since bitmagnet #82 (`77d726345`,
+2026-10-05) it is a **deny-override over the `anon` Role**:
+
+- `true`: anonymous callers get exactly what the `anon` Role holds in the database.
+- `false`: they get nothing, whatever it holds.
+
+A new installation seeds `anon` once, at first start, with the registered read actions
+(verb `query`), except on `auth`, `pprof` and `metrics`. After that an administrator
+changes it with `putRole`, like any other Role. Before #82 the grant was computed in memory
+from the setting: every action except `auth` until `11764a54c`, then the read actions.
+Magnes supports both configurations of the fork:
 
 1. **Anonymous access on** — `self.identity` returns `user: null` with the anonymous
    permissions. Login exists but search does not require it.
@@ -104,9 +116,10 @@ mutation {
     register(input: RegisterInput!): RegisterResult!    # { user }
     login(username: String!, password: String!): LoginResult!   # non-browser: returns the token
     loginBrowser(username: String!, password: String!): Void   # sets the HttpOnly cookie
-    logoutBrowser: Void                                        # clears it
+    logoutBrowser: Void                                        # ends every session, expires it
     createAPIKey(input: CreateAPIKeyInput!): CreateAPIKeyResult!
     deleteAPIKey(id: Int!): Void
+    updatePassword(input: UpdatePasswordInput!): Void         # ends every session too
   }
   auth {
     setUserRole(userId: Int!, roleName: String!): User!
@@ -122,15 +135,25 @@ mutation {
 input RegisterInput    { invitationCode: String  username: String!  password: String!  email: String }
 input CreateAPIKeyInput{ name: String!  permissions: [AuthObjectActionInput!]!  expiry: Duration }
 input InviteInput      { email: String  role: String  expiry: Duration }
+input UpdatePasswordInput { currentPassword: String!  newPassword: String! }
 
 type LoginResult       { token: String!  user: User!  permissions: [Permission!]! }
 type CreateAPIKeyResult{ id: Int!  apiKey: String!  name: String!  expiresAt: DateTime }
 ```
 
-**There is no password-change mutation.** `user.Service.UpdatePassword` is implemented in
-`../bitmagnet/internal/auth/user/method_update_password.go` and called from nowhere — no
-resolver, no schema field. A user cannot change their own password through any API.
-Closing that needs a schema change in bitmagnet.
+**Ending a session ends all of them.** Since `77f3fd9e3` (2026-09-14), every JWT carries a
+per-User epoch, and authentication refuses a token whose epoch is behind the User's row.
+`logoutBrowser` and `updatePassword` both increment it, so either one ends **every** session
+for that User: every device, both cookie and bearer. bitmagnet keeps no per-session record,
+so "sign out of this device only" cannot be expressed (bitmagnet ADR 0003). A revoked token
+falls through to Anonymous like any other dead credential, and the response expires a
+revoked cookie. API keys are not affected.
+
+`updatePassword` checks `currentPassword` and holds `newPassword` to
+`auth.password_min_entropy`. It requires a User-authenticated Identity, so Anonymous and
+API-key Identities are refused. It does not re-issue a credential: the caller is Anonymous
+afterwards and has to sign in again. The Angular UI does not call it; Magnes's side is
+ticket 20.
 
 `putRole` is a **replace, not a merge**: the object actions given become the role's entire
 permission set. Read the role first, or an edit silently revokes everything unlisted. It
@@ -175,25 +198,34 @@ the boundary; the subject is always the caller's own role and carries nothing.
 
 ## Authorization
 
-An **object action** is `namespace/object/action`. Three namespaces exist, seventeen
+An **object action** is `namespace/object/action`. Three namespaces exist, fifteen
 actions in total:
 
-- `graphql` (13) — derived from the `@auth` directives in the schema, not listed anywhere
-  by hand: `self::query`, `self::mutate`, `auth::query`, `auth::mutate`, `version::query`,
-  `health::query`, `workers::query`, `queue::query`, `queue::mutate`, `torrent::query`,
-  `torrent::mutate`, `torrent::delete`, `torrentContent::query`.
+- `graphql` (11) — derived from the `@auth` directives in the schema, not listed anywhere
+  by hand: `auth::query`, `auth::mutate`, `version::query`, `health::query`,
+  `workers::query`, `queue::query`, `queue::mutate`, `torrent::query`, `torrent::mutate`,
+  `torrent::delete`, `torrentContent::query`. `Query.self` and `Mutation.self` carry no
+  `@auth` since `5d8ef2697` (2026-08-24). They are a recovery boundary outside the
+  object-action model, and the Identity kind is enforced by their child resolvers.
 - `http` (3) — `import::mutate`, `pprof::query`, `metrics::query`, for the non-GraphQL
   endpoints.
 - `torznab` (1) — `torznab::query`, registered by
   `../bitmagnet/internal/torznab/httpserver/auth.go`.
 
-Only the `graphql` ones are reachable from a browser, but **all seventeen appear in
+Only the `graphql` ones are reachable from a browser, but **all fifteen appear in
 `listObjectActions`**, and therefore in any role editor or API-key scoping form. Scoping a
 key to Torznab and nothing else is the case that makes the last one matter.
 
-**[verified]** on a live instance the anonymous identity holds exactly 15 of the 17 — every
-one except `graphql::auth::query` and `graphql::auth::mutate`, and `{auth{…}}` accordingly
-returns `"unauthorized"`. That is the deliberate exclusion below, confirmed in the field.
+**[verified 2026-08-24]** on a live instance, the anonymous identity held every action
+except `graphql::auth::query` and `graphql::auth::mutate`, and `{auth{…}}` returned
+`"unauthorized"`. **That is no longer the rule.** Since `11764a54c` and #82 (both
+2026-10-05), Anonymous holds whatever the `anon` Role stores. A new installation seeds that
+Role from an allow-list on the verb: only `query` actions, and none on `auth`, `pprof` or
+`metrics`. The reason is that CORS defaults to `*`, so any page the operator visited could
+issue an anonymous `torrent::delete` cross-origin. Read off the source and not yet observed
+live, a freshly seeded `anon` holds `version`, `health`, `workers`, `queue`, `torrent` and
+`torrentContent` `::query`, plus `torznab::torznab::query`. It holds no write action. An
+administrator can still grant one; that is now a choice, not a default.
 
 Enforcement is per **top-level field**. `Mutation.torrent` is gated by
 `torrent::mutate`, and every field beneath it inherits that, with `delete` additionally
@@ -202,18 +234,20 @@ gated by `torrent::delete`. There is no per-argument or per-row authorization.
 ### Roles
 
 `admin`, `editor`, `user`, `anon` are core and seeded by migration `00022_auth.sql`, with
-**no permissions rows**. What each actually gets:
+**no permissions rows**. Since #82, `anon` gets rows from a one-time startup seed, guarded
+by the `auth.anon_role_translated` key in `key_values`. What each actually gets:
 
 | Role     | Where its permissions come from                                                     |
 | -------- | ------------------------------------------------------------------------------------ |
 | `admin`  | An in-memory core permission of `**/**/**`. Everything, always.                       |
 | `user`   | The baseline below, plus `torrent::query` and `torrentContent::query`.                |
-| `anon`   | The baseline below; plus everything except `auth::*` while anonymous access is on.    |
+| `anon`   | The baseline below, plus its stored rows, honoured only while anonymous access is on.  |
 | `editor` | **Nothing.** It is a name with no grants until an admin uses `putRole`.               |
 
 The baseline granted to `anon` and `user` regardless of the anonymous-access setting is
-`self::query`, `self::mutate`, `health::query`, `version::query` — because logging in is
-itself a GraphQL mutation, and without it enabling authentication is a permanent lockout.
+`health::query` and `version::query`, which a client shell reads before anyone can log in.
+Logging in needs no grant at all, because `self` is outside the object-action model. That
+is what keeps enabling authentication from being a permanent lockout.
 
 Permissions match by **glob**, not equality: admin's `**` is a pattern. Server-side this
 is casbin with `globMatch` over three fields — the subject as `role::<name>`, the object as
@@ -322,6 +356,7 @@ for telling which of several fields failed, but it is no longer the only signal.
 | `INVITATION_EXPIRED` | Registration, code past its expiry |
 | `INVITATION_CLAIMED` | Registration, code already used |
 | `PASSWORD_INSUFFICIENT_ENTROPY` | Below `auth.password_min_entropy` (default 70) |
+| `PASSWORD_INCORRECT` | `updatePassword`, wrong `currentPassword`; not yet mapped in `ApiError.elm` |
 | `EMAIL_REQUIRED` | `auth.email_required` is on and no address was given |
 | `EMAIL_INVALID` | Registration or invitation, malformed address |
 | `UNAUTHORIZED` | Refusal; carries `namespace`, `object`, `action` |

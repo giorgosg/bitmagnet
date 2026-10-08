@@ -193,7 +193,9 @@ Sign-out is a request, not a client-side act. That changed with
 [ADR 0005](adr/0005-use-an-http-only-cookie-for-browser-authentication.md): the browser
 credential is an HttpOnly cookie Magnes cannot read or clear, so `self.logoutBrowser`
 clears it server-side. There is nothing to erase locally beyond telling the other tabs,
-and until the mutation answers the User is still signed in.
+and until the mutation answers the User is still signed in. Since bitmagnet `77f3fd9e3`
+(2026-09-14), the mutation also ends every other session that User has, on every device.
+See [auth-api.md](auth-api.md#mutations).
 
 ### 9. Errors, which are codes
 
@@ -212,16 +214,18 @@ failure; a half-applied permission change is not something to render optimistica
 
 ## What Magnes cannot fix from here
 
-Three gaps need a change in bitmagnet, and the fork is ours, so they are workable — just
-not in this repository:
+Three gaps needed a change in bitmagnet. The fork is ours, so they are workable, just not
+in this repository. One has since been closed:
 
-1. **No password-change mutation.** `user.Service.UpdatePassword` exists and is called
-   from nowhere: no resolver, no schema field. A user cannot change their own password
-   through any API. Needs a `SelfMutation.updatePassword` field.
-2. **`User` has no `enabled` field.** `setUserEnabled` exists, the column exists, and the
+1. **No password-change mutation** — **closed** by bitmagnet `77f3fd9e3` (2026-09-14),
+   which adds `self.updatePassword` and ends every session for the account when it
+   succeeds. The account screen's password section is ticket 20
+   (`.scratch/identity-and-permissions/issues/20-build-password-change.md`).
+2. **`User` has no `enabled` field.** Still true on trunk on 2026-10-05. `setUserEnabled` exists, the column exists, and the
    type does not expose it — so a users table cannot show who is disabled, or reflect the
    result of disabling someone.
 3. **`auth.email_verification` is inert.** Documented as such in bitmagnet's own
    `docs/auth.md`. Do not build UI that implies an address was verified.
 
-Until (1) lands, the account screen has no password section. Do not draw a disabled one.
+Until ticket 20 is built, the account screen has no password section. Do not draw a
+disabled one.

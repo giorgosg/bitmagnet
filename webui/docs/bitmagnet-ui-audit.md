@@ -53,8 +53,10 @@ navigation draws the dashboard link for everyone; an unauthorised user reaches
 `docs/auth.md` lists this under "Known gaps" and calls it presentation, not protection —
 which is true, and also means Magnes gets no help from the existing UI here.
 
-**No password change.** Not a UI gap: there is no mutation to call
-([auth-api.md](auth-api.md)).
+**No password change.** When this audit was written, that was not a UI gap: there was no
+mutation to call. Since bitmagnet `77f3fd9e3` (2026-09-14) there is one,
+`self.updatePassword`. The Angular UI has it only in its generated types and calls it
+nowhere ([auth-api.md](auth-api.md)).
 
 ## Points worth taking, other than the GraphQL
 

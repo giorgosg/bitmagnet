@@ -41,13 +41,16 @@ type alias Report =
     }
 
 
-{-| `checkedAt` is `Nothing` for a check that has never run. bitmagnet sends Go's zero
-time for it, `0001-01-01T00:00:00Z`, which is a placeholder rather than a moment.
+{-| `checkedAt` is the timestamp as bitmagnet sends it, which is a time the check ran only
+when its status says it ran: `up` or `down`. For a check that has not run yet, or one that
+is switched off, bitmagnet sends the time its checker started instead, or Go's zero time
+where the checker was never started, as in the test fixture
+(`internal/health/check.go`, `mapStateToCheckerResult`).
 -}
 type alias Check =
     { key : String
     , status : HealthStatus
-    , checkedAt : Maybe Time.Posix
+    , checkedAt : Time.Posix
     , error : Maybe String
     }
 
@@ -102,7 +105,7 @@ checkSelection =
     SelectionSet.map4 Check
         HealthCheck.key
         HealthCheck.status
-        (HealthCheck.timestamp |> SelectionSet.map moment)
+        HealthCheck.timestamp
         HealthCheck.error
 
 
@@ -111,18 +114,6 @@ workerSelection =
     SelectionSet.map2 Worker
         ApiWorker.key
         ApiWorker.started
-
-
-{-| No check has run before the Unix epoch, so anything at or before it is Go's zero time
-standing in for "never".
--}
-moment : Time.Posix -> Maybe Time.Posix
-moment at =
-    if Time.posixToMillis at <= 0 then
-        Nothing
-
-    else
-        Just at
 
 
 {-| The status page.
@@ -139,7 +130,7 @@ view zone state =
                         [ p [ class "notice error", attribute "role" "alert" ] [ text (ApiError.toMessage failure) ] ]
 
                     Reported report ->
-                        [ p [ class "health-summary" ] [ text (summary report.status) ]
+                        [ p [ class "health-summary" ] [ text (meaning report.status).summary ]
                         , checkTable zone report.checks
                         , workerSection report.workers
                         ]
@@ -147,24 +138,60 @@ view zone state =
         )
 
 
-{-| The overall status, as a sentence. bitmagnet's overall status is its worst check's,
-so `down` here means one check is down while bitmagnet itself is answering: degraded, as
-the Angular UI also calls it, not down.
+{-| What a status says wherever it is shown, in one place, so the page, its rows and the
+header cannot describe it three different ways.
+
+  - `summary` is the status as bitmagnet's overall one: the page's headline, and the
+    header's name for itself. bitmagnet's overall status is its worst check's, and it ranks
+    `inactive` with `up` (`aggregateStatus` in `internal/health/check.go`). So overall
+    `down` means a check is down while bitmagnet itself answers, which is degraded, as the
+    Angular UI also calls it. Overall `inactive` never occurs, though the enum allows it.
+  - `check` is the status of one check.
+  - `failing` marks a down check as a failure, and raises the header's alarm. `unknown` is
+    a check that has not run yet and `inactive` one that is switched off, such as TMDB
+    without an API key; neither is anything going wrong.
+  - `notRun` is what a check's "Last checked" says instead of a time, when its status
+    means it did not run. Its timestamp is then not a time it ran: see `Check`.
+
 -}
-summary : HealthStatus -> String
-summary status =
+type alias Meaning =
+    { summary : String
+    , check : String
+    , tone : String
+    , failing : Bool
+    , notRun : Maybe String
+    }
+
+
+meaning : HealthStatus -> Meaning
+meaning status =
     case status of
         Up ->
-            "bitmagnet is up."
+            { summary = "bitmagnet is up.", check = "Up", tone = "up", failing = False, notRun = Nothing }
 
         Down ->
-            "bitmagnet is degraded: a check is down."
+            { summary = "bitmagnet is degraded: a check is down."
+            , check = "Down"
+            , tone = "down"
+            , failing = True
+            , notRun = Nothing
+            }
 
         Unknown ->
-            "Not every check has run yet."
+            { summary = "Not every check has run yet."
+            , check = "Pending"
+            , tone = "pending"
+            , failing = False
+            , notRun = Just "Never"
+            }
 
         Inactive ->
-            "bitmagnet is inactive."
+            { summary = "bitmagnet is inactive."
+            , check = "Inactive"
+            , tone = "inactive"
+            , failing = False
+            , notRun = Just "—"
+            }
 
 
 checkTable : Time.Zone -> List Check -> Html msg
@@ -184,17 +211,19 @@ checkTable zone list =
         ]
 
 
-{-| Only `down` is a failure. `unknown` is a check that has not run yet and `inactive` one
-that is switched off, such as TMDB without an API key; neither is anything going wrong.
-The error is shown whenever bitmagnet sends one, which is mostly when the check is down,
-but also while a failing check is still inside its tolerance and reported as up.
+{-| The error is shown whenever bitmagnet sends one: mostly when the check is down, but
+also while a failing check is still inside its tolerance and reported as up.
 -}
 checkRow : Time.Zone -> Check -> Html msg
 checkRow zone check =
-    tr [ classList [ ( "health-failing", check.status == Down ) ] ]
+    let
+        status =
+            meaning check.status
+    in
+    tr [ classList [ ( "health-failing", status.failing ) ] ]
         [ th [ scope "row" ] [ text (checkName check.key) ]
         , td []
-            (text (statusWord check.status)
+            (text status.check
                 :: (case check.error of
                         Just error ->
                             [ span [ class "health-error" ] [ text error ] ]
@@ -203,30 +232,8 @@ checkRow zone check =
                             []
                    )
             )
-        , td []
-            [ text
-                (check.checkedAt
-                    |> Maybe.map (Format.dateTime zone)
-                    |> Maybe.withDefault "Never"
-                )
-            ]
+        , td [] [ text (Maybe.withDefault (Format.dateTime zone check.checkedAt) status.notRun) ]
         ]
-
-
-statusWord : HealthStatus -> String
-statusWord status =
-    case status of
-        Up ->
-            "Up"
-
-        Down ->
-            "Down"
-
-        Unknown ->
-            "Pending"
-
-        Inactive ->
-            "Inactive"
 
 
 {-| The names bitmagnet's own UI gives its checks. A check Magnes does not know keeps its
@@ -310,9 +317,10 @@ workerName key =
 
 {-| The header's glance at the same answer: a dot, linking to the status page.
 
-It speaks up only when something wants attention. While bitmagnet is up, and while a check
-is pending or switched off, it is a quiet dot; a down check or no answer at all adds a word
-and the accent. Its accessible name is always the full sentence, which also contains the
+It speaks up only when something wants attention. While bitmagnet is up it is a quiet dot,
+and a hollow one while a check is still pending; a down check or no answer at all adds a
+word and the accent. A switched-off check changes nothing here, since bitmagnet counts it
+as up overall. Its accessible name is always the full sentence, which also contains the
 word, so what is read out and what is seen agree.
 
 Nothing is drawn before the first answer, as the Identity menu draws nothing before the
@@ -362,23 +370,15 @@ reading state =
                 }
 
         Reported report ->
+            let
+                { summary, tone, failing } =
+                    meaning report.status
+            in
             Just
-                { sentence = summary report.status
-                , tone =
-                    case report.status of
-                        Up ->
-                            "up"
-
-                        Down ->
-                            "down"
-
-                        Unknown ->
-                            "pending"
-
-                        Inactive ->
-                            "inactive"
+                { sentence = summary
+                , tone = tone
                 , word =
-                    if report.status == Down then
+                    if failing then
                         Just "degraded"
 
                     else
