@@ -6,6 +6,7 @@
 // fixture server's bootstrap Invitation, and goes away with the database when the run ends.
 
 import { test as base, expect } from "@playwright/test";
+import crypto from "crypto";
 import fs from "fs";
 
 export { expect };
@@ -43,6 +44,30 @@ export async function signIn(page, credentials) {
   await page.getByRole("button", { name: "Sign in" }).click();
 
   await expect(page.getByRole("button", { name: credentials.username })).toBeVisible();
+}
+
+// Registers a User of the test's own, through the form the way a person does, and returns
+// its credentials. It lands on the login form, signed out, with the username filled in. For
+// any test that acts on a User rather than as one (see e2e/README.md), and for one that
+// needs the core `user` Role, which an Invitation minted here grants.
+export async function registerUser(page, request, credentials, prefix) {
+  const code = await mintInvitation(request, credentials);
+  const registered = {
+    // bitmagnet's usernames are ^[a-zA-Z0-9][a-zA-Z0-9._-]{1,18}[a-zA-Z0-9]$, so twenty
+    // characters is the ceiling and a timestamp does not fit under it.
+    username: `${prefix}-${crypto.randomBytes(3).toString("hex")}`,
+    // Generated, not written down. This one is a real User's password for as long as the
+    // run lasts, so the suite's claim to hold no password should stay literally true.
+    password: crypto.randomBytes(24).toString("base64url"),
+  };
+
+  await page.goto(`/register?code=${code}`);
+  await page.getByLabel("Username").fill(registered.username);
+  await page.getByLabel("Password", { exact: true }).fill(registered.password);
+  await page.getByRole("button", { name: "Register" }).click();
+  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+
+  return registered;
 }
 
 // Mints an Invitation for a test that needs to register someone. Done over the API with a

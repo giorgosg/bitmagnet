@@ -167,9 +167,15 @@ function buildFixtureServer() {
   return binary;
 }
 
-// Starts the server and resolves with the one line of JSON it prints. Its stderr is passed
-// through: gin and the logger write there deliberately so that stdout carries the
-// announcement alone.
+// Starts the server and resolves with the announcement it prints: one line of JSON naming
+// its address and GraphQL endpoint. Its stderr is passed through.
+//
+// bitmagnet documents that announcement as the only thing on stdout, and gin writes to
+// stderr to keep it so. Its logger does not: since bitmagnet #82 the anon-role translation
+// logs as the server starts, and so does each worker, all on stdout and ahead of the
+// announcement (observed 2026-10-08 against trunk at 51a7c2895; filed in bitmagnet's
+// .scratch as test-fixtures 03). So every other line on stdout is passed on to stderr, before
+// the announcement and after it, where a reason the server failed to come up is still seen.
 function startFixtureServer(binary, templateDSN) {
   const child = childProcess.spawn(
     binary,
@@ -194,6 +200,7 @@ function startFixtureServer(binary, templateDSN) {
 
   return new Promise((resolve, reject) => {
     let buffered = "";
+    let announced = false;
 
     // Its own deadline, because the one that would otherwise apply is Playwright's
     // web-server timeout — and reaching that means Playwright kills this process, which is
@@ -207,25 +214,18 @@ function startFixtureServer(binary, templateDSN) {
     child.stdout.on("data", (chunk) => {
       buffered += chunk;
 
-      // Startup diagnostics may precede the JSON announcement on stdout. Keep
-      // consuming complete lines until the handshake arrives, even in one chunk.
       let newline;
       while ((newline = buffered.indexOf("\n")) >= 0) {
-        const line = buffered.slice(0, newline).trim();
+        const line = buffered.slice(0, newline);
         buffered = buffered.slice(newline + 1);
-        if (!line.startsWith("{")) continue;
 
-        try {
-          const announcement = JSON.parse(line);
-          if (!announcement.graphqlEndpoint || !announcement.address) continue;
-          child.stdout.removeAllListeners("data");
+        const announcement = announced ? null : readAnnouncement(line);
+        if (announcement) {
+          announced = true;
           clearTimeout(deadline);
           resolve(announcement);
-          return;
-        } catch {
-          clearTimeout(deadline);
-          reject(new Error("the fixture server announcement was not valid JSON"));
-          return;
+        } else {
+          process.stderr.write(`${line}\n`);
         }
       }
     });
@@ -236,6 +236,17 @@ function startFixtureServer(binary, templateDSN) {
     });
     child.on("error", reject);
   });
+}
+
+// The announcement, or null for any other line: a log line, coloured or as JSON, names no
+// address and GraphQL endpoint.
+function readAnnouncement(line) {
+  try {
+    const parsed = JSON.parse(line);
+    return parsed && parsed.graphqlEndpoint && parsed.address ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 // Claims the printed bootstrap Invitation, which makes this User an administrator — the

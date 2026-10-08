@@ -19,9 +19,13 @@ only the pages the current Identity may reach. A credentialed end-to-end suite d
 signed-in half in a real browser, against a disposable bitmagnet it starts itself, so no
 real password is involved.
 
+`/status` shows bitmagnet's health checks, and its workers to an Identity that may see them.
+A dot in the header gives the same answer at a glance, polled every 30 seconds while the tab
+is showing, and links to it.
+
 Still to do: password change, which the fork has offered since 2026-09-14, browser
-coverage of the administration screens, and the status, statistics and queue pages that
-the fork's Angular UI has under `/dashboard`.
+coverage of the administration screens, and the statistics and queue pages that the fork's
+Angular UI has under `/dashboard`.
 
 See [docs/plan.md](docs/plan.md) for the completed first milestone and
 [docs/accounts-plan.md](docs/accounts-plan.md) for the current phase; the working notes

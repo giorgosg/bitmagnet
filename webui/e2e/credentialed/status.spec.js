@@ -5,9 +5,7 @@
 // the workers production registers, with only the ones this stack runs marked started.
 // See e2e/README.md, "What the fixture serves the operational pages".
 
-import crypto from "crypto";
-
-import { mintInvitation, signIn, expect, test } from "../support/credentialed.js";
+import { registerUser, signIn, expect, test } from "../support/credentialed.js";
 
 test("Anonymous reaches the status page from the header", async ({ page }) => {
   await page.goto("/search");
@@ -36,16 +34,7 @@ test("an administrator sees which workers are running", async ({ page, credentia
 test("an ordinary User sees health but not workers", async ({ page, request, credentials }) => {
   // A User of its own, per e2e/README.md: the shared administrator holds `**`, and the
   // point here is the core `user` Role, which holds health::query and not workers::query.
-  const code = await mintInvitation(request, credentials);
-  const ordinary = {
-    username: `e2e-status-${crypto.randomBytes(3).toString("hex")}`,
-    password: crypto.randomBytes(24).toString("base64url"),
-  };
-  await page.goto(`/register?code=${code}`);
-  await page.getByLabel("Username").fill(ordinary.username);
-  await page.getByLabel("Password", { exact: true }).fill(ordinary.password);
-  await page.getByRole("button", { name: "Register" }).click();
-  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+  const ordinary = await registerUser(page, request, credentials, "e2e-status");
   await signIn(page, ordinary);
 
   await page.goto("/status");
@@ -163,6 +152,38 @@ test("a refreshed Identity loses its previous worker report immediately", async 
     release();
   }
   await expect(page.getByText("Your Identity may not see bitmagnet's workers.")).toBeVisible();
+});
+
+test("says health is unavailable when bitmagnet cannot be reached at all", async ({ page }) => {
+  // Not even the Identity resolves here, which is the case that left the header blank: with
+  // no Identity there were no Permissions, so health was never asked for, when not being
+  // able to ask is exactly what the indicator should say.
+  await page.route("**/graphql", (route) => route.abort());
+  await page.goto("/search");
+
+  await expect(page.getByRole("link", { name: /^bitmagnet's health is unavailable/ })).toBeVisible();
+});
+
+test("a refused health request after a failed Identity is not retried in a loop", async ({ page }) => {
+  // The Identity failing and bitmagnet then refusing health as unauthorized is the shape
+  // that, answered the way any other refusal is, would refresh the Identity, fail again,
+  // ask for health again, and so on without end.
+  const refusal = {
+    data: null,
+    errors: [{ message: "unauthorized", extensions: { code: "UNAUTHORIZED" } }],
+  };
+  let identityAsked = 0;
+  await page.route("**/graphql", async (route) => {
+    if (route.request().postDataJSON().query.includes("identity")) identityAsked += 1;
+    await route.fulfill({ json: refusal });
+  });
+
+  await page.goto("/search");
+  await expect(page.getByRole("link", { name: /^bitmagnet's health is unavailable/ })).toBeVisible();
+
+  // A loop would have asked dozens of times by now.
+  await page.waitForTimeout(1000);
+  expect(identityAsked).toBe(1);
 });
 
 test("an unanswered health request becomes unavailable before the next poll", async ({ page }) => {

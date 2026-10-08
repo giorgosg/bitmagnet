@@ -42,8 +42,8 @@ anonymous =
 
 
 {-| Shaped as bitmagnet's resolver answers: checks sorted by key, `error` null unless the
-check failed, RFC 3339 with microseconds, and Go's zero time for a check that has never
-run.
+check failed, and RFC 3339 with microseconds. `tmdb` carries Go's zero time, as a check
+that has never run does where the checker was never started: the test fixture's.
 -}
 answer : String
 answer =
@@ -72,11 +72,19 @@ lastChecked =
     Time.millisToPosix 1791295387000
 
 
+{-| 2026-10-06T09:00:00Z: when the checker started. bitmagnet sends it as the timestamp of
+a check that has not run, or that is switched off, in place of a time the check ran.
+-}
+checkerStarted : Time.Posix
+checkerStarted =
+    Time.millisToPosix 1791277200000
+
+
 report : HealthStatus -> Health.Report
 report status =
     { status = status
     , checks =
-        [ { key = "postgres", status = Up, checkedAt = Just lastChecked, error = Nothing } ]
+        [ { key = "postgres", status = Up, checkedAt = lastChecked, error = Nothing } ]
     , workers = Nothing
     }
 
@@ -87,10 +95,10 @@ everyKind : Health.Report
 everyKind =
     { status = Down
     , checks =
-        [ { key = "dht", status = Down, checkedAt = Just lastChecked, error = Just "no peers responded" }
-        , { key = "postgres", status = Up, checkedAt = Just lastChecked, error = Nothing }
-        , { key = "search_index", status = Unknown, checkedAt = Nothing, error = Nothing }
-        , { key = "tmdb", status = Inactive, checkedAt = Nothing, error = Nothing }
+        [ { key = "dht", status = Down, checkedAt = lastChecked, error = Just "no peers responded" }
+        , { key = "postgres", status = Up, checkedAt = lastChecked, error = Nothing }
+        , { key = "search_index", status = Unknown, checkedAt = checkerStarted, error = Nothing }
+        , { key = "tmdb", status = Inactive, checkedAt = checkerStarted, error = Nothing }
         ]
     , workers = Nothing
     }
@@ -135,7 +143,7 @@ suite =
                     Graphql.Document.serializeQuery (Health.query ordinary)
                         |> String.contains "workers"
                         |> Expect.equal False
-            , test "reads bitmagnet's answer, and a check that has never run as never checked" <|
+            , test "reads bitmagnet's answer as it was sent" <|
                 \_ ->
                     Decode.decodeString (Graphql.Document.decoder (Health.query anonymous)) answer
                         |> Expect.equal
@@ -146,15 +154,21 @@ suite =
                                       , status = Down
 
                                       -- 2026-10-06T14:02:51.204Z
-                                      , checkedAt = Just (Time.millisToPosix 1791295371204)
+                                      , checkedAt = Time.millisToPosix 1791295371204
                                       , error = Just "no peers responded"
                                       }
                                     , { key = "postgres"
                                       , status = Up
-                                      , checkedAt = Just (Time.millisToPosix 1791295387862)
+                                      , checkedAt = Time.millisToPosix 1791295387862
                                       , error = Nothing
                                       }
-                                    , { key = "tmdb", status = Inactive, checkedAt = Nothing, error = Nothing }
+                                    , { key = "tmdb"
+                                      , status = Inactive
+
+                                      -- 0001-01-01T00:00:00Z
+                                      , checkedAt = Time.millisToPosix -62135596800000
+                                      , error = Nothing
+                                      }
                                     ]
                                 , workers =
                                     Just
@@ -216,21 +230,24 @@ suite =
                                 , Query.has [ Selector.text "Down" ]
                                 , Query.has [ Selector.text "no peers responded" ]
                                 ]
-                , test "a check that has not run reads as pending, and as never checked" <|
+                , test "a check that has not run reads as pending, and as never checked, not as checked when the checker started" <|
                     \_ ->
                         checkRows everyKind
                             |> Query.index 2
                             |> Expect.all
                                 [ Query.has [ Selector.text "Pending" ]
                                 , Query.has [ Selector.text "Never" ]
+                                , Query.hasNot [ Selector.text "2026-10-06 09:00" ]
                                 ]
-                , test "an inactive check reads as inactive" <|
+                , test "an inactive check reads as inactive, with no time, since it is not being run" <|
                     \_ ->
                         checkRows everyKind
                             |> Query.index 3
                             |> Expect.all
                                 [ Query.has [ Selector.text "TMDB" ]
                                 , Query.has [ Selector.text "Inactive" ]
+                                , Query.has [ Selector.text "—" ]
+                                , Query.hasNot [ Selector.text "2026-10-06 09:00" ]
                                 ]
                 , test "only a down check is marked as failing" <|
                     \_ ->

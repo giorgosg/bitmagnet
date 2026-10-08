@@ -52,7 +52,10 @@ What happens, in order, from `e2e/harness/serve.js`:
    the `../bitmagnet` checkout, serving the real Gin, auth middleware and gqlgen stack over a
    clone of the `../btm-testdb` seed template, built there as of 2026-08-29. So the index has
    ~100k real torrents in it, not three rows. It announces its address and a freshly minted
-   bootstrap Invitation as one line of JSON on stdout.
+   bootstrap Invitation as one line of JSON on stdout. bitmagnet documents that line as the
+   only thing there, but since bitmagnet #82 its logger writes to stdout as well, ahead of
+   it. The harness passes every other line on to stderr, so they are still seen. Observed
+   2026-10-08 against `trunk` at `51a7c2895`.
 2. **A throwaway administrator is registered** through that Invitation, with a password
    generated for the run. The first registration through a bootstrap Invitation is always an
    `admin`, which is what makes the administration screens reachable.

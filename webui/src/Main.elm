@@ -297,9 +297,11 @@ scoringDebounceMs =
 
 
 {-| How often the health report is asked for while the tab is visible. bitmagnet runs its
-checks on timers of its own — Postgres every 30 seconds, TMDB every five minutes — and
-answers `health` from their last results, so asking more often than its fastest check
-mostly reads the same answer again.
+checks on timers of its own — the DHT every 10 seconds, Postgres every 30, TMDB every five
+minutes (their `healthcheck` packages) — and answers `health` from their last results, so a
+poll only ever reads them and never runs one. At thirty seconds the header is as fresh as
+the Postgres check itself, and a DHT result can take up to 30 seconds to reach it rather
+than the 10 its own timer would allow.
 -}
 healthPollMs : Float
 healthPollMs =
@@ -1393,13 +1395,23 @@ update msg model =
                         ( { model | health = Health.Reported report }, Cmd.none )
 
                     Err error ->
-                        onRequestFailure error
-                            model
-                            (\_ current ->
-                                ( { current | health = Health.Unavailable (ApiError.fromError error) }
+                        case model.identity of
+                            -- Asked without a known Identity, so a refusal says nothing new
+                            -- about the credential. Refreshing the Identity on it, as any
+                            -- other refusal does, could fail again and ask again, forever.
+                            Identity.Failed _ ->
+                                ( { model | health = Health.Unavailable (ApiError.fromError error) }
                                 , Cmd.none
                                 )
-                            )
+
+                            _ ->
+                                onRequestFailure error
+                                    model
+                                    (\_ current ->
+                                        ( { current | health = Health.Unavailable (ApiError.fromError error) }
+                                        , Cmd.none
+                                        )
+                                    )
 
         GotIdentity identityEpoch result ->
             if identityEpoch /= model.identityEpoch then
@@ -1413,14 +1425,14 @@ update msg model =
                                 refreshFailure model.identityRefresh
                                     (ApiError.toMessage (ApiError.fromError error))
                         in
-                        ( { model
-                            | identity = Identity.Failed message
-                            , results = Failed message
-                            , health = Health.Unasked
-                            , healthEpoch = model.healthEpoch + 1
-                          }
-                        , Cmd.none
-                        )
+                        -- Health is still asked for. Not reaching bitmagnet is exactly what
+                        -- the header should say, and an answer is worth showing either way.
+                        refreshHealth
+                            { model
+                                | identity = Identity.Failed message
+                                , results = Failed message
+                                , health = Health.Unasked
+                            }
 
                     Ok identity ->
                         identityResolved identity model
@@ -1860,12 +1872,17 @@ onRequestFailure error model toFailed =
 
 
 {-| Ask for the health report again, under a fresh epoch so that only the newest answer
-lands. Which fields are asked for depends on the Identity, so nothing is asked until it is
-known, and an Identity that may not read health has nothing to show.
+lands. Which fields are asked for depends on the Identity, so nothing is asked while it is
+being resolved, and an Identity that may not read health has nothing to show.
+
+An Identity that could not be resolved is still asked for, without workers. The likeliest
+reason it failed is that bitmagnet cannot be reached, which is what the header should say
+rather than go blank.
+
 -}
 refreshHealth : Model -> ( Model, Cmd Msg )
 refreshHealth model =
-    if Identity.can (Identity.graphql "health" "query") model.identity then
+    if mayAskHealth model.identity then
         let
             healthEpoch =
                 model.healthEpoch + 1
@@ -1876,6 +1893,19 @@ refreshHealth model =
 
     else
         ( { model | health = Health.Unasked, healthEpoch = model.healthEpoch + 1 }, Cmd.none )
+
+
+mayAskHealth : Identity.Identity -> Bool
+mayAskHealth identity =
+    case identity of
+        Identity.Unknown ->
+            False
+
+        Identity.Failed _ ->
+            True
+
+        _ ->
+            Identity.can (Identity.graphql "health" "query") identity
 
 
 {-| Refetch the User listing under a fresh epoch, so only the answer to this very

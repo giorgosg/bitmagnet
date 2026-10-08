@@ -221,8 +221,9 @@ main {
 
 /* bitmagnet's health, beside the Identity, as one dot (src/Health.elm). Quiet while there
    is nothing to see: the dot is --dim when bitmagnet is up, and hollow while a check is
-   pending or switched off. Only a down check or no answer at all takes the accent and a
-   word. Centred for the same reason the Identity button is: a dot has no text baseline. */
+   still pending. A switched-off check leaves it up: bitmagnet counts `inactive` as up
+   overall. Only a down check or no answer at all takes the accent and a word. Centred for
+   the same reason the Identity button is: a dot has no text baseline. */
 .health-indicator {
   display: flex;
   flex: none;
