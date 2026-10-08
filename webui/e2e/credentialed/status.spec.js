@@ -31,10 +31,10 @@ test("an administrator sees which workers are running", async ({ page, credentia
   await expect(workers.getByRole("row", { name: "DHT crawler Not started" })).toBeVisible();
 });
 
-test("an ordinary User sees health but not workers", async ({ page, request, credentials }) => {
-  // A User of its own, per e2e/README.md: the shared administrator holds `**`, and the
-  // point here is the core `user` Role, which holds health::query and not workers::query.
-  const ordinary = await registerUser(page, request, credentials, "e2e-status");
+test("an ordinary User sees health but not workers", async ({ page, request, issuer }) => {
+  // A User of its own: the worker's administrator holds `**`, and the point here is the
+  // core `user` Role, which holds health::query and not workers::query.
+  const ordinary = await registerUser(page, request, issuer, "e2e-status");
   await signIn(page, ordinary);
 
   await page.goto("/status");

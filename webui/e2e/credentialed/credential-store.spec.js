@@ -22,13 +22,9 @@ test("a successful sign-in offers the credential", async ({ page, credentials })
   ]);
 });
 
-test("a successful registration offers the credential", async ({
-  page,
-  request,
-  credentials,
-}) => {
+test("a successful registration offers the credential", async ({ page, request, issuer }) => {
   await recordCredentialStores(page);
-  const registered = await registerUser(page, request, credentials, "e2e-new");
+  const registered = await registerUser(page, request, issuer, "e2e-new");
 
   // Registration does not sign anyone in: it lands on the login form with the username
   // already there, and the password on its way to the store as the form is emptied.

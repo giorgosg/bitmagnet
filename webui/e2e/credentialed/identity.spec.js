@@ -100,8 +100,9 @@ test.describe("signing out", () => {
   test("returns to Anonymous", async ({ page, credentials }) => {
     await signOut(page, credentials);
 
-    // The header is the visible half. bitmagnet expired the cookie and Magnes refetched
-    // self.identity; nothing local was erased, because Magnes never held the credential.
+    // The header is the visible half. bitmagnet expired the cookie, and since bitmagnet
+    // 77f3fd9e3 it also revoked every other session the User has; Magnes refetched
+    // self.identity. Nothing local was erased, because Magnes never held the credential.
     await expect(page.getByRole("link", { name: "Sign in" })).toBeVisible();
     await expect(page.getByRole("button", { name: credentials.username })).toHaveCount(0);
   });
@@ -113,6 +114,31 @@ test.describe("signing out", () => {
 
     await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
     expect(new URL(page.url()).pathname).toBe("/login");
+  });
+
+  test("ends the session on another device too", async ({ page, browser, credentials }) => {
+    // A second browser context shares nothing with the first, the cookie included, so it
+    // stands for another device. The other-tab test below says nothing about this: tabs in
+    // one context share a cookie, and one expiring takes the other's with it.
+    const device = await browser.newContext({
+      baseURL: new URL(page.url()).origin,
+      ignoreHTTPSErrors: true,
+    });
+    try {
+      const elsewhere = await device.newPage();
+      await elsewhere.goto("/login");
+      await signIn(elsewhere, credentials);
+
+      await signOut(page, credentials);
+
+      // Nothing tells the other device. Its next request carries a cookie bitmagnet has
+      // revoked, since signing out ends every session for the User (bitmagnet 77f3fd9e3).
+      await elsewhere.reload();
+      await expect(elsewhere.getByRole("link", { name: "Sign in" })).toBeVisible();
+      await expect(elsewhere.getByRole("button", { name: credentials.username })).toHaveCount(0);
+    } finally {
+      await device.close();
+    }
   });
 
   test("is noticed by another tab", async ({ page, context, credentials }) => {
