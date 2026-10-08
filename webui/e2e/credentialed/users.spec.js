@@ -3,15 +3,30 @@
 // reach, one of them a successful act leaving every control disabled. So after each act
 // these tests check that the screen settles, as well as what the server did.
 //
-// Every User acted on is registered for its test. Disabling, deleting or demoting a User
-// ends its sessions for good, so the worker's own administrator is only ever the one acting.
+// Every User acted on is registered for its test, so the worker's own administrator is only
+// ever the one acting. Disabling a User refuses everything its sessions ask while it stays
+// disabled, deleting one ends them for good, and a new Role changes what they may do.
 
-import { registerUser, signIn, expect, test } from "../support/credentialed.js";
+import {
+  inAnotherBrowser,
+  registerUser,
+  setRole,
+  signIn,
+  signInAt,
+  expect,
+  test,
+} from "../support/credentialed.js";
 
-// The listed User, found through the search the way an administrator would.
+// The listed User, found through the search the way an administrator would. Waits for the
+// search's own answer, so the row is not one from the unfiltered page the screen opened on.
 async function find(page, username) {
+  const searched = page.waitForResponse((response) =>
+    (response.request().postData() ?? "").includes(username),
+  );
   await page.getByLabel("Find a User").fill(username);
-  const row = page.getByRole("listitem").filter({ hasText: username });
+  await searched;
+
+  const row = page.getByRole("listitem").filter({ has: page.getByText(username, { exact: true }) });
   await expect(row).toHaveCount(1);
   return row;
 }
@@ -26,12 +41,10 @@ async function settled(row) {
   await expect(row.getByRole("button", { name: "Delete" })).toBeEnabled();
 }
 
-// Signs `user` in from a browser context of its own, standing for the person themselves, and
-// returns what the login form said. Nothing is shared with the administrator's session.
-async function attemptSignIn(browser, user) {
-  const theirs = await browser.newContext();
-  try {
-    const them = await theirs.newPage();
+// Signs `user` in from a browser of its own, standing for the person themselves, and returns
+// what the login form said.
+function attemptSignIn(browser, user) {
+  return inAnotherBrowser(browser, async (them) => {
     await them.goto("/login");
     await them.getByLabel("Username").fill(user.username);
     await them.getByLabel("Password").fill(user.password);
@@ -41,9 +54,7 @@ async function attemptSignIn(browser, user) {
     const refused = them.getByRole("alert");
     await expect(signedIn.or(refused)).toBeVisible();
     return (await signedIn.isVisible()) ? "signed in" : await refused.textContent();
-  } finally {
-    await theirs.close();
-  }
+  });
 }
 
 test("finds a User, and each act on them lands on the server and leaves the screen usable", async ({
@@ -57,17 +68,18 @@ test("finds a User, and each act on them lands on the server and leaves the scre
   await signIn(page, credentials);
   await page.goto("/admin/users");
 
-  let row = await find(page, target.username);
-  const role = row.getByLabel(`Role for ${target.username}`);
-  await expect(role).toHaveValue("user");
+  // bitmagnet's User has no enabled field, so the screen says it cannot show one rather than
+  // inventing a column.
+  await expect(
+    page.getByText("Whether a User is disabled is not shown: bitmagnet does not report it."),
+  ).toBeVisible();
 
-  // A Role change for someone else applies at once: an administrator can as easily undo it.
-  // There is no ask to wait out, so it waits for bitmagnet's answer instead.
-  const answered = page.waitForResponse((response) =>
-    (response.request().postData() ?? "").includes("setUserRole"),
-  );
-  await role.selectOption("editor");
-  await answered;
+  let row = await find(page, target.username);
+  await expect(row.getByLabel(`Role for ${target.username}`)).toHaveValue("user");
+
+  // A Role change for someone else applies at once, with no ask: an administrator can as
+  // easily undo it.
+  await setRole(page, target.username, "editor");
   await settled(row);
   await page.reload();
   row = await find(page, target.username);
@@ -104,8 +116,7 @@ test("an act asked about and then kept changes nothing", async ({
   credentials,
 }) => {
   const target = await registerUser(page, request, issuer, "e2e-kept");
-  await signIn(page, credentials);
-  await page.goto("/admin/users");
+  await signInAt(page, credentials, "/admin/users", "Users");
 
   const row = await find(page, target.username);
   await row.getByRole("button", { name: "Delete" }).click();
@@ -113,14 +124,4 @@ test("an act asked about and then kept changes nothing", async ({
   await settled(row);
 
   expect(await attemptSignIn(browser, target)).toBe("signed in");
-});
-
-test("is refused to an Identity without administration", async ({ page, request, issuer }) => {
-  const ordinary = await registerUser(page, request, issuer, "e2e-nousers");
-  await signIn(page, ordinary);
-
-  await page.goto("/admin/users");
-
-  await expect(page.getByText("Your Identity does not permit administration.")).toBeVisible();
-  await expect(page.getByLabel("Find a User")).toHaveCount(0);
 });

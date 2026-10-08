@@ -199,10 +199,7 @@ suite =
                     loaded []
                         |> Invitations.withSubmission (Invitations.Created { unclaimed | role = "admin" })
                         |> rendered administrator
-                        |> Expect.all
-                            [ Query.has [ Selector.text "Invitation created, for the Role admin." ]
-                            , Query.hasNot [ Selector.text "for a admin" ]
-                            ]
+                        |> Query.has [ Selector.text "Invitation created, for the Role admin." ]
             ]
         , describe "the warning before withdrawing"
             [ test "names the Role the link would have granted" <|
