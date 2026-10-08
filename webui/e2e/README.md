@@ -75,6 +75,14 @@ What happens, in order, from `e2e/harness/serve.js`:
    it, every run left a `bitmagnet_test_*` database behind. Verified 2026-09-03 over three
    consecutive runs: no database, no build directory, no credentials file.
 
+### What it drives
+
+Sign-in, sign-out across tabs and devices, API keys, the status page, and since ticket 21 the
+three administration screens. `users.spec.js`, `invitations.spec.js` and `roles.spec.js` act
+through each screen, check what bitmagnet did, and check the effect on the User acted on from
+a browser of its own; `administration-access.spec.js` checks what an Identity without
+`auth::query`, or with it but without `auth::mutate`, is offered.
+
 ### What it needs present
 
 If the database is not up, the harness says so and stops before building anything —
@@ -97,14 +105,17 @@ along with why the login throttle is not the shipped one. Change it there.
 
 ## What is still not covered
 
-- **The administration workflows** beyond reaching them. The suite checks that the User and
-  Role screens render a heading, and never opens the Invitation screen. That is ticket 21
-  in `.scratch/identity-and-permissions/`.
+- **A mount other than the origin root.** The harness serves Magnes at `/`, so nothing here
+  checks that a deployment under a base path, such as `/ui`, still parses its routes and
+  builds its links, an Invitation's registration link among them. `RouteTest` and
+  `InvitationsTest` check both under `/magnes`. A browser check needs `dev.js` to serve
+  beneath a prefix, with the matching `<base href>`.
 - **Anonymous access off**, which the feature spec requires the one bundle to handle, and
   **the login throttle's wait state**. Both need a fixture server configured the other way,
   which is a second set of flags and a second project rather than anything new underneath.
 
-All of these are now a spec away rather than a harness away.
+The last two are a spec away rather than a harness away; the first needs `dev.js` to serve
+beneath a prefix.
 
 ### Each worker has its own User, because sign-out ends all of a User's sessions
 

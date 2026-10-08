@@ -231,6 +231,10 @@ suite =
                     ]
                         |> List.filter (String.isEmpty << ApiError.toMessage)
                         |> Expect.equal []
+            , test "names a disabled User as a User, the word the rest of Magnes uses" <|
+                \_ ->
+                    ApiError.toMessage ApiError.UserDisabled
+                        |> Expect.equal "That User is disabled."
             , test "throttling reads as a wait, not a credential problem" <|
                 \_ ->
                     ApiError.toMessage ApiError.LoginThrottled

@@ -68,15 +68,18 @@ export const test = base.extend({
   ],
 });
 
-// A username and password nobody chose. bitmagnet's usernames are
+// A name no other test, in any worker, will make: for a User, a Role, anything listed on a
+// screen every worker shares. bitmagnet's usernames are
 // ^[a-zA-Z0-9][a-zA-Z0-9._-]{1,18}[a-zA-Z0-9]$, so twenty characters is the ceiling and a
-// timestamp does not fit under it. The password is a real User's for as long as the run
-// lasts, so the suite's claim to hold no password should stay literally true.
+// timestamp does not fit under it.
+export function uniqueName(prefix) {
+  return `${prefix}-${crypto.randomBytes(3).toString("hex")}`;
+}
+
+// A username and password nobody chose. The password is a real User's for as long as the
+// run lasts, so the suite's claim to hold no password should stay literally true.
 function newUser(prefix) {
-  return {
-    username: `${prefix}-${crypto.randomBytes(3).toString("hex")}`,
-    password: crypto.randomBytes(24).toString("base64url"),
-  };
+  return { username: uniqueName(prefix), password: crypto.randomBytes(24).toString("base64url") };
 }
 
 // Signs in through the form, the way a person does, and waits for the Identity that follows
@@ -90,21 +93,71 @@ export async function signIn(page, credentials) {
   await expect(page.getByRole("button", { name: credentials.username })).toBeVisible();
 }
 
+// Signs `user` in, then opens `path` and waits for `heading`: the screen has loaded.
+export async function signInAt(page, user, path, heading) {
+  await page.goto("/login");
+  await signIn(page, user);
+  await page.goto(path);
+  await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+}
+
+// Runs `act` with a page in a browser context of its own: another person, or another device.
+// It shares nothing with the test's own page, the cookie included.
+export async function inAnotherBrowser(browser, act) {
+  const context = await browser.newContext();
+  try {
+    return await act(await context.newPage());
+  } finally {
+    await context.close();
+  }
+}
+
 // Registers a User of the test's own, through the form the way a person does, and returns
 // its credentials. It lands on the login form, signed out, with the username filled in. For
 // a test that acts on a User rather than as one (see e2e/README.md), or that needs the core
 // `user` Role, which an Invitation with no Role grants.
 export async function registerUser(page, request, issuer, prefix) {
-  const code = await mintInvitation(request, issuer);
+  return registerThrough(page, await mintInvitation(request, issuer), prefix);
+}
+
+// Registers through the Invitation `code` names, as a person following its link would.
+export async function registerThrough(page, code, prefix) {
   const registered = newUser(prefix);
 
   await page.goto(`/register?code=${code}`);
+  await expect(page.getByLabel("Invitation code")).toHaveValue(code);
   await page.getByLabel("Username").fill(registered.username);
   await page.getByLabel("Password", { exact: true }).fill(registered.password);
   await page.getByRole("button", { name: "Register" }).click();
   await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
 
   return registered;
+}
+
+// Gives `username` the Role `role` on the User administration screen, which `page` must be
+// on, and waits for bitmagnet to have accepted it: a refusal fails here, not later as a
+// confusing absence somewhere else.
+export async function setRole(page, username, role) {
+  await page.getByLabel("Find a User").fill(username);
+  const select = page.getByLabel(`Role for ${username}`, { exact: true });
+  const answered = page.waitForResponse((response) =>
+    (response.request().postData() ?? "").includes("setUserRole"),
+  );
+  await select.selectOption(role);
+
+  const body = await (await answered).json();
+  expect(body.errors).toBeUndefined();
+}
+
+// Creates a Role holding `objectActions` on the Role administration screen, which `page`
+// must be on, and waits for bitmagnet to have saved it.
+export async function createRole(page, name, objectActions) {
+  await page.getByLabel("Name").fill(name);
+  for (const objectAction of objectActions) {
+    await page.getByRole("checkbox", { name: objectAction, exact: true }).check();
+  }
+  await page.getByRole("button", { name: "Create Role" }).click();
+  await expect(page.getByRole("status")).toHaveText(`Saved the Role ${name}.`);
 }
 
 // Mints an Invitation, granting `role` or, without one, bitmagnet's default. Done over the API

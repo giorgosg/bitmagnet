@@ -194,6 +194,12 @@ suite =
                             [ Selector.attribute (Html.Attributes.attribute "role" "status")
                             , Selector.attribute (Html.Attributes.href "/register?code=abc123")
                             ]
+            , test "names the Role it grants without an article, which would read \"a admin\"" <|
+                \_ ->
+                    loaded []
+                        |> Invitations.withSubmission (Invitations.Created { unclaimed | role = "admin" })
+                        |> rendered administrator
+                        |> Query.has [ Selector.text "Invitation created, for the Role admin." ]
             ]
         , describe "the warning before withdrawing"
             [ test "names the Role the link would have granted" <|

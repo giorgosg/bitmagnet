@@ -5,7 +5,7 @@
 // Each worker signs in as an administrator of its own, registered against a disposable
 // bitmagnet — see e2e/README.md.
 
-import { signIn, expect, test } from "../support/credentialed.js";
+import { inAnotherBrowser, signIn, expect, test } from "../support/credentialed.js";
 
 test.describe("a successful sign-in", () => {
   test("returns to the route the guard interrupted", async ({ page, credentials }) => {
@@ -118,12 +118,10 @@ test.describe("signing out", () => {
   });
 
   test("ends the session on another device too", async ({ page, browser, credentials }) => {
-    // A second browser context shares nothing with the first, the cookie included, so it
-    // stands for another device. The other-tab test below says nothing about this: tabs in
-    // one context share a cookie, and one expiring takes the other's with it.
-    const device = await browser.newContext();
-    try {
-      const elsewhere = await device.newPage();
+    // Another browser shares nothing with this one, the cookie included, so it stands for
+    // another device. The other-tab test below says nothing about this: tabs in one browser
+    // share a cookie, and one expiring takes the other's with it.
+    await inAnotherBrowser(browser, async (elsewhere) => {
       await elsewhere.goto("/login");
       await signIn(elsewhere, credentials);
 
@@ -136,9 +134,7 @@ test.describe("signing out", () => {
       await elsewhere.reload();
       await expect(elsewhere.getByRole("link", { name: "Sign in" })).toBeVisible();
       await expect(elsewhere.getByRole("button", { name: credentials.username })).toHaveCount(0);
-    } finally {
-      await device.close();
-    }
+    });
   });
 
   test("is noticed by another tab", async ({ page, context, credentials }) => {
