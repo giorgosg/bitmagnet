@@ -12,6 +12,9 @@ import (
 type Params struct {
 	fx.In
 	Config Config
+	// Output is where the console log goes; stdout when nothing provides it.
+	// A binary whose stdout is a machine-read contract supplies stderr here.
+	Output zapcore.WriteSyncer `name:"log_output" optional:"true"`
 }
 
 type Result struct {
@@ -31,7 +34,10 @@ func New(params Params) Result {
 		encoder = zapcore.NewConsoleEncoder(consoleEncoderConfig)
 	}
 
-	writeSyncer := zapcore.AddSync(os.Stdout)
+	writeSyncer := params.Output
+	if writeSyncer == nil {
+		writeSyncer = zapcore.AddSync(os.Stdout)
+	}
 
 	opts := []zap.Option{
 		zap.AddStacktrace(zapcore.ErrorLevel),

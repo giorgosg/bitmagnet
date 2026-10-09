@@ -98,6 +98,7 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#83](https://github.com/giorgosg/bitmagnet/pull/83) | Serve the operational pages from the fixture server                         | local — magnes dashboard ticket 01                                   | Six surfaces answered `internal system error`; observed red    |
 | [#84](https://github.com/giorgosg/bitmagnet/pull/84) | Delete the `Param` machinery nothing reads                                  | local — review finding 14                                            | Deletion: 2,533 lines out; gates green, no behaviour to test   |
 | [#85](https://github.com/giorgosg/bitmagnet/pull/85) | Store API key secrets as SHA-256, not bcrypt                                | local — issue 0010b, review finding 03b                              | 57.6 ms → 118 ns per request; legacy rehash seen red           |
+| [#86](https://github.com/giorgosg/bitmagnet/pull/86) | Refuse `standard_conforming_strings = off`; dev binary logs to stderr       | local — issue 0002 option 1, test-fixtures ticket 03                 | Pool test, payload test with the setting off, stdout test      |
 
 ## In flight
 
@@ -106,12 +107,24 @@ Nothing currently in flight.
 ## The static review findings
 
 A full static review of the Go tree (2026-08-22) produced eleven findings, kept as
-untracked notes under `docs/issues/`. PRs #38-#45 above close six of them, plus four of
-the small defects collected in 0008. What remains open there, hardest last:
-`files_count`/`size` consistency for rows already written, the breaking half of the CORS
-decision (same-origin default), the crawler and importer shutdown
-paths, the queue job that runs inside its claiming transaction, the search SQL
-re-execution, and the two serialisation points in the auth path.
+untracked notes under `docs/issues/`, and two more were added on 2026-10-05. PRs #38-#45
+closed the first six and four of the small defects collected in 0008; #75, #76, #79, #80,
+#81, #82 and #85 closed the shutdown paths, the queue job that ran inside its claiming
+transaction, both serialisation points in the auth path, and the anonymous-access
+findings. `files_count`/`size` was settled without a backfill: `size` keeps the total
+length, padding included.
+
+Still open, as of 2026-10-09:
+
+- **The search SQL re-execution.** Search renders its query to a string and executes it
+  again, which is injectable when `standard_conforming_strings` is off. The pool now
+  refuses such a server; removing the dependency means passing parameters to
+  `budgeted_count`, which is also where the facet fan-out fix belongs.
+- **The same-origin CORS default**, decided and deferred to the release that removes the
+  Angular UI, whose dev server is the one caller relying on `*`.
+- **`break` inside `select` in the crawler's peer and scrape loops**, which has no
+  deterministic red test. It is to be fixed under the redesign of the next candidate below,
+  which carries the same shape.
 
 One finding was measured and rejected rather than fixed: the crawler's periodic queue
 depth `COUNT` costs 0.065 ms in steady state on the reference instance, and a

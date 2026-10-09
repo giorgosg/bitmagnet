@@ -130,8 +130,9 @@ TEST_POSTGRES_TEMPLATE_DSN=$(cd ../btm-testdb && bin/testdb url) \
 It writes **one line of JSON to stdout** and nothing else — address, GraphQL endpoint,
 bootstrap invitation code, database name, and the three settings a harness branches on
 (`anonymousAccess`, `invitationRequired`, `seededDashboardData`) — so the harness parses it
-rather than scraping logs. gin is put in release mode and pointed at
-stderr to keep that line alone on stdout. The default address is `127.0.0.1:0`, so
+rather than scraping logs. Everything else goes to stderr to keep that line alone on
+stdout: gin is put in release mode and pointed there, and the dev binary's logger writes
+there too. The default address is `127.0.0.1:0`, so
 parallel runs do not collide and the assigned port comes back in the announcement.
 
 The invitation is minted fresh for each run, which is the point: the harness registers its
