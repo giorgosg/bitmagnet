@@ -1,6 +1,8 @@
 package devfx
 
 import (
+	"os"
+
 	"github.com/bitmagnet-io/bitmagnet/internal/app/cli"
 	"github.com/bitmagnet-io/bitmagnet/internal/app/cli/args"
 	"github.com/bitmagnet-io/bitmagnet/internal/config/configfx"
@@ -13,6 +15,7 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/logging/loggingfx"
 	"github.com/bitmagnet-io/bitmagnet/internal/validation/validationfx"
 	"go.uber.org/fx"
+	"go.uber.org/zap/zapcore"
 )
 
 func New() fx.Option {
@@ -21,6 +24,13 @@ func New() fx.Option {
 		configfx.NewConfigModule[postgres.Config]("postgres", postgres.NewDefaultConfig()),
 		configfx.New(),
 		loggingfx.New(),
+		// Logs go to stderr. `dev fixture serve` prints one line of JSON on
+		// stdout for a harness to parse, and a log line in front of it is read
+		// as the announcement.
+		fx.Provide(fx.Annotate(
+			func() zapcore.WriteSyncer { return zapcore.AddSync(os.Stderr) },
+			fx.ResultTags(`name:"log_output"`),
+		)),
 		validationfx.New(),
 		fx.Provide(args.New),
 		fx.Provide(cli.New),
