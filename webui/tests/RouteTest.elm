@@ -2,6 +2,8 @@ module RouteTest exposing (suite)
 
 import Expect
 import Identity
+import Magnes.Api.Enum.QueueJobStatus exposing (QueueJobStatus(..))
+import Magnes.Api.Enum.QueueJobsOrderByField exposing (QueueJobsOrderByField(..))
 import Route
 import Test exposing (Test, describe, test)
 import Time
@@ -50,6 +52,41 @@ suite =
                             ( Route.Refused "Your Identity does not permit reading bitmagnet's health."
                             , Route.Refused "Your Identity does not permit reading bitmagnet's health."
                             )
+            ]
+        , describe "queue jobs"
+            [ test "an unfiltered first page is a bare path" <|
+                \_ ->
+                    Route.toHref mount (Route.QueueJobs Route.emptyJobs)
+                        |> Expect.equal "/magnes/queue/jobs"
+            , test "carries its filters, ordering and page in the query string" <|
+                \_ ->
+                    Route.toHref mount (Route.QueueJobs filteredJobs)
+                        |> Expect.equal "/magnes/queue/jobs?queue=process_torrent&status=failed&status=retry&order=priority&direction=desc&page=3"
+            , test "leaves out a direction that is the ordering's own" <|
+                \_ ->
+                    Route.toHref mount (Route.QueueJobs { emptyJobs | order = { field = Ran_at, descending = True } })
+                        |> Expect.equal "/magnes/queue/jobs?order=ran_at"
+            , test "drops what it does not recognise rather than failing the page" <|
+                \_ ->
+                    "https://example.test/magnes/queue/jobs?status=bogus&status=failed&queue=&order=size&direction=sideways&page=0"
+                        |> Url.fromString
+                        |> Maybe.map (Route.fromUrl mount)
+                        |> Expect.equal (Just (Route.QueueJobs { emptyJobs | statuses = [ Failed ] }))
+            , test "is refused, not redirected, to an Identity without queue::query" <|
+                \_ ->
+                    ( Route.guard mount (Identity.Anonymous [ Identity.graphql "health" "query" ]) (Route.QueueJobs emptyJobs)
+                    , Route.guard mount userIdentity (Route.QueueJobs emptyJobs)
+                    )
+                        |> Expect.equal
+                            ( Route.Refused "Your Identity does not permit reading bitmagnet's queue."
+                            , Route.Refused "Your Identity does not permit reading bitmagnet's queue."
+                            )
+            , test "is open to an Anonymous Identity or a User holding queue::query" <|
+                \_ ->
+                    ( Route.guard mount (Identity.Anonymous [ Identity.graphql "queue" "query" ]) (Route.QueueJobs emptyJobs)
+                    , Route.guard mount adminIdentity (Route.QueueJobs filteredJobs)
+                    )
+                        |> Expect.equal ( Route.Allowed, Route.Allowed )
             ]
         , test "Unknown waits and bootstrap failure remains a refusal" <|
             \_ ->
@@ -129,7 +166,24 @@ routes =
     , Route.AdminRoles
     , Route.AdminInvitations
     , Route.Status
+    , Route.QueueJobs Route.emptyJobs
+    , Route.QueueJobs filteredJobs
+    , Route.QueueJobs { emptyJobs | order = { field = Created_at, descending = False } }
     ]
+
+
+emptyJobs : Route.JobsParams
+emptyJobs =
+    Route.emptyJobs
+
+
+filteredJobs : Route.JobsParams
+filteredJobs =
+    { queues = [ "process_torrent" ]
+    , statuses = [ Failed, Retry ]
+    , order = { field = Priority, descending = True }
+    , page = 3
+    }
 
 
 roundTripTest : Route.Route -> Test

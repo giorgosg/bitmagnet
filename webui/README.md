@@ -21,11 +21,13 @@ real password is involved.
 
 `/status` shows bitmagnet's health checks, and its workers to an Identity that may see them.
 A dot in the header gives the same answer at a glance, polled every 30 seconds while the tab
-is showing, and links to it.
+is showing, and links to it. Under the report it lists the operational pages the Identity
+may open. The first is `/queue/jobs`, bitmagnet's queue a page at a time: filtered by queue
+and status with each facet's counts, ordered, with every choice in the URL, and each job
+opening to show its payload and error in full.
 
-Still to do: password change, which the fork has offered since 2026-09-14, browser
-coverage of the administration screens, and the statistics and queue pages that the fork's
-Angular UI has under `/dashboard`.
+Still to do: password change, which the fork has offered since 2026-09-14, and the
+statistics pages and queue administration that the fork's Angular UI has under `/dashboard`.
 
 See [docs/plan.md](docs/plan.md) for the completed first milestone and
 [docs/accounts-plan.md](docs/accounts-plan.md) for the current phase; the working notes

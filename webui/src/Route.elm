@@ -1,4 +1,4 @@
-module Route exposing (Access(..), BasePath, LoginParams, RegisterParams, Route(..), SearchParams, basePath, emptySearch, fromUrl, guard, returnDestination, toHref)
+module Route exposing (Access(..), BasePath, JobsParams, LoginParams, RegisterParams, Route(..), SearchParams, basePath, emptyJobs, emptySearch, fromUrl, guard, returnDestination, toHref)
 
 {-| Routes are real paths, not fragments — see the README.
 
@@ -9,6 +9,8 @@ variant breaks it at compile time rather than producing a dead link.
 
 import Facet exposing (Filters)
 import Identity
+import JobOrder exposing (JobOrder)
+import Magnes.Api.Enum.QueueJobStatus as QueueJobStatus exposing (QueueJobStatus)
 import Sort exposing (Sort)
 import Url exposing (Url)
 import Url.Builder as Builder
@@ -27,6 +29,7 @@ type Route
     | AdminRoles
     | AdminInvitations
     | Status
+    | QueueJobs JobsParams
     | NotFound
 
 
@@ -82,6 +85,22 @@ emptySearch =
     { q = Nothing, sort = Sort.default, filters = Facet.empty }
 
 
+{-| Everything the URL says about the queue's jobs, so a filtered page of them is a link
+(ADR 0002). `page` counts from 1, as bitmagnet's does.
+-}
+type alias JobsParams =
+    { queues : List String
+    , statuses : List QueueJobStatus
+    , order : JobOrder
+    , page : Int
+    }
+
+
+emptyJobs : JobsParams
+emptyJobs =
+    { queues = [], statuses = [], order = JobOrder.default, page = 1 }
+
+
 parser : Parser (Route -> a) a
 parser =
     oneOf
@@ -102,6 +121,15 @@ parser =
         , Parser.map AdminRoles (s "admin" </> s "roles")
         , Parser.map AdminInvitations (s "admin" </> s "invitations")
         , Parser.map Status (s "status")
+        , Parser.map jobsWith
+            (s "queue"
+                </> s "jobs"
+                <?> Query.custom "queue" identity
+                <?> Query.custom "status" identity
+                <?> Query.string "order"
+                <?> Query.string "direction"
+                <?> Query.int "page"
+            )
         ]
 
 
@@ -130,6 +158,19 @@ searchWith q sort contentValues fileValues =
         { q = q |> Maybe.andThen nonBlank
         , sort = sort |> Maybe.map Sort.fromParam |> Maybe.withDefault Sort.default
         , filters = Facet.fromQuery contentValues fileValues
+        }
+
+
+{-| As a search's filters do, unrecognised values are dropped rather than failing the page,
+so a link written against a later schema still opens a list.
+-}
+jobsWith : List String -> List String -> Maybe String -> Maybe String -> Maybe Int -> Route
+jobsWith queues statuses order direction page =
+    QueueJobs
+        { queues = List.filterMap nonBlank queues
+        , statuses = List.filterMap QueueJobStatus.fromString statuses
+        , order = JobOrder.fromParams order direction
+        , page = page |> Maybe.withDefault 1 |> max 1
         }
 
 
@@ -228,6 +269,19 @@ toHref (BasePath prefix) route =
 
                 Status ->
                     Builder.absolute [ "status" ] []
+
+                QueueJobs params ->
+                    Builder.absolute [ "queue", "jobs" ]
+                        (List.map (Builder.string "queue") params.queues
+                            ++ List.map (Builder.string "status" << QueueJobStatus.toString) params.statuses
+                            ++ JobOrder.toParams params.order
+                            ++ (if params.page == 1 then
+                                    []
+
+                                else
+                                    [ Builder.int "page" params.page ]
+                               )
+                        )
 
                 NotFound ->
                     Builder.absolute [] []
@@ -336,6 +390,9 @@ anonymousAccess mount identity route =
         Status ->
             requireHealth identity
 
+        QueueJobs _ ->
+            requireQueue identity
+
         UserOverview ->
             loginRedirect mount route
 
@@ -381,6 +438,9 @@ userAccess identity route =
         Status ->
             requireHealth identity
 
+        QueueJobs _ ->
+            requireQueue identity
+
         _ ->
             Allowed
 
@@ -397,6 +457,19 @@ requireHealth identity =
 
     else
         Refused "Your Identity does not permit reading bitmagnet's health."
+
+
+{-| Refused rather than sent to sign in, as `requireHealth` is. Signing in can grant it, but
+only to a User whose Role holds it, and the core `user` Role does not; a sign-in offered
+here would mostly lead to the same refusal.
+-}
+requireQueue : Identity.Identity -> Access
+requireQueue identity =
+    if Identity.can (Identity.graphql "queue" "query") identity then
+        Allowed
+
+    else
+        Refused "Your Identity does not permit reading bitmagnet's queue."
 
 
 requireAdministration : Identity.Identity -> Access

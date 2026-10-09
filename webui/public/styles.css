@@ -1530,3 +1530,168 @@ main {
     width: 0;
   }
 }
+
+/* The queue's jobs (src/QueueJobs.elm) ------------------------------------- */
+
+/* The search's chips, on a page whose buttons are otherwise drawn as `.page button`. */
+.page button.chip {
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  align-self: auto;
+}
+
+.page button.chip.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.queue-jobs .facets {
+  padding-top: 0;
+  margin-bottom: 1.25rem;
+}
+
+.job-order {
+  padding: 0.15rem 0.25rem;
+  border: 1px solid var(--faint);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.8125rem;
+}
+
+.job-order option {
+  background: var(--bg);
+  color: var(--fg);
+}
+
+/* While the next page is on its way the old one stays, quieter, rather than vanishing. */
+.jobs-refreshing {
+  opacity: 0.55;
+}
+
+/* Seven columns do not fit a phone. The table scrolls sideways inside its own box rather
+   than widening the page. Positioned, so the visually hidden column heading, which is
+   absolutely positioned, is held by the box rather than by the page. */
+.jobs-scroll {
+  position: relative;
+  overflow-x: auto;
+}
+
+.jobs-table {
+  width: 100%;
+  min-width: 40rem;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.jobs-table th,
+.jobs-table td {
+  padding: 0.35rem 1.25rem 0.35rem 0;
+  text-align: left;
+  vertical-align: baseline;
+}
+
+.jobs-table thead th {
+  color: var(--dim);
+  font-size: 0.8125rem;
+  font-weight: normal;
+}
+
+.jobs-table .job-time,
+.jobs-table .job-number {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.job-failing td:first-child {
+  color: var(--accent);
+}
+
+/* A glance at the error in the row; the whole of it is in the details. */
+.job-error-line {
+  display: block;
+  max-width: 16rem;
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 0.8125rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-details > td {
+  padding: 0.25rem 0 1rem;
+}
+
+/* On a phone the row is wider than the screen. Its details stay in view and wrap at the
+   screen's width, wherever the table has been scrolled to, so a payload is read by scrolling
+   down rather than sideways. 3rem is the page's side padding. */
+.job-details > td > * {
+  position: sticky;
+  left: 0;
+  max-width: min(100%, calc(100vw - 3rem));
+  box-sizing: border-box;
+}
+
+.job-details h2 {
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.job-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.5rem;
+  margin: 0;
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+.job-facts dt {
+  display: inline;
+  margin-right: 0.4rem;
+}
+
+.job-facts dd {
+  display: inline;
+  margin: 0;
+  color: var(--fg);
+}
+
+.job-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Read in full, so they wrap rather than scroll; a long token with nothing to break at
+   still breaks. */
+.job-payload,
+.job-error {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  background: var(--faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8125rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.paging-link {
+  color: var(--accent);
+  font-size: 0.875rem;
+}
+
+.paging-link[aria-disabled="true"] {
+  color: var(--faint);
+}
+
+.operations ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.operations a {
+  color: var(--accent);
+}

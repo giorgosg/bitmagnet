@@ -83,6 +83,11 @@ through each screen, check what bitmagnet did, and check the effect on the User 
 a browser of its own; `administration-access.spec.js` checks what an Identity without
 `auth::query`, or with it but without `auth::mutate`, is offered.
 
+`queue-jobs.spec.js` (ticket 04 in `.scratch/dashboard`) reaches the queue's jobs from the
+status page, filters them by status and checks the facet counts against what is listed,
+opens a job, follows ordering and paging through the URL, and checks that an ordinary User
+is refused the page and not offered it.
+
 ### What it needs present
 
 If the database is not up, the harness says so and stops before building anything —
