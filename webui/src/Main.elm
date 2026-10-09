@@ -7,6 +7,7 @@ import Browser
 import Browser.Dom
 import Browser.Events
 import Browser.Navigation as Nav
+import Chip
 import Facet
 import FileTree
 import Format
@@ -23,7 +24,9 @@ import Json.Decode as Decode exposing (Value)
 import Login
 import Magnes.Api.Enum.ContentType as ContentType
 import Magnes.Api.Enum.FilesStatus exposing (FilesStatus(..))
+import Operations
 import Process
+import QueueJobs
 import Register
 import Roles
 import Route exposing (Route)
@@ -159,6 +162,10 @@ type alias Model =
     -- Whether the tab is showing. Polling stops while it is not; the browser reports only
     -- changes, so the starting value comes in with the flags.
     , visible : Bool
+
+    -- The queue's jobs: the page last fetched, and which of its rows are open. What is
+    -- listed comes from the route; answers carry `epoch`, as search pages do.
+    , jobs : QueueJobs.State
     }
 
 
@@ -336,6 +343,7 @@ init flags url key =
       , signOut = UserOverview.Ready
       , register = Register.prefilled (invitationCodeFor route)
       , invitations = Invitations.empty
+      , jobs = QueueJobs.empty
       , users = Users.empty
       , usersEpoch = 0
       , userTyping = 0
@@ -549,6 +557,9 @@ type Msg
     | AuthenticationChanged
     | HealthPollDue
     | GotHealth Int (Result (Graphql.Http.Error Health.Report) Health.Report)
+    | JobsChosen Route.JobsParams
+    | JobToggled String
+    | GotJobs Int (Result (Graphql.Http.Error QueueJobs.Page) QueueJobs.Page)
     | Ignored
 
 
@@ -1490,6 +1501,16 @@ update msg model =
                             , rolesEpoch = model.rolesEpoch + 1
                             , apiKeys = ApiKeys.empty
                             , apiKeysEpoch = model.apiKeysEpoch + 1
+
+                            -- Another page of the jobs keeps the one shown until it
+                            -- arrives, so a chosen filter does not blank the screen.
+                            , jobs =
+                                case ( model.route, route ) of
+                                    ( Route.QueueJobs _, Route.QueueJobs _ ) ->
+                                        QueueJobs.refreshing model.jobs
+
+                                    _ ->
+                                        QueueJobs.empty
                         }
 
                     epoch =
@@ -1681,6 +1702,30 @@ update msg model =
             else
                 ( scrolled, Cmd.none )
 
+        JobsChosen params ->
+            ( model, Nav.pushUrl model.key (Route.toHref model.basePath (Route.QueueJobs params)) )
+
+        JobToggled jobId ->
+            ( { model | jobs = QueueJobs.toggle jobId model.jobs }, Cmd.none )
+
+        GotJobs epoch result ->
+            if epoch /= model.epoch then
+                ( model, Cmd.none )
+
+            else
+                case result of
+                    Ok fetched ->
+                        ( { model | jobs = QueueJobs.loaded fetched model.jobs }, Cmd.none )
+
+                    Err error ->
+                        onRequestFailure error
+                            model
+                            (\_ current ->
+                                ( { current | jobs = QueueJobs.failed (ApiError.fromError error) current.jobs }
+                                , Cmd.none
+                                )
+                            )
+
         GotResults epoch result ->
             if epoch /= model.epoch then
                 -- A page for a query the user has already moved on from.
@@ -1708,6 +1753,13 @@ update msg model =
                             (\message current ->
                                 ( { current | results = Failed message }, Cmd.none )
                             )
+
+
+jobsMessages : QueueJobs.Messages Msg
+jobsMessages =
+    { navigate = JobsChosen
+    , toggled = JobToggled
+    }
 
 
 invitationsMessages : Invitations.Messages Msg
@@ -2206,6 +2258,9 @@ routeNeedsSearch route =
         Route.Status ->
             False
 
+        Route.QueueJobs _ ->
+            False
+
         Route.NotFound ->
             False
 
@@ -2248,6 +2303,7 @@ beginIdentityRefresh reason model =
         , usersEpoch = model.usersEpoch + 1
         , roles = Roles.empty
         , rolesEpoch = model.rolesEpoch + 1
+        , jobs = QueueJobs.empty
 
         -- And a pending search-debounce is spent: the timer it would fire belongs to a
         -- screen that no longer holds the search it was typed into.
@@ -2381,6 +2437,9 @@ load identity apiUrl epochs route =
         -- and polled on its own rather than here: see `refreshHealth`.
         Route.Status ->
             ( Blank, Cmd.none )
+
+        Route.QueueJobs params ->
+            ( Blank, QueueJobs.fetch apiUrl params (GotJobs epochs.query) )
 
         Route.NotFound ->
             ( Blank, Cmd.none )
@@ -2588,6 +2647,9 @@ documentTitle model =
         Route.Status ->
             "status — magnes"
 
+        Route.QueueJobs _ ->
+            "queue jobs — magnes"
+
         Route.NotFound ->
             "not found — magnes"
 
@@ -2719,23 +2781,27 @@ viewFilters model =
 
     else
         div [ class "facets" ]
-            [ viewFacet "kind"
+            [ Chip.facet "kind"
                 (List.map
                     (\( value, n ) ->
-                        chip (Facet.contentLabel value)
-                            (Just n)
-                            (List.member value filters.content)
-                            (FilterChanged (Facet.toggleContent value filters))
+                        Chip.view
+                            { label = Facet.contentLabel value
+                            , count = Just n
+                            , selected = List.member value filters.content
+                            , onToggle = FilterChanged (Facet.toggleContent value filters)
+                            }
                     )
                     contentValues
                 )
-            , viewFacet "files"
+            , Chip.facet "files"
                 (List.map
                     (\value ->
-                        chip (Facet.fileLabel value)
-                            Nothing
-                            (List.member value filters.files)
-                            (FilterChanged (Facet.toggleFile value filters))
+                        Chip.view
+                            { label = Facet.fileLabel value
+                            , count = Nothing
+                            , selected = List.member value filters.files
+                            , onToggle = FilterChanged (Facet.toggleFile value filters)
+                            }
                     )
                     Facet.fileTypes
                 )
@@ -2747,44 +2813,6 @@ viewFilters model =
                     [ class "clear", type_ "button", onClick (FilterChanged Facet.empty) ]
                     [ text "clear filters" ]
             ]
-
-
-viewFacet : String -> List (Html Msg) -> Html Msg
-viewFacet label chips =
-    if List.isEmpty chips then
-        text ""
-
-    else
-        div [ class "facet" ]
-            [ span [ class "facet-label" ] [ text label ]
-            , div [ class "chips" ] chips
-            ]
-
-
-chip : String -> Maybe Int -> Bool -> Msg -> Html Msg
-chip label maybeCount selected msg =
-    button
-        [ class "chip"
-        , classList [ ( "on", selected ) ]
-        , type_ "button"
-        , attribute "aria-pressed"
-            (if selected then
-                "true"
-
-             else
-                "false"
-            )
-        , onClick msg
-        ]
-        (text label
-            :: (case maybeCount of
-                    Just n ->
-                        [ span [ class "chip-count" ] [ text (Format.count n) ] ]
-
-                    Nothing ->
-                        []
-               )
-        )
 
 
 {-| A plain `select`, so it is a real form control: keyboard-operable, and rendered by the
@@ -2863,7 +2891,13 @@ viewAllowedRoute model =
             Invitations.view model.basePath model.zone invitationsMessages model.identity model.invitations
 
         Route.Status ->
-            Health.view model.zone model.health
+            div []
+                [ Health.view model.zone model.health
+                , Operations.view model.basePath model.identity
+                ]
+
+        Route.QueueJobs params ->
+            QueueJobs.view model.basePath model.zone jobsMessages params model.jobs
 
         Route.NotFound ->
             p [ class "notice" ] [ text "No such page." ]
