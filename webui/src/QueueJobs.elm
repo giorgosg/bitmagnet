@@ -220,15 +220,14 @@ jobSelection =
         |> with QueueJob.createdAt
 
 
-{-| bitmagnet builds its aggregations from a Go map, so they arrive in no particular order.
-Queues are put in name order and statuses in the schema's, so a chip stays where it was
-between one page and the next.
+{-| bitmagnet sends each facet's counts sorted by label. Queues stay that way; statuses are
+put in the schema's order, which is the order of a job's life, rather than alphabetical.
 -}
 aggregationsSelection : SelectionSet ( List ( String, Int ), List ( QueueJobStatus, Int ) ) Magnes.Api.Object.QueueJobsAggregations
 aggregationsSelection =
     SelectionSet.map2
         (\queues statuses ->
-            ( queues |> Maybe.withDefault [] |> List.sortBy Tuple.first
+            ( queues |> Maybe.withDefault []
             , statuses |> Maybe.withDefault [] |> List.sortBy (Tuple.first >> statusRank)
             )
         )
@@ -406,7 +405,7 @@ controls messages params jobsPage =
     let
         -- Choosing anything starts the list over: page 3 of the old list says nothing
         -- about the new one.
-        narrowed changed =
+        startOver changed =
             messages.navigate { changed | page = 1 }
     in
     div [ class "facets" ]
@@ -417,10 +416,10 @@ controls messages params jobsPage =
                         { label = queue
                         , count = Just n
                         , selected = List.member queue params.queues
-                        , onToggle = narrowed { params | queues = toggled queue params.queues }
+                        , onToggle = startOver { params | queues = toggleIn queue params.queues }
                         }
                 )
-                (withChosen params.queues jobsPage.queues |> List.sortBy Tuple.first)
+                (withChosen params.queues jobsPage.queues)
             )
         , Chip.facet "status"
             (List.map
@@ -429,17 +428,17 @@ controls messages params jobsPage =
                         { label = QueueJobStatus.toString status
                         , count = Just n
                         , selected = List.member status params.statuses
-                        , onToggle = narrowed { params | statuses = toggled status params.statuses }
+                        , onToggle = startOver { params | statuses = toggleIn status params.statuses }
                         }
                 )
-                (withChosen params.statuses jobsPage.statuses |> List.sortBy (Tuple.first >> statusRank))
+                jobsPage.statuses
             )
         , div [ class "facet" ]
             [ span [ class "facet-label" ] [ text "order" ]
             , select
                 [ class "job-order"
                 , attribute "aria-label" "Order jobs"
-                , onInput (\key -> narrowed { params | order = JobOrder.fromKey key })
+                , onInput (\key -> startOver { params | order = JobOrder.fromKey key })
                 ]
                 (List.map
                     (\order ->
@@ -449,21 +448,26 @@ controls messages params jobsPage =
                     JobOrder.all
                 )
             ]
-        , if List.isEmpty params.queues && List.isEmpty params.statuses then
+        , if unfiltered params then
             text ""
 
           else
             button
-                [ class "clear", type_ "button", onClick (narrowed { params | queues = [], statuses = [] }) ]
+                [ class "clear", type_ "button", onClick (startOver { params | queues = [], statuses = [] }) ]
                 [ text "clear filters" ]
         ]
 
 
-{-| A chosen value stays offered when the aggregation leaves it out, which bitmagnet does
-for a value with no jobs. Otherwise a filter that emptied the list would take its own chip
-with it, and leave no way to unchoose it.
+{-| A chosen queue stays offered when the counts leave it out. bitmagnet counts a chosen
+value even at zero, but only among the queues it knows by name (`queueNames` in its
+`facet_queue_job_queue.go`), so a link naming any other queue lists nothing and counts
+nothing. Its chip is still drawn, at zero, so it can be unchosen.
+
+Statuses need no such care: the schema's enum is the whole set, and the URL can name no
+other.
+
 -}
-withChosen : List a -> List ( a, Int ) -> List ( a, Int )
+withChosen : List String -> List ( String, Int ) -> List ( String, Int )
 withChosen chosen counted =
     counted
         ++ List.filterMap
@@ -477,8 +481,13 @@ withChosen chosen counted =
             chosen
 
 
-toggled : a -> List a -> List a
-toggled value values =
+unfiltered : Route.JobsParams -> Bool
+unfiltered params =
+    List.isEmpty params.queues && List.isEmpty params.statuses
+
+
+toggleIn : a -> List a -> List a
+toggleIn value values =
     if List.member value values then
         List.filter ((/=) value) values
 
@@ -500,7 +509,7 @@ listing mount zone messages params state jobsPage =
                         (if jobsPage.totalCount > 0 then
                             "There " ++ Format.forCount lastPage { one = "is only 1 page", many = "are only " ++ String.fromInt lastPage ++ " pages" } ++ " of jobs."
 
-                         else if List.isEmpty params.queues && List.isEmpty params.statuses then
+                         else if unfiltered params then
                             "The queue holds no jobs."
 
                          else
@@ -612,12 +621,12 @@ paging mount params jobsPage lastPage =
         to target =
             Route.toHref mount (Route.QueueJobs { params | page = target })
 
-        pageLink label_ target available =
+        pageLink name target available =
             if available then
-                a [ class "paging-link", href (to target) ] [ text label_ ]
+                a [ class "paging-link", href (to target) ] [ text name ]
 
             else
-                a [ class "paging-link", attribute "aria-disabled" "true" ] [ text label_ ]
+                a [ class "paging-link", attribute "aria-disabled" "true" ] [ text name ]
     in
     div [ class "paging" ]
         [ pageLink "Previous" (min lastPage (params.page - 1)) (params.page > 1)

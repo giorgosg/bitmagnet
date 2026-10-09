@@ -451,12 +451,8 @@ not change the answer. An Identity without it is one whose Role was given less: 
 holds nothing until an administrator grants it.
 -}
 requireHealth : Identity.Identity -> Access
-requireHealth identity =
-    if Identity.can (Identity.graphql "health" "query") identity then
-        Allowed
-
-    else
-        Refused "Your Identity does not permit reading bitmagnet's health."
+requireHealth =
+    require "health" "Your Identity does not permit reading bitmagnet's health."
 
 
 {-| Refused rather than sent to sign in, as `requireHealth` is. Signing in can grant it, but
@@ -464,18 +460,21 @@ only to a User whose Role holds it, and the core `user` Role does not; a sign-in
 here would mostly lead to the same refusal.
 -}
 requireQueue : Identity.Identity -> Access
-requireQueue identity =
-    if Identity.can (Identity.graphql "queue" "query") identity then
-        Allowed
-
-    else
-        Refused "Your Identity does not permit reading bitmagnet's queue."
+requireQueue =
+    require "queue" "Your Identity does not permit reading bitmagnet's queue."
 
 
 requireAdministration : Identity.Identity -> Access
-requireAdministration identity =
-    if Identity.can (Identity.graphql "auth" "query") identity then
+requireAdministration =
+    require "auth" "Your Identity does not permit administration."
+
+
+{-| Allowed with the object's `query` action, and otherwise refused with `refusal`.
+-}
+require : String -> String -> Identity.Identity -> Access
+require object refusal identity =
+    if Identity.can (Identity.graphql object "query") identity then
         Allowed
 
     else
-        Refused "Your Identity does not permit administration."
+        Refused refusal

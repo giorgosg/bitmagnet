@@ -49,7 +49,7 @@ suite =
                     Graphql.Document.serializeQuery (QueueJobs.query Route.emptyJobs)
                         |> String.contains "facets: {status: {aggregate: true}, queue: {aggregate: true}}"
                         |> Expect.equal True
-            , test "reads bitmagnet's answer, putting the counts in a stable order" <|
+            , test "reads bitmagnet's answer, putting statuses in the order of a job's life" <|
                 \_ ->
                     Decode.decodeString (Graphql.Document.decoder (QueueJobs.query Route.emptyJobs)) answer
                         |> Expect.equal (Ok page)
@@ -102,11 +102,11 @@ suite =
                         |> Query.findAll [ Selector.class "chip" ]
                         |> Query.index 2
                         |> Query.has [ Selector.text "pending", Selector.containing [ Selector.class "chip-count", Selector.text "4" ] ]
-            , test "a chosen value is still offered when the aggregation leaves it out, so it can be unchosen" <|
+            , test "a chosen queue bitmagnet does not count is still offered, so it can be unchosen" <|
                 \_ ->
-                    viewed { emptyJobs | statuses = [ Processed ] } (QueueJobs.loaded page QueueJobs.empty)
+                    viewed { emptyJobs | queues = [ "reindex" ] } (QueueJobs.loaded page QueueJobs.empty)
                         |> Query.find [ Selector.class "chip", Selector.attribute (Html.Attributes.attribute "aria-pressed" "true") ]
-                        |> Query.has [ Selector.text "processed", Selector.text "0" ]
+                        |> Query.has [ Selector.text "reindex", Selector.text "0" ]
             , test "choosing a value asks for the first page with it added" <|
                 \_ ->
                     viewed { emptyJobs | page = 2 } (QueueJobs.loaded page QueueJobs.empty)
@@ -200,8 +200,8 @@ longError =
     "tmdb: request failed after 3 attempts: Get \"https://api.themoviedb.org/3/search/movie\": context deadline exceeded"
 
 
-{-| Shaped as bitmagnet answers: aggregations come out of a Go map, so in no particular
-order, and a value with no jobs is left out.
+{-| Shaped as bitmagnet answers: each facet's counts sorted by label, and a value with no
+jobs left out unless it was chosen.
 -}
 answer : String
 answer =
@@ -220,13 +220,13 @@ answer =
       "hasNextPage": false,
       "aggregations": {
         "queue": [
-          {"value": "process_torrent_batch", "label": "process_torrent_batch", "count": 8},
-          {"value": "process_torrent", "label": "process_torrent", "count": 8}
+          {"value": "process_torrent", "label": "process_torrent", "count": 8},
+          {"value": "process_torrent_batch", "label": "process_torrent_batch", "count": 8}
         ],
         "status": [
-          {"value": "retry", "label": "retry", "count": 4},
           {"value": "failed", "label": "failed", "count": 4},
-          {"value": "pending", "label": "pending", "count": 4}
+          {"value": "pending", "label": "pending", "count": 4},
+          {"value": "retry", "label": "retry", "count": 4}
         ]
       }
     }}}}
