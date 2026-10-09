@@ -65,6 +65,16 @@ case by passing it as text to a plpgsql function that `EXECUTE`s it
 structurally risky thing in the codebase and is written up in
 the issue notes below; read them before extending the pattern.
 
+Rendering inlines every value with its quotes doubled, which is sound **only while
+`standard_conforming_strings` is on**. With it off, a backslash escapes the next quote, so
+`\'` in a search term or a tag name closes the literal and the rest runs as SQL. PostgreSQL
+has defaulted it on since 9.1, so it is off only when someone set it — per database, per
+role, in a DSN's `options`, or in a pooler — and `internal/database/postgres` therefore
+**refuses to start** when it reads anything but `on`.
+`search/injection_integration_test.go` pins that the escaping holds on a conforming
+server, through the search string, tag criteria and a tag facet filter, under both count
+paths.
+
 ## Migrations
 
 Goose SQL in [`migrations/`](../../migrations), embedded and run through
