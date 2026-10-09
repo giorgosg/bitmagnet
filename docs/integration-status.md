@@ -98,6 +98,7 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#83](https://github.com/giorgosg/bitmagnet/pull/83) | Serve the operational pages from the fixture server                         | local — magnes dashboard ticket 01                                   | Six surfaces answered `internal system error`; observed red    |
 | [#84](https://github.com/giorgosg/bitmagnet/pull/84) | Delete the `Param` machinery nothing reads                                  | local — review finding 14                                            | Deletion: 2,533 lines out; gates green, no behaviour to test   |
 | [#85](https://github.com/giorgosg/bitmagnet/pull/85) | Store API key secrets as SHA-256, not bcrypt                                | local — issue 0010b, review finding 03b                              | 57.6 ms → 118 ns per request; legacy rehash seen red           |
+| [#86](https://github.com/giorgosg/bitmagnet/pull/86) | Refuse `standard_conforming_strings = off`; dev binary logs to stderr       | local — issue 0002 option 1, test-fixtures ticket 03                 | Pool test, payload test with the setting off, stdout test      |
 
 ## In flight
 
