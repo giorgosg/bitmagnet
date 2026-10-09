@@ -106,12 +106,24 @@ Nothing currently in flight.
 ## The static review findings
 
 A full static review of the Go tree (2026-08-22) produced eleven findings, kept as
-untracked notes under `docs/issues/`. PRs #38-#45 above close six of them, plus four of
-the small defects collected in 0008. What remains open there, hardest last:
-`files_count`/`size` consistency for rows already written, the breaking half of the CORS
-decision (same-origin default), the crawler and importer shutdown
-paths, the queue job that runs inside its claiming transaction, the search SQL
-re-execution, and the two serialisation points in the auth path.
+untracked notes under `docs/issues/`, and two more were added on 2026-10-05. PRs #38-#45
+closed the first six and four of the small defects collected in 0008; #75, #76, #79, #80,
+#81, #82 and #85 closed the shutdown paths, the queue job that ran inside its claiming
+transaction, both serialisation points in the auth path, and the anonymous-access
+findings. `files_count`/`size` was settled without a backfill: `size` keeps the total
+length, padding included.
+
+Still open, as of 2026-10-09:
+
+- **The search SQL re-execution.** Search renders its query to a string and executes it
+  again, which is injectable when `standard_conforming_strings` is off. The pool now
+  refuses such a server; removing the dependency means passing parameters to
+  `budgeted_count`, which is also where the facet fan-out fix belongs.
+- **The same-origin CORS default**, decided and deferred to the release that removes the
+  Angular UI, whose dev server is the one caller relying on `*`.
+- **`break` inside `select` in the crawler's peer and scrape loops**, which has no
+  deterministic red test. It is to be fixed under the redesign of the next candidate below,
+  which carries the same shape.
 
 One finding was measured and rejected rather than fixed: the crawler's periodic queue
 depth `COUNT` costs 0.065 ms in steady state on the reference instance, and a
