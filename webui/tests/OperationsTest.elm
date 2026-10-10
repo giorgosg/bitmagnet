@@ -1,5 +1,6 @@
 module OperationsTest exposing (suite)
 
+import Expect
 import Html.Attributes
 import Identity
 import Operations
@@ -21,6 +22,25 @@ suite =
                     |> Query.has
                         [ Selector.text "Queue jobs"
                         , Selector.attribute (Html.Attributes.href "/magnes/queue/jobs")
+                        ]
+        , test "lists the torrent statistics for an Identity holding torrent::query" <|
+            \_ ->
+                Operations.view mount (Identity.UserAuthenticated user [ Identity.graphql "health" "query", Identity.graphql "torrent" "query" ])
+                    |> Query.fromHtml
+                    |> Query.find [ Selector.tag "a" ]
+                    |> Query.has
+                        [ Selector.text "Torrent statistics"
+                        , Selector.attribute (Html.Attributes.href "/magnes/stats/torrents")
+                        ]
+        , test "lists each page only to an Identity that may open it, torrent statistics first" <|
+            \_ ->
+                Operations.view mount (Identity.Anonymous [ Identity.graphql "queue" "query", Identity.graphql "torrent" "query" ])
+                    |> Query.fromHtml
+                    |> Query.findAll [ Selector.tag "a" ]
+                    |> Expect.all
+                        [ Query.count (Expect.equal 2)
+                        , Query.index 0 >> Query.has [ Selector.text "Torrent statistics" ]
+                        , Query.index 1 >> Query.has [ Selector.text "Queue jobs" ]
                         ]
         , test "lists nothing, heading included, for an Identity holding none of them" <|
             \_ ->

@@ -1,4 +1,4 @@
-module Route exposing (Access(..), BasePath, JobsParams, LoginParams, RegisterParams, Route(..), SearchParams, basePath, emptyJobs, emptySearch, fromUrl, guard, returnDestination, toHref)
+module Route exposing (Access(..), BasePath, JobsParams, LoginParams, RegisterParams, Route(..), SearchParams, TorrentStatsParams, basePath, emptyJobs, emptySearch, emptyTorrentStats, fromUrl, guard, returnDestination, toHref)
 
 {-| Routes are real paths, not fragments — see the README.
 
@@ -12,6 +12,7 @@ import Identity
 import JobOrder exposing (JobOrder)
 import Magnes.Api.Enum.QueueJobStatus as QueueJobStatus exposing (QueueJobStatus)
 import Sort exposing (Sort)
+import StatsControls exposing (Controls, Timeframe(..))
 import Url exposing (Url)
 import Url.Builder as Builder
 import Url.Parser as Parser exposing ((</>), (<?>), Parser, oneOf, s, top)
@@ -30,6 +31,7 @@ type Route
     | AdminInvitations
     | Status
     | QueueJobs JobsParams
+    | TorrentStats TorrentStatsParams
     | NotFound
 
 
@@ -101,6 +103,21 @@ emptyJobs =
     { queues = [], statuses = [], order = JobOrder.default, page = 1 }
 
 
+{-| Everything the URL says about the torrent timeline: how far back, how coarsely, how
+often to look again, and which sources, so a view of the index's growth is a link (ADR
+0002). No source is all of them.
+-}
+type alias TorrentStatsParams =
+    { controls : Controls
+    , sources : List String
+    }
+
+
+emptyTorrentStats : TorrentStatsParams
+emptyTorrentStats =
+    { controls = StatsControls.default, sources = [] }
+
+
 parser : Parser (Route -> a) a
 parser =
     oneOf
@@ -129,6 +146,15 @@ parser =
                 <?> Query.string "order"
                 <?> Query.string "direction"
                 <?> Query.int "page"
+            )
+        , Parser.map torrentStatsWith
+            (s "stats"
+                </> s "torrents"
+                <?> Query.string "timeframe"
+                <?> Query.string "resolution"
+                <?> Query.int "every"
+                <?> Query.string "refresh"
+                <?> Query.custom "source" identity
             )
         ]
 
@@ -171,6 +197,26 @@ jobsWith queues statuses order direction page =
         , statuses = List.filterMap QueueJobStatus.fromString statuses
         , order = JobOrder.fromParams order direction
         , page = page |> Maybe.withDefault 1 |> max 1
+        }
+
+
+{-| As the jobs' filters do, drops what it does not recognise. The timeframe of everything is
+the queue's alone: the torrent query is not bounded by what the index holds, and a link
+to it is read as the default.
+-}
+torrentStatsWith : Maybe String -> Maybe String -> Maybe Int -> Maybe String -> List String -> Route
+torrentStatsWith timeframe resolution every refresh sources =
+    TorrentStats
+        { controls =
+            StatsControls.fromParams
+                { defaults = StatsControls.default
+                , timeframes = List.filter ((/=) AllTime) StatsControls.allTimeframes
+                , timeframe = timeframe
+                , resolution = resolution
+                , every = every
+                , refresh = refresh
+                }
+        , sources = List.filterMap nonBlank sources
         }
 
 
@@ -283,6 +329,12 @@ toHref (BasePath prefix) route =
                                )
                         )
 
+                TorrentStats params ->
+                    Builder.absolute [ "stats", "torrents" ]
+                        (StatsControls.toParams StatsControls.default params.controls
+                            ++ List.map (Builder.string "source") params.sources
+                        )
+
                 NotFound ->
                     Builder.absolute [] []
            )
@@ -393,6 +445,9 @@ anonymousAccess mount identity route =
         QueueJobs _ ->
             requireQueue identity
 
+        TorrentStats _ ->
+            requireTorrent identity
+
         UserOverview ->
             loginRedirect mount route
 
@@ -441,6 +496,9 @@ userAccess identity route =
         QueueJobs _ ->
             requireQueue identity
 
+        TorrentStats _ ->
+            requireTorrent identity
+
         _ ->
             Allowed
 
@@ -462,6 +520,16 @@ here would mostly lead to the same refusal.
 requireQueue : Identity.Identity -> Access
 requireQueue =
     require "queue" "Your Identity does not permit reading bitmagnet's queue."
+
+
+{-| Refused rather than sent to sign in, as the other guards here refuse, and the refusal
+says what is missing. `torrent::query` is in the core `user` Role, so a User can open the page
+unless their Role was given less; Anonymous can only if the `anon` Role has been granted it,
+which it starts without (bitmagnet #87).
+-}
+requireTorrent : Identity.Identity -> Access
+requireTorrent =
+    require "torrent" "Your Identity does not permit reading bitmagnet's torrents."
 
 
 requireAdministration : Identity.Identity -> Access

@@ -33,6 +33,9 @@ bar segment, so a status keeps its look across the two charts.
   - `Accent`: the one colour, for what wants attention. A heavier line; a solid bar.
   - `AccentSoft`: the accent held back. A dashed accent line; a pale bar edged in accent.
   - `Strong`: the text colour. A solid line; a solid bar.
+  - `StrongSoft`: the text colour held back, as `AccentSoft` holds the accent back. A long-dashed
+    line; a pale bar edged in the text colour. It is `Strong`'s partner, for a second series of
+    the same thing.
   - `Muted`: the secondary grey. A dashed line; a solid grey bar.
   - `Faint`: barely there. A dotted grey line; a pale bar with an edge.
 
@@ -41,6 +44,7 @@ type Ink
     = Accent
     | AccentSoft
     | Strong
+    | StrongSoft
     | Muted
     | Faint
 
@@ -281,6 +285,11 @@ paint ink =
         Strong ->
             { line = { stroke = "var(--fg)", width = 1.5, dashes = [] }
             , bar = { fill = "var(--fg)", edge = "var(--fg)", edgeWidth = 0 }
+            }
+
+        StrongSoft ->
+            { line = { stroke = "var(--fg)", width = 1.5, dashes = [ 8, 3 ] }
+            , bar = { fill = "var(--faint)", edge = "var(--fg)", edgeWidth = 1 }
             }
 
         Muted ->
