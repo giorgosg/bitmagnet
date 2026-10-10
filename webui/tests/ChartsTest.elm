@@ -212,6 +212,48 @@ suite =
                             , Query.index 2
                                 >> Query.has [ Selector.attribute (Svg.Attributes.stroke "var(--accent)") ]
                             ]
+            , test "draws a soft strong ink as the strong one dashed, in the legend and the line" <|
+                \_ ->
+                    Charts.timeline
+                        { title = "Jobs per hour"
+                        , description = "Line chart."
+                        , zone = Time.utc
+                        , time = .at
+                        , series =
+                            [ { label = "Created", value = .created, ink = Charts.Strong }
+                            , { label = "Processed", value = .processed, ink = Charts.StrongSoft }
+                            ]
+                        }
+                        (hourly 48)
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.findAll [ Selector.tag "li" ]
+                                >> Expect.all
+                                    [ Query.index 0 >> Query.has [ Selector.attribute (Svg.Attributes.strokeDasharray "") ]
+                                    , Query.index 1
+                                        >> Query.has
+                                            [ Selector.attribute (Svg.Attributes.stroke "var(--fg)")
+                                            , Selector.attribute (Svg.Attributes.strokeDasharray "8 3")
+                                            ]
+                                    ]
+                            , image
+                                >> Query.findAll
+                                    [ Selector.tag "path"
+                                    , Selector.attribute (Svg.Attributes.stroke "var(--fg)")
+                                    , Selector.attribute (Svg.Attributes.strokeDasharray "8 3")
+                                    ]
+                                >> Query.count (Expect.equal 1)
+                            ]
+            , test "opens its box at the latest end, which is the end a timeline is read for, and a bar chart's does not" <|
+                \_ ->
+                    ( timeline (hourly 48)
+                        |> Query.findAll [ Selector.class "chart-plot", Selector.class "chart-timeline" ]
+                        |> Query.count (Expect.equal 1)
+                    , stackedBars totals
+                        |> Query.findAll [ Selector.class "chart-timeline" ]
+                        |> Query.count (Expect.equal 0)
+                    )
+                        |> (\( timelineBox, barBox ) -> Expect.all [ always timelineBox, always barBox ] ())
             , test "with a single bucket, marks it with a dot in each series' ink" <|
                 \_ ->
                     -- A line through one point draws nothing.
@@ -407,6 +449,22 @@ suite =
                                     [ Selector.attribute (Svg.Attributes.fill "var(--faint)")
                                     , Selector.attribute (Svg.Attributes.stroke "var(--edge)")
                                     ]
+                            ]
+            , test "draws a soft strong ink as a pale bar edged in the strong colour" <|
+                \_ ->
+                    Charts.stackedBars
+                        { title = "Jobs by queue and status"
+                        , description = "Stacked bar chart."
+                        , categoryHeading = "Queue"
+                        , category = .queue
+                        , segments = [ { label = "Failed", value = .failed, ink = Charts.StrongSoft } ]
+                        }
+                        totals
+                        |> Query.fromHtml
+                        |> Query.find [ Selector.tag "li" ]
+                        |> Query.has
+                            [ Selector.attribute (Svg.Attributes.fill "var(--faint)")
+                            , Selector.attribute (Svg.Attributes.stroke "var(--fg)")
                             ]
             , test "gives the numbers in a visually hidden table, a row per category" <|
                 \_ ->

@@ -17,7 +17,8 @@ import Route exposing (Route)
 
 candidates : List { route : Route, label : String }
 candidates =
-    [ { route = Route.QueueJobs Route.emptyJobs, label = "Queue jobs" }
+    [ { route = Route.TorrentStats Route.emptyTorrentStats, label = "Torrent statistics" }
+    , { route = Route.QueueJobs Route.emptyJobs, label = "Queue jobs" }
     ]
 
 

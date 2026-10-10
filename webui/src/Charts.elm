@@ -33,6 +33,9 @@ bar segment, so a status keeps its look across the two charts.
   - `Accent`: the one colour, for what wants attention. A heavier line; a solid bar.
   - `AccentSoft`: the accent held back. A dashed accent line; a pale bar edged in accent.
   - `Strong`: the text colour. A solid line; a solid bar.
+  - `StrongSoft`: the text colour held back, as `AccentSoft` holds the accent back. A long-dashed
+    line; a pale bar edged in the text colour. It is `Strong`'s partner, for a second series of
+    the same thing.
   - `Muted`: the secondary grey. A dashed line; a solid grey bar.
   - `Faint`: barely there. A dotted grey line; a pale bar with an edge.
 
@@ -41,6 +44,7 @@ type Ink
     = Accent
     | AccentSoft
     | Strong
+    | StrongSoft
     | Muted
     | Faint
 
@@ -94,6 +98,7 @@ timeline config data =
         [ plot
             { description = config.description
             , width = 920
+            , classes = [ "chart-timeline" ]
             , top =
                 data
                     |> List.concatMap (\datum -> List.map (\series -> series.value datum) config.series)
@@ -134,6 +139,7 @@ stackedBars config data =
                             |> Maybe.withDefault 0
                 in
                 max 920 (96 + List.length data * labelWidth)
+            , classes = []
             , top =
                 data
                     |> List.map (\datum -> List.sum (List.map (\series -> series.value datum) config.segments))
@@ -167,13 +173,19 @@ shrinking much below that, on a narrow screen, by letting `chart-plot` scroll in
 That box clips whatever falls outside the drawing, so every label has to fit inside its
 margins: the left one is as wide as the largest count, `top`, written out.
 
+A timeline's box is also `chart-timeline`, which the stylesheet opens at its right-hand end,
+where the latest time is. What a timeline is for is how things are now, and on a phone the
+box is the narrower part of a chart that scrolls: opened at the left, it would show the oldest
+stretch and the count axis and hide the end that matters. The cost is that the axis is out of
+view until the box is scrolled back, and the numbers are in the table either way.
+
 -}
 plot :
-    { description : String, width : Int, top : Int, range : List (CA.Attribute CS.Axis) }
+    { description : String, width : Int, top : Int, range : List (CA.Attribute CS.Axis), classes : List String }
     -> List (C.Element data msg)
     -> Html msg
-plot { description, width, top, range } elements =
-    div [ class "chart-plot" ]
+plot { description, width, top, range, classes } elements =
+    div [ class (String.join " " ("chart-plot" :: classes)) ]
         [ C.chart
             [ CA.width (toFloat width)
             , CA.htmlAttrs
@@ -281,6 +293,11 @@ paint ink =
         Strong ->
             { line = { stroke = "var(--fg)", width = 1.5, dashes = [] }
             , bar = { fill = "var(--fg)", edge = "var(--fg)", edgeWidth = 0 }
+            }
+
+        StrongSoft ->
+            { line = { stroke = "var(--fg)", width = 1.5, dashes = [ 8, 3 ] }
+            , bar = { fill = "var(--faint)", edge = "var(--fg)", edgeWidth = 1 }
             }
 
         Muted ->

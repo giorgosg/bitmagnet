@@ -36,6 +36,7 @@ import Svg
 import Svg.Attributes as SvgAttr
 import Task
 import Time
+import TorrentStats
 import Url exposing (Url)
 import UserOverview
 import Users
@@ -80,9 +81,9 @@ type alias Model =
     -- with filters already applied, so a shared search shows what is narrowing it.
     , filtersOpen : Bool
 
-    -- Bumped when the searched-for query actually changes. Responses carry the epoch they
-    -- were asked under, so a page that arrives after the query moved on is dropped rather
-    -- than appended to the wrong list.
+    -- Bumped when the searched-for query actually changes, and when a statistics page looks
+    -- again. Responses carry the epoch they were asked under, so a page that arrives after
+    -- the query moved on is dropped rather than appended to the wrong list.
     , epoch : Int
 
     -- The login form. It lives here rather than being rebuilt per render so a keystroke
@@ -166,6 +167,11 @@ type alias Model =
     -- The queue's jobs: the page last fetched, and which of its rows are open. What is
     -- listed comes from the route; answers carry `epoch`, as search pages do.
     , jobs : QueueJobs.State
+
+    -- The torrent timeline: the last answer, drawn. What is looked at comes from the route;
+    -- answers carry `epoch`, so a look that comes back after the controls moved on, or
+    -- after a newer look was asked for, is dropped.
+    , torrentStats : TorrentStats.State
     }
 
 
@@ -344,6 +350,7 @@ init flags url key =
       , register = Register.prefilled (invitationCodeFor route)
       , invitations = Invitations.empty
       , jobs = QueueJobs.empty
+      , torrentStats = TorrentStats.empty
       , users = Users.empty
       , usersEpoch = 0
       , userTyping = 0
@@ -414,6 +421,7 @@ subscriptions model =
 
           else
             Sub.none
+        , statsTimer model
         ]
 
 
@@ -560,6 +568,10 @@ type Msg
     | JobsChosen Route.JobsParams
     | JobToggled String
     | GotJobs Int (Result (Graphql.Http.Error QueueJobs.Page) QueueJobs.Page)
+    | StatsChosen Route.TorrentStatsParams
+    | StatsRefreshDue
+    | StatsRefreshRequested
+    | GotTorrentStats Int (Result (Graphql.Http.Error TorrentStats.Statistics) TorrentStats.Statistics)
     | Ignored
 
 
@@ -1381,9 +1393,17 @@ update msg model =
             let
                 ( refreshed, healthCmd ) =
                     refreshHealth { model | visible = True }
+
+                -- And so is a chart that was asked to keep itself fresh.
+                ( looked, statsCmd ) =
+                    if Route.refreshInterval refreshed.route /= Nothing then
+                        lookAgain Regardless refreshed
+
+                    else
+                        ( refreshed, Cmd.none )
             in
-            ( refreshed
-            , Cmd.batch [ Identity.fetch model.apiUrl (GotIdentity model.identityEpoch), healthCmd ]
+            ( looked
+            , Cmd.batch [ Identity.fetch model.apiUrl (GotIdentity model.identityEpoch), healthCmd, statsCmd ]
             )
 
         VisibilityChanged Browser.Events.Hidden ->
@@ -1485,6 +1505,11 @@ update msg model =
                 -- Same query re-submitted; don't throw away results to fetch them again.
                 ( model, Cmd.none )
 
+            else if Route.withoutRefresh model.route == Route.withoutRefresh route then
+                -- How often to look again is not what to look at. The chart stays, and the
+                -- timer is the subscription's to restart.
+                ( { model | route = route }, Cmd.none )
+
             else
                 let
                     -- Leaving a screen ends what was on it: an armed ask, a refusal, the
@@ -1511,6 +1536,16 @@ update msg model =
 
                                     _ ->
                                         QueueJobs.empty
+
+                            -- The same for the timeline: the old chart stays, quieter,
+                            -- until the new one comes.
+                            , torrentStats =
+                                case ( model.route, route ) of
+                                    ( Route.TorrentStats _, Route.TorrentStats _ ) ->
+                                        TorrentStats.refreshing model.torrentStats
+
+                                    _ ->
+                                        TorrentStats.empty
                         }
 
                     epoch =
@@ -1726,6 +1761,48 @@ update msg model =
                                 )
                             )
 
+        StatsChosen params ->
+            if Route.TorrentStats params == model.route then
+                -- A chip already in force, or a number typed that came to the multiplier
+                -- already in force: nothing to ask for, and no history entry. Elm draws the
+                -- page again all the same, which puts a field's value back to what the page
+                -- says, so a number that was typed and not kept does not stay in it.
+                ( model, Cmd.none )
+
+            else
+                -- Choosing what to look at is a deliberate act, so it earns a history entry.
+                ( model, Nav.pushUrl model.key (Route.toHref model.basePath (Route.TorrentStats params)) )
+
+        StatsRefreshDue ->
+            if model.visible then
+                lookAgain IfIdle model
+
+            else
+                ( model, Cmd.none )
+
+        StatsRefreshRequested ->
+            lookAgain Regardless model
+
+        GotTorrentStats epoch result ->
+            case ( epoch == model.epoch, model.route ) of
+                ( True, Route.TorrentStats params ) ->
+                    case result of
+                        Ok fetched ->
+                            ( { model | torrentStats = TorrentStats.loaded params fetched model.torrentStats }, Cmd.none )
+
+                        Err error ->
+                            onRequestFailure error
+                                model
+                                (\_ current ->
+                                    ( { current | torrentStats = TorrentStats.failed params (ApiError.fromError error) current.torrentStats }
+                                    , Cmd.none
+                                    )
+                                )
+
+                -- Asked under a look that has been left, or a newer one was asked for.
+                _ ->
+                    ( model, Cmd.none )
+
         GotResults epoch result ->
             if epoch /= model.epoch then
                 -- A page for a query the user has already moved on from.
@@ -1753,6 +1830,13 @@ update msg model =
                             (\message current ->
                                 ( { current | results = Failed message }, Cmd.none )
                             )
+
+
+torrentStatsMessages : TorrentStats.Messages Msg
+torrentStatsMessages =
+    { navigate = StatsChosen
+    , refreshRequested = StatsRefreshRequested
+    }
 
 
 jobsMessages : QueueJobs.Messages Msg
@@ -1921,6 +2005,91 @@ onRequestFailure error model toFailed =
 
     else
         toFailed (ApiError.toMessage failure) model
+
+
+{-| The timer of a page that looks again by itself. It runs only while the tab is showing:
+a chart nobody can see is not worth the requests, and `VisibilityChanged` looks again the
+moment the tab returns. Which pages have one is `Route.refreshInterval`'s to say.
+-}
+statsTimer : Model -> Sub Msg
+statsTimer model =
+    case ( model.visible, Route.refreshInterval model.route ) of
+        ( True, Just interval ) ->
+            Time.every interval (\_ -> StatsRefreshDue)
+
+        _ ->
+            Sub.none
+
+
+{-| How firmly a page is told to look again. A timer asks `IfIdle`: one that fires over a slow
+request waits for the next tick rather than piling another on. A person asking, or a tab
+coming back to the front, asks `Regardless`, and the request on its way, which may be one that
+is never answered, is given up on.
+-}
+type Nudge
+    = IfIdle
+    | Regardless
+
+
+{-| Look again, under a fresh epoch so that only the newest answer lands. Every route is
+listed, with no catch-all, so that a page that is given a timer (`Route.refreshInterval`)
+cannot be left without the look it asks for.
+-}
+lookAgain : Nudge -> Model -> ( Model, Cmd Msg )
+lookAgain nudge model =
+    if Route.guard model.basePath model.identity model.route /= Route.Allowed then
+        ( model, Cmd.none )
+
+    else
+        case model.route of
+            Route.TorrentStats params ->
+                if nudge == IfIdle && not (TorrentStats.timerDue params model.torrentStats) then
+                    ( model, Cmd.none )
+
+                else
+                    let
+                        epoch =
+                            model.epoch + 1
+                    in
+                    ( { model | epoch = epoch, torrentStats = TorrentStats.refreshing model.torrentStats }
+                    , TorrentStats.fetch model.apiUrl params (GotTorrentStats epoch)
+                    )
+
+            Route.Search _ ->
+                ( model, Cmd.none )
+
+            Route.Torrent _ ->
+                ( model, Cmd.none )
+
+            Route.Login _ ->
+                ( model, Cmd.none )
+
+            Route.Register _ ->
+                ( model, Cmd.none )
+
+            Route.UserOverview ->
+                ( model, Cmd.none )
+
+            Route.APIKeys ->
+                ( model, Cmd.none )
+
+            Route.AdminUsers ->
+                ( model, Cmd.none )
+
+            Route.AdminRoles ->
+                ( model, Cmd.none )
+
+            Route.AdminInvitations ->
+                ( model, Cmd.none )
+
+            Route.Status ->
+                ( model, Cmd.none )
+
+            Route.QueueJobs _ ->
+                ( model, Cmd.none )
+
+            Route.NotFound ->
+                ( model, Cmd.none )
 
 
 {-| Ask for the health report again, under a fresh epoch so that only the newest answer
@@ -2261,6 +2430,9 @@ routeNeedsSearch route =
         Route.QueueJobs _ ->
             False
 
+        Route.TorrentStats _ ->
+            False
+
         Route.NotFound ->
             False
 
@@ -2304,6 +2476,7 @@ beginIdentityRefresh reason model =
         , roles = Roles.empty
         , rolesEpoch = model.rolesEpoch + 1
         , jobs = QueueJobs.empty
+        , torrentStats = TorrentStats.empty
 
         -- And a pending search-debounce is spent: the timer it would fire belongs to a
         -- screen that no longer holds the search it was typed into.
@@ -2440,6 +2613,9 @@ load identity apiUrl epochs route =
 
         Route.QueueJobs params ->
             ( Blank, QueueJobs.fetch apiUrl params (GotJobs epochs.query) )
+
+        Route.TorrentStats params ->
+            ( Blank, TorrentStats.fetch apiUrl params (GotTorrentStats epochs.query) )
 
         Route.NotFound ->
             ( Blank, Cmd.none )
@@ -2649,6 +2825,9 @@ documentTitle model =
 
         Route.QueueJobs _ ->
             "queue jobs — magnes"
+
+        Route.TorrentStats _ ->
+            "torrent statistics — magnes"
 
         Route.NotFound ->
             "not found — magnes"
@@ -2898,6 +3077,9 @@ viewAllowedRoute model =
 
         Route.QueueJobs params ->
             QueueJobs.view model.basePath model.zone jobsMessages params model.jobs
+
+        Route.TorrentStats params ->
+            TorrentStats.view model.zone torrentStatsMessages params model.torrentStats
 
         Route.NotFound ->
             p [ class "notice" ] [ text "No such page." ]

@@ -88,6 +88,20 @@ status page, filters them by status and checks the facet counts against what is 
 opens a job, follows ordering and paging through the URL, and checks that an ordinary User
 is refused the page and not offered it.
 
+`torrent-stats.spec.js` (ticket 06 in `.scratch/dashboard`) reaches the torrent timeline from
+the status page and compares the chart's table with what bitmagnet answered, line by line;
+follows each control (timeframe, resolution and its multiplier, source, auto-refresh) through
+the URL and back; counts the timeline's requests under a faked clock to check that auto-refresh
+is off by default, runs at its interval, stops while the tab is hidden and does not pile on a
+look still on its way; holds one answer back until the controls have moved on, and another until
+"Refresh now" has given up on it, to check that neither is drawn over a newer one; and checks
+that Anonymous (the fixture grants it every read action) and an ordinary User may open the page
+and an Identity without `torrent::query` is refused it and not offered it. It reads the numbers
+from bitmagnet's answer and not from the seed: the seed has to leave something in the last hour
+to count, and the last week holds nothing else. It also expects more than one source to be
+counted, which the seed does not promise (it picks its rows with a `limit` and no `order by`); the
+template loaded here has three.
+
 ### What it needs present
 
 If the database is not up, the harness says so and stops before building anything —

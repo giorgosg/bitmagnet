@@ -1409,6 +1409,17 @@ main {
   min-width: 44rem;
 }
 
+/* A timeline is read for its right-hand end, now. On a phone it is wider than the box and
+   scrolls, so the box opens at that end: a box that scrolls right-to-left starts there, and
+   the chart inside it is put back left-to-right. */
+.chart-timeline {
+  direction: rtl;
+}
+
+.chart-timeline > * {
+  direction: ltr;
+}
+
 .chart-empty {
   margin: 0;
   color: var(--dim);
@@ -1695,3 +1706,46 @@ main {
 .operations a {
   color: var(--accent);
 }
+
+/* The torrent timeline (src/TorrentStats.elm, src/StatsControls.elm) ------- */
+
+/* The same rows of chips the jobs page has, with longer labels ("timeframe",
+   "resolution") than its "queue" and "status" to make room for. */
+.stats-controls {
+  padding-top: 0;
+  margin-bottom: 1.25rem;
+}
+
+.stats-controls .facet-label {
+  width: 5.5rem;
+}
+
+/* A number the way the order menu is a menu: a real control, drawn small beside the chips. */
+.stats-every {
+  width: 4.5rem;
+  padding: 0.15rem 0.35rem;
+  border: 1px solid var(--faint);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.8125rem;
+}
+
+.stats-every:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* While another look is on its way the old chart stays, quieter, rather than vanishing. */
+.stats-refreshing {
+  opacity: 0.55;
+}
+
+.stats-note {
+  max-width: 40rem;
+  margin: 0.5rem 0 0;
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
