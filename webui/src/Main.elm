@@ -85,9 +85,11 @@ type alias Model =
     -- with filters already applied, so a shared search shows what is narrowing it.
     , filtersOpen : Bool
 
-    -- Bumped when the searched-for query actually changes, and when a statistics page looks
-    -- again. Responses carry the epoch they were asked under, so a page that arrives after
-    -- the query moved on is dropped rather than appended to the wrong list.
+    -- Bumped when the searched-for query actually changes, when a statistics page looks
+    -- again, and whenever the queue's administration asks bitmagnet anything. Responses carry
+    -- the epoch they were asked under, so a page that arrives after the query moved on is
+    -- dropped rather than appended to the wrong list, and a count of the queue that a newer
+    -- one has replaced is dropped rather than drawn.
     , epoch : Int
 
     -- The login form. It lives here rather than being rebuilt per render so a keystroke
@@ -182,9 +184,15 @@ type alias Model =
     , queueStats : QueueStats.State
 
     -- The queue's administration: what a purge would delete, the reprocessing form, and
-    -- which act has been asked about but not yet confirmed. Counts carry `epoch`, so a count
-    -- of a scope since changed is dropped.
+    -- which act has been asked about but not yet confirmed, or is on its way. A count carries
+    -- `epoch`, which drops an answer a newer request has replaced, and the scope it was asked
+    -- about, by which `QueueAdmin.counted` drops one about a scope no longer chosen.
     , queueAdmin : QueueAdmin.State
+
+    -- How many of the queue's acts have been confirmed. Never reset: each act is numbered by
+    -- it, its answer carries the number back, and `QueueAdmin.answered` drops an answer to
+    -- any act but the one on its way.
+    , queueAdminActs : Int
     }
 
 
@@ -366,6 +374,7 @@ init flags url key =
       , torrentStats = StatsLook.empty
       , queueStats = StatsLook.empty
       , queueAdmin = QueueAdmin.empty
+      , queueAdminActs = 0
       , users = Users.empty
       , usersEpoch = 0
       , userTyping = 0
@@ -589,15 +598,15 @@ type Msg
     | StatsRefreshRequested
     | GotTorrentStats Int (Result (Graphql.Http.Error TorrentStats.Statistics) TorrentStats.Statistics)
     | GotQueueStats Int (Result (Graphql.Http.Error QueueStats.Statistics) QueueStats.Statistics)
-    | QueueToggled String
-    | QueueStatusToggled QueueJobStatus
-    | QueueFormEdited QueueAdmin.Edit
-    | QueuePurgeAsked
-    | QueueReprocessAsked
-    | QueueActKept
-    | QueueActConfirmed
-    | GotQueueCount Int QueueAdmin.Scope (Result (Graphql.Http.Error QueueAdmin.Tally) QueueAdmin.Tally)
-    | GotQueueAct (Result (Graphql.Http.Error ()) ())
+    | QueueAdminQueueToggled String
+    | QueueAdminStatusToggled QueueJobStatus
+    | QueueAdminFormEdited QueueAdmin.Edit
+    | QueueAdminPurgeAsked
+    | QueueAdminReprocessAsked
+    | QueueAdminActCancelled
+    | QueueAdminActConfirmed
+    | GotQueueAdminCount Int QueueAdmin.Scope (Result (Graphql.Http.Error QueueAdmin.Tally) QueueAdmin.Tally)
+    | GotQueueAdminAct Int (Result (Graphql.Http.Error ()) ())
     | Ignored
 
 
@@ -1610,8 +1619,9 @@ update msg model =
                             , invitations = Invitations.empty
 
                             -- The same for the queue's administration: an act asked about
-                            -- is not carried to another visit.
-                            , queueAdmin = QueueAdmin.empty
+                            -- is not carried to another visit. One on its way is, until it
+                            -- is answered, so that no second act is confirmed beside it.
+                            , queueAdmin = QueueAdmin.leave model.queueAdmin
 
                             -- And abandons any measurement of that password. Without
                             -- this, one still in flight when the page was left comes
@@ -1779,41 +1789,45 @@ update msg model =
         JobsChosen params ->
             ( model, Nav.pushUrl model.key (Route.toHref model.basePath (Route.QueueJobs params)) )
 
-        QueueToggled queue ->
+        QueueAdminQueueToggled queue ->
             let
-                ( queueAdmin, wanted ) =
+                ( queueAdmin, call ) =
                     QueueAdmin.toggleQueue queue model.queueAdmin
             in
-            askQueue wanted { model | queueAdmin = queueAdmin }
+            callQueue call { model | queueAdmin = queueAdmin }
 
-        QueueStatusToggled status ->
+        QueueAdminStatusToggled status ->
             let
-                ( queueAdmin, wanted ) =
+                ( queueAdmin, call ) =
                     QueueAdmin.toggleStatus status model.queueAdmin
             in
-            askQueue wanted { model | queueAdmin = queueAdmin }
+            callQueue call { model | queueAdmin = queueAdmin }
 
-        QueueFormEdited change ->
+        QueueAdminFormEdited change ->
             ( { model | queueAdmin = QueueAdmin.edit change model.queueAdmin }, Cmd.none )
 
-        QueuePurgeAsked ->
+        QueueAdminPurgeAsked ->
             ( { model | queueAdmin = QueueAdmin.askPurge model.queueAdmin }, Cmd.none )
 
-        QueueReprocessAsked ->
+        QueueAdminReprocessAsked ->
             ( { model | queueAdmin = QueueAdmin.askReprocess model.queueAdmin }, Cmd.none )
 
-        QueueActKept ->
-            ( { model | queueAdmin = QueueAdmin.keep model.queueAdmin }, Cmd.none )
+        QueueAdminActCancelled ->
+            ( { model | queueAdmin = QueueAdmin.cancel model.queueAdmin }, Cmd.none )
 
-        QueueActConfirmed ->
-            case QueueAdmin.confirm model.queueAdmin of
-                ( queueAdmin, Just wanted ) ->
-                    askQueue wanted { model | queueAdmin = queueAdmin }
+        QueueAdminActConfirmed ->
+            let
+                number =
+                    model.queueAdminActs + 1
+            in
+            case QueueAdmin.confirm number model.queueAdmin of
+                ( queueAdmin, Just call ) ->
+                    callQueue call { model | queueAdmin = queueAdmin, queueAdminActs = number }
 
                 ( _, Nothing ) ->
                     ( model, Cmd.none )
 
-        GotQueueCount epoch scope result ->
+        GotQueueAdminCount epoch scope result ->
             if epoch /= model.epoch then
                 ( model, Cmd.none )
 
@@ -1831,24 +1845,36 @@ update msg model =
                                 )
                             )
 
-        GotQueueAct result ->
-            -- A refusal that says the Identity has gone stale refetches it, and that empties
-            -- the page with every other; anything else is the act's own answer.
+        GotQueueAdminAct number result ->
+            -- The answer is the act's first, whatever else it says: it ends the act on its way,
+            -- which outlasts leaving the page and a refetched Identity alike. Then a refusal
+            -- that says the Identity is stale refetches it, and anything else asks for the
+            -- recount the answer wants, if the page is still showing to draw it.
             let
-                answer current =
-                    case QueueAdmin.answered (Result.mapError ApiError.fromError result) current.queueAdmin of
-                        ( queueAdmin, Just wanted ) ->
-                            askQueue wanted { current | queueAdmin = queueAdmin }
+                ( queueAdmin, recount ) =
+                    QueueAdmin.answered number result model.queueAdmin
 
-                        ( queueAdmin, Nothing ) ->
-                            ( { current | queueAdmin = queueAdmin }, Cmd.none )
+                answered =
+                    { model | queueAdmin = queueAdmin }
+
+                counting current =
+                    case recount of
+                        Just call ->
+                            if current.route == Route.AdminQueue then
+                                callQueue call current
+
+                            else
+                                ( current, Cmd.none )
+
+                        Nothing ->
+                            ( current, Cmd.none )
             in
             case result of
                 Ok () ->
-                    answer model
+                    counting answered
 
                 Err error ->
-                    onRequestFailure error model (\_ current -> answer current)
+                    onRequestFailure error answered (\_ current -> counting current)
 
         JobToggled jobId ->
             ( { model | jobs = QueueJobs.toggle jobId model.jobs }, Cmd.none )
@@ -1997,35 +2023,44 @@ chooseStats route model =
         ( model, Nav.pushUrl model.key (Route.toHref model.basePath route) )
 
 
-{-| Send what the queue's administration asks for. A count goes under a fresh epoch, so only the
-answer to the newest is applied; an act is the only one on its way, which the page makes sure
-of, and its answer is told apart by the page's own step.
+{-| Send what the queue's administration asks for, under a fresh epoch, so that only the
+answer to the newest count is drawn. The page asks for nothing while it is not showing, and an
+act's answer, the one answer not checked by epoch, is checked by its number.
 -}
-askQueue : QueueAdmin.Request -> Model -> ( Model, Cmd Msg )
-askQueue wanted model =
+callQueue : QueueAdmin.Call -> Model -> ( Model, Cmd Msg )
+callQueue call model =
     let
         epoch =
-            case wanted of
-                QueueAdmin.CountJobs _ ->
-                    model.epoch + 1
-
-                _ ->
-                    model.epoch
+            model.epoch + 1
     in
     ( { model | epoch = epoch }
-    , QueueAdmin.send model.apiUrl { counted = GotQueueCount epoch, acted = GotQueueAct } wanted
+    , QueueAdmin.send model.apiUrl (queueAdminCalls epoch) call
     )
+
+
+{-| Where the answers to the queue's administration's calls go: a count under `epoch`.
+-}
+queueAdminCalls :
+    Int
+    ->
+        { counted : QueueAdmin.Scope -> Result (Graphql.Http.Error QueueAdmin.Tally) QueueAdmin.Tally -> Msg
+        , acted : Int -> Result (Graphql.Http.Error ()) () -> Msg
+        }
+queueAdminCalls epoch =
+    { counted = GotQueueAdminCount epoch
+    , acted = GotQueueAdminAct
+    }
 
 
 queueAdminMessages : QueueAdmin.Messages Msg
 queueAdminMessages =
-    { queueToggled = QueueToggled
-    , statusToggled = QueueStatusToggled
-    , edited = QueueFormEdited
-    , purgeAsked = QueuePurgeAsked
-    , reprocessAsked = QueueReprocessAsked
-    , kept = QueueActKept
-    , confirmed = QueueActConfirmed
+    { queueToggled = QueueAdminQueueToggled
+    , statusToggled = QueueAdminStatusToggled
+    , edited = QueueAdminFormEdited
+    , purgeAsked = QueueAdminPurgeAsked
+    , reprocessAsked = QueueAdminReprocessAsked
+    , cancelled = QueueAdminActCancelled
+    , confirmed = QueueAdminActConfirmed
     }
 
 
@@ -2704,7 +2739,7 @@ beginIdentityRefresh reason model =
         , jobs = QueueJobs.empty
         , torrentStats = StatsLook.empty
         , queueStats = StatsLook.empty
-        , queueAdmin = QueueAdmin.empty
+        , queueAdmin = QueueAdmin.leave model.queueAdmin
 
         -- And a pending search-debounce is spent: the timer it would fire belongs to a
         -- screen that no longer holds the search it was typed into.
@@ -2783,7 +2818,7 @@ identityApplied identity model =
                                 , results = results
                                 , epoch = epoch
                                 , infiniteList = InfiniteList.init
-                                , queueAdmin = QueueAdmin.empty
+                                , queueAdmin = QueueAdmin.leave model.queueAdmin
                             }
                 in
                 ( refreshed
@@ -2839,9 +2874,7 @@ load identity apiUrl epochs route =
 
         Route.AdminQueue ->
             ( Blank
-            , QueueAdmin.send apiUrl
-                { counted = GotQueueCount epochs.query, acted = GotQueueAct }
-                (QueueAdmin.CountJobs QueueAdmin.emptyScope)
+            , QueueAdmin.send apiUrl (queueAdminCalls epochs.query) QueueAdmin.opening
             )
 
         -- The health report is the header's as well as this page's, so it is fetched

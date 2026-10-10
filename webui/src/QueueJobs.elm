@@ -1,4 +1,4 @@
-module QueueJobs exposing (Job, Listing, Messages, Page, State, empty, failed, fetch, loaded, prettyPayload, query, refreshing, toggle, view)
+module QueueJobs exposing (Job, Listing, Messages, Page, State, empty, facetCounts, failed, fetch, loaded, prettyPayload, query, refreshing, statuses, toggle, view, withChosen)
 
 {-| bitmagnet's queue, a page of jobs at a time: filtered by queue and status, ordered, and
 opened one by one to read what each was asked to do and how it failed.
@@ -157,23 +157,14 @@ query params =
                         , hasNextPage = Present True
                         , facets =
                             Present
-                                { status = Present { aggregate = Present True, filter = presentList params.statuses }
-                                , queue = Present { aggregate = Present True, filter = presentList params.queues }
+                                { status = Present { aggregate = Present True, filter = Bitmagnet.optionalList params.statuses }
+                                , queue = Present { aggregate = Present True, filter = Bitmagnet.optionalList params.queues }
                                 }
                         , orderBy = Present (orderBy params.order)
                     }
                 )
     in
     Query.queue (QueueQuery.jobs { input = input } pageSelection)
-
-
-presentList : List a -> OptionalArgument (List a)
-presentList values =
-    if List.isEmpty values then
-        Absent
-
-    else
-        Present values
 
 
 orderBy : JobOrder -> List InputObject.QueueJobsOrderByInput
@@ -190,18 +181,18 @@ orderBy order =
 pageSelection : SelectionSet Page Magnes.Api.Object.QueueJobsQueryResult
 pageSelection =
     SelectionSet.succeed
-        (\jobs totalCount hasNextPage ( queues, statuses ) ->
+        (\jobs totalCount hasNextPage ( queueCounts, statusCounts ) ->
             { jobs = jobs
             , totalCount = totalCount
             , hasNextPage = Maybe.withDefault False hasNextPage
-            , queues = queues
-            , statuses = statuses
+            , queues = queueCounts
+            , statuses = statusCounts
             }
         )
         |> with (JobsResult.items jobSelection)
         |> with JobsResult.totalCount
         |> with JobsResult.hasNextPage
-        |> with (JobsResult.aggregations aggregationsSelection)
+        |> with (JobsResult.aggregations facetCounts)
 
 
 jobSelection : SelectionSet Job Magnes.Api.Object.QueueJob
@@ -220,35 +211,32 @@ jobSelection =
         |> with QueueJob.createdAt
 
 
-{-| bitmagnet sends each facet's counts sorted by label. Queues stay that way; statuses are
-put in the schema's order, which is the order of a job's life, rather than alphabetical.
+{-| Each facet's counts: the queues', then the statuses'. bitmagnet sends each sorted by
+label. Queues stay that way; statuses are put in the order of a job's life (`statuses`),
+rather than alphabetical. The queue's administration counts with the same facets.
 -}
-aggregationsSelection : SelectionSet ( List ( String, Int ), List ( QueueJobStatus, Int ) ) Magnes.Api.Object.QueueJobsAggregations
-aggregationsSelection =
+facetCounts : SelectionSet ( List ( String, Int ), List ( QueueJobStatus, Int ) ) Magnes.Api.Object.QueueJobsAggregations
+facetCounts =
     SelectionSet.map2
-        (\queues statuses ->
+        (\queues counted ->
             ( queues |> Maybe.withDefault []
-            , statuses |> Maybe.withDefault [] |> List.sortBy (Tuple.first >> statusRank)
+            , counted |> Maybe.withDefault [] |> inLifeOrder
             )
         )
         (Aggregations.queue (SelectionSet.map2 Tuple.pair QueueAgg.value QueueAgg.count))
         (Aggregations.status (SelectionSet.map2 Tuple.pair StatusAgg.value StatusAgg.count))
 
 
-statusRank : QueueJobStatus -> Int
-statusRank status =
-    case status of
-        QueueJobStatus.Pending ->
-            0
+{-| Every status, in the order of a job's life, which is the schema's order.
+-}
+statuses : List QueueJobStatus
+statuses =
+    [ QueueJobStatus.Pending, QueueJobStatus.Retry, QueueJobStatus.Failed, QueueJobStatus.Processed ]
 
-        QueueJobStatus.Retry ->
-            1
 
-        QueueJobStatus.Failed ->
-            2
-
-        QueueJobStatus.Processed ->
-            3
+inLifeOrder : List ( QueueJobStatus, Int ) -> List ( QueueJobStatus, Int )
+inLifeOrder counted =
+    List.filterMap (\status -> List.filter (Tuple.first >> (==) status) counted |> List.head) statuses
 
 
 

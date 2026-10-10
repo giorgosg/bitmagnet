@@ -7,6 +7,10 @@
 // playwright.config.js, and e2e/README.md, "Specs that change the queue"). Each reads what
 // the queue holds from bitmagnet's own answer rather than from the seed, since the tests before
 // it have changed it, and the last one empties it.
+//
+// Serially and never retried: a retry would find what its first try consumed gone (the failed
+// jobs it purged, the queue it emptied), and a test after a failed one would find the queue
+// in a state nobody meant. Serial mode skips the rest instead.
 
 import {
   createRole,
@@ -19,6 +23,8 @@ import {
   expect,
   test,
 } from "../support/credentialed.js";
+
+test.describe.configure({ mode: "serial", retries: 0 });
 
 function graphqlQuery(request) {
   if (new URL(request.url()).pathname !== "/graphql") return null;
@@ -113,15 +119,18 @@ test("an Identity without queue::mutate is neither offered the page nor let in",
   issuer,
   credentials,
 }) => {
-  // The administrator is offered it, in the Identity menu, and it opens.
-  await signInAt(page, credentials, "/admin/roles", "Create a Role");
+  // The administrator is offered it on the status page, and in the Identity menu.
+  await signInAt(page, credentials, "/status", "Status");
+  await expect(page.getByRole("link", { name: "Queue administration" })).toHaveAttribute("href", "/admin/queue");
+  await page.goto("/admin/roles");
+  await expect(page.getByRole("heading", { name: "Create a Role" })).toBeVisible();
   await page.getByRole("button", { name: credentials.username }).click();
   await expect(page.getByRole("link", { name: "Queue administration" })).toHaveAttribute("href", "/admin/queue");
 
-  // A Role that may read the queue and not change it.
+  // A Role that may read the queue, and bitmagnet's health, and not change the queue.
   const reading = uniqueName("e2e-qread");
   await page.keyboard.press("Escape");
-  await createRole(page, reading, ["queue::query"]);
+  await createRole(page, reading, ["queue::query", "health::query"]);
 
   await inAnotherBrowser(browser, async (them) => {
     const reader = await registerUser(them, request, issuer, "e2e-qread");
@@ -134,7 +143,11 @@ test("an Identity without queue::mutate is neither offered the page nor let in",
     await expect(them.getByRole("heading", { name: "Queue jobs" })).toBeVisible();
     await expect(jobRows(them).first()).toBeVisible();
 
-    // But the menu does not offer its administration, and the page refuses it.
+    // But neither the status page nor the menu offers its administration, and the page
+    // refuses it.
+    await them.goto("/status");
+    await expect(them.getByRole("link", { name: "Queue jobs" })).toBeVisible();
+    await expect(them.getByRole("link", { name: "Queue administration" })).toHaveCount(0);
     await them.getByRole("button", { name: reader.username }).click();
     await expect(them.getByRole("link", { name: "Your User" })).toBeVisible();
     await expect(them.getByRole("link", { name: "Queue administration" })).toHaveCount(0);
@@ -148,6 +161,9 @@ test("an Identity without queue::mutate is neither offered the page nor let in",
   // Anonymous, which the fixture grants every read action and nothing that changes anything, is
   // refused too, and not sent to sign in instead.
   await inAnotherBrowser(browser, async (anonymous) => {
+    await anonymous.goto("/status");
+    await expect(anonymous.getByRole("link", { name: "Queue jobs" })).toBeVisible();
+    await expect(anonymous.getByRole("link", { name: "Queue administration" })).toHaveCount(0);
     await anonymous.goto("/admin/queue");
     await expect(anonymous.getByText("Your Identity does not permit changing bitmagnet's queue.")).toBeVisible();
     expect(new URL(anonymous.url()).pathname).toBe("/admin/queue");

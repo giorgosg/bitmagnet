@@ -34,13 +34,16 @@ of the answer without asking again, all in the URL too. `/queue/jobs` is bitmagn
 page at a time: filtered by queue and status with each facet's counts, ordered, with every
 choice in the URL, and each job opening to show its payload and error in full.
 
-`/admin/queue`, offered in the header menu to an Identity holding `queue::mutate` (and
-`queue::query`, to count with), purges jobs and queues a batch that reprocesses torrents.
+`/admin/queue`, offered in the header menu and on the status page to an Identity holding
+`queue::mutate` (and `queue::query`, to count with), purges jobs and queues a batch that
+reprocesses torrents.
 A purge is chosen by queue and status, with bitmagnet's count of the jobs that match; a
 reprocessing batch by which torrents, how they are classified, whether matches are looked up
 and how big its jobs are, each option labelled with what the fork's source does with it.
-Neither is sent until a question that says what it will do has been answered, and the counts
-are asked for again afterwards. The page points to `/queue/jobs` to watch a batch run.
+Neither is sent until a question that says what it will do has been answered, including that
+reprocessing can delete a torrent the classifier now judges unwanted, and the counts are asked
+for again afterwards. An answer that does not come back leaves the act unknown, and the page
+says so rather than inviting it twice. The page points to `/queue/jobs` to watch a batch run.
 
 Still to do: password change, which the fork has offered since 2026-09-14.
 

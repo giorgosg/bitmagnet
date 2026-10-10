@@ -605,15 +605,12 @@ viewCharts zone params drawnFrom plotted =
 -}
 eventsSaid : Plot -> String
 eventsSaid plotted =
-    case List.reverse (List.map QueueMetrics.eventName plotted.events) of
+    case plotted.events of
         [] ->
             "counted"
 
-        [ only ] ->
-            only
-
-        last :: rest ->
-            String.join ", " (List.reverse rest) ++ " and " ++ last
+        events ->
+            Format.series "and" (List.map QueueMetrics.eventName events)
 
 
 {-| Who "Other queues" are, since a set of lines that adds up several cannot say.

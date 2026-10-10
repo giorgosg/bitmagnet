@@ -125,8 +125,9 @@ opens the jobs table to see them gone; queues a reprocessing batch by content ty
 the mutation the form sent, that it added exactly one job, and the payload bitmagnet stored
 for it, reached through the page's pointer to the jobs table; queues one that purges first and
 checks that it emptied the queue before adding itself; and checks that an Identity that may
-read the queue but not change it, and Anonymous, are refused the page and not offered it. It
-runs in a project of its own, after everything else: see "Specs that change the queue".
+read the queue but not change it, and Anonymous, are refused the page and offered it neither on
+the status page nor in the menu, where an administrator is offered it in both. It runs in a
+project of its own, after everything else: see "Specs that change the queue".
 
 ### Specs that change the queue
 
@@ -141,10 +142,14 @@ Neither can be aimed at jobs nobody else counts.
 So `playwright.config.js` gives them a second project, `credentialed-queue-changes`, which
 `dependencies` start only once every test of the `credentialed` project has finished, and
 which runs its own tests in file order (`fullyParallel: false`), since each leaves the queue
-changed for the next. Two consequences: naming the spec on the command line still runs the
-whole `credentialed` project first (`--no-deps` skips it, which is only safe when nothing else
-is running), and if anything in that project fails, these are skipped rather than run. A new
-spec that changes the queue belongs in `queueChangingSpecs` in the config.
+changed for the next. The spec itself is `serial` with no retries: a retry would find what its
+first try consumed gone, and a test after a failed one would meet a queue nobody meant, so a
+failure skips the rest instead. (Ticket 23 ruled serial mode out for hiding sign-outs between
+workers; here the order is what the tests are about.) Two consequences of the project: naming
+the spec on the command line still runs the whole `credentialed` project first (`--no-deps`
+skips it, which is only safe when nothing else is running), and if anything in that project
+fails, these are skipped rather than run. A new spec that changes the queue belongs in
+`queueChangingSpecs` in the config.
 
 ### What it needs present
 

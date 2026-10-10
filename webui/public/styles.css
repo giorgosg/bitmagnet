@@ -821,6 +821,17 @@ main {
   color: var(--bg);
 }
 
+/* A danger button that cannot be pressed — an act that cannot be asked about yet, or one
+   waiting while another is on its way — looks like any other disabled button. Written after
+   both rules above, which it ties on specificity: without it a disabled danger button kept the
+   accent, and its hover filled it. */
+.page button.danger:disabled {
+  border-color: var(--faint);
+  background: transparent;
+  color: var(--faint);
+  cursor: default;
+}
+
 /* The code just minted. It is the only thing on the screen that cannot be recovered by
    looking again, so it is drawn as an answer rather than as another row. */
 .created {
@@ -1802,16 +1813,6 @@ main {
 .panel.queue-admin-panel > button {
   width: auto;
   margin-top: 0.75rem;
-}
-
-/* An act that cannot be asked about yet — nothing counted, nothing matching, a form with a
-   problem — must not look armed. `.page button.danger` is written after `.page button:disabled`
-   at the same specificity, so without this a disabled act keeps the accent. */
-.queue-admin button.danger:disabled {
-  border-color: var(--faint);
-  background: transparent;
-  color: var(--dim);
-  cursor: default;
 }
 
 /* The question stands where the act's button was. It is the page's most consequential

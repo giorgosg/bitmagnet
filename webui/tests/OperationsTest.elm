@@ -52,6 +52,25 @@ suite =
                         , Query.index 1 >> Query.has [ Selector.text "Queue statistics" ]
                         , Query.index 2 >> Query.has [ Selector.text "Queue jobs" ]
                         ]
+        , test "lists the queue's administration, last, for an Identity that may change the queue" <|
+            \_ ->
+                -- Anonymous may be granted it, and has no Identity menu to find it in.
+                Operations.view mount (Identity.Anonymous [ Identity.graphql "queue" "query", Identity.graphql "queue" "mutate" ])
+                    |> Query.fromHtml
+                    |> Query.findAll [ Selector.tag "a" ]
+                    |> Expect.all
+                        [ Query.count (Expect.equal 3)
+                        , Query.index 2
+                            >> Query.has
+                                [ Selector.text "Queue administration"
+                                , Selector.attribute (Html.Attributes.href "/magnes/admin/queue")
+                                ]
+                        ]
+        , test "does not list it for an Identity that may only read the queue" <|
+            \_ ->
+                Operations.view mount (Identity.Anonymous [ Identity.graphql "queue" "query" ])
+                    |> Query.fromHtml
+                    |> Query.hasNot [ Selector.text "Queue administration" ]
         , test "lists nothing, heading included, for an Identity holding none of them" <|
             \_ ->
                 Operations.view mount (Identity.UserAuthenticated user [ Identity.graphql "health" "query" ])

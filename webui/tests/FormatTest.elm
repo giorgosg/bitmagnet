@@ -48,4 +48,14 @@ suite =
                     Format.dateTime (Time.customZone 90 []) moment
                         |> Expect.equal "2026-08-25 15:33"
             ]
+        , describe "series"
+            [ test "joins the last two with the conjunction and the rest with commas" <|
+                \_ ->
+                    [ Format.series "and" []
+                    , Format.series "and" [ "created" ]
+                    , Format.series "or" [ "pending", "retry" ]
+                    , Format.series "and" [ "created", "processed", "failed" ]
+                    ]
+                        |> Expect.equal [ "", "created", "pending or retry", "created, processed and failed" ]
+            ]
         ]

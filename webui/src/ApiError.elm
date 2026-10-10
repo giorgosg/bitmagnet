@@ -206,8 +206,8 @@ fromCode code refused =
         "UNAUTHORIZED" ->
             Just (Unauthorized refused)
 
-        -- The same refusal, made to an Identity that is neither a User nor an API key
-        -- (bitmagnet `4efaae142`). It carries the same extensions.
+        -- The same refusal, made to an Anonymous Identity (bitmagnet `4efaae142`). It carries
+        -- the same extensions.
         "AUTHENTICATION_REQUIRED" ->
             Just (AuthenticationRequired refused)
 
@@ -231,9 +231,9 @@ fromCode code refused =
 server sees, and so should be refetched. A wrong password does not: it is a statement
 about the credential just offered, not about the Identity in hand.
 
-A refusal to Anonymous does: a session ended on another device, or by an administrator,
-leaves this browser's cookie revoked, and bitmagnet then treats it as Anonymous rather than
-refusing the credential.
+A refusal to Anonymous does. Signing out on another device, or an administrator disabling the
+User, revokes this browser's credential, and bitmagnet then resolves the request to the
+Anonymous Identity rather than refusing the credential.
 
 -}
 isUnauthorized : Failure -> Bool

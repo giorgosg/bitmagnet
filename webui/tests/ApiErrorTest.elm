@@ -145,8 +145,8 @@ suite =
                             Expect.fail "expected an authorization refusal"
             , test "a refusal to Anonymous is its own outcome, carrying the refused Object action" <|
                 \_ ->
-                    -- bitmagnet 4efaae142 split these out of UNAUTHORIZED: a caller that is
-                    -- neither a User nor an API key, refused, is told to authenticate.
+                    -- bitmagnet 4efaae142 split these out of UNAUTHORIZED: an Anonymous Identity,
+                    -- refused, is told to authenticate.
                     from
                         [ withPath [ "queue" ]
                             (codedAt "AUTHENTICATION_REQUIRED"
@@ -217,7 +217,7 @@ suite =
                         |> Expect.equal True
             , test "a refusal to Anonymous means the Identity may be stale" <|
                 \_ ->
-                    -- A session ended elsewhere leaves the browser Anonymous: bitmagnet falls
+                    -- A credential revoked elsewhere leaves the browser Anonymous: bitmagnet falls
                     -- through to the anonymous authenticator for a revoked token.
                     ApiError.isUnauthorized (ApiError.AuthenticationRequired unrefused)
                         |> Expect.equal True
@@ -268,6 +268,10 @@ suite =
                         |> String.toLower
                         |> String.contains "password"
                         |> Expect.equal False
+            , test "a refusal to Anonymous without an Object action still says to sign in" <|
+                \_ ->
+                    ApiError.toMessage (ApiError.AuthenticationRequired unrefused)
+                        |> Expect.equal "Sign in first: Anonymous is not allowed to do that."
             , test "a refusal to Anonymous says to sign in, and what was refused" <|
                 \_ ->
                     ApiError.toMessage

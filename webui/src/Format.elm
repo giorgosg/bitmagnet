@@ -1,4 +1,4 @@
-module Format exposing (bytes, count, date, dateTime, forCount, plural, time)
+module Format exposing (bytes, count, date, dateTime, forCount, plural, series, time)
 
 {-| Human-readable numbers and dates: sizes and counts for the row, dates and times
 wherever a moment is shown to a person.
@@ -173,3 +173,19 @@ forCount n wording =
 
     else
         wording.many
+
+
+{-| Words in a list, as a sentence has them: "a", "a and b", "a, b and c", with the conjunction
+given, so a choice can be "a or b".
+-}
+series : String -> List String -> String
+series conjunction words =
+    case List.reverse words of
+        [] ->
+            ""
+
+        [ only ] ->
+            only
+
+        last :: rest ->
+            String.join ", " (List.reverse rest) ++ " " ++ conjunction ++ " " ++ last
