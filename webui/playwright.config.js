@@ -39,6 +39,8 @@ const baseURL = `https://localhost:${port}`;
 // Resolved against the working directory, which npm scripts set to the repository root.
 process.env.MAGNES_E2E_CREDENTIALS = path.resolve(".dev/e2e-credentials.json");
 
+const queueChangingSpecs = ["**/queue-admin.spec.js"];
+
 const credentialFree = {
   name: "chromium",
   testDir: "e2e",
@@ -51,6 +53,23 @@ const credentialFree = {
 const withCredentials = {
   name: "credentialed",
   testDir: "e2e/credentialed",
+  testIgnore: queueChangingSpecs,
+  use: { ...devices["Desktop Chrome"] },
+};
+
+// The specs that change bitmagnet's queue, which the rest of the credentialed suite reads and
+// counts while it runs in parallel. A purge can only name queues and statuses, and the fixture
+// seeds two jobs in every status of both queues, so no purge can miss what the jobs and
+// statistics specs count; a reprocessing batch adds a pending job to one of those queues. So
+// these run after every other credentialed spec has finished (`dependencies`), with the fixture
+// server to themselves, and their own tests in file order (`fullyParallel: false`), since each
+// leaves the queue changed for the next. See e2e/README.md, "Specs that change the queue".
+const changesTheQueue = {
+  name: "credentialed-queue-changes",
+  testDir: "e2e/credentialed",
+  testMatch: queueChangingSpecs,
+  dependencies: ["credentialed"],
+  fullyParallel: false,
   use: { ...devices["Desktop Chrome"] },
 };
 
@@ -68,7 +87,7 @@ export default defineConfig({
     ignoreHTTPSErrors: true,
     trace: "on-first-retry",
   },
-  projects: [credentialed ? withCredentials : credentialFree],
+  projects: credentialed ? [withCredentials, changesTheQueue] : [credentialFree],
   // Only the credentialed run has anything to take down. See e2e/harness/teardown.js for
   // why Playwright's own web-server teardown is not enough.
   globalTeardown: credentialed ? "./e2e/harness/teardown.js" : undefined,

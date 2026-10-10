@@ -24,8 +24,10 @@ import Json.Decode as Decode exposing (Value)
 import Login
 import Magnes.Api.Enum.ContentType as ContentType
 import Magnes.Api.Enum.FilesStatus exposing (FilesStatus(..))
+import Magnes.Api.Enum.QueueJobStatus exposing (QueueJobStatus)
 import Operations
 import Process
+import QueueAdmin
 import QueueJobs
 import QueueStats
 import Register
@@ -178,6 +180,11 @@ type alias Model =
     -- The queue's statistics: the last answer, drawn with the queues and events the route
     -- chooses. Answers carry `epoch`, as the torrent timeline's do.
     , queueStats : QueueStats.State
+
+    -- The queue's administration: what a purge would delete, the reprocessing form, and
+    -- which act has been asked about but not yet confirmed. Counts carry `epoch`, so a count
+    -- of a scope since changed is dropped.
+    , queueAdmin : QueueAdmin.State
     }
 
 
@@ -358,6 +365,7 @@ init flags url key =
       , jobs = QueueJobs.empty
       , torrentStats = StatsLook.empty
       , queueStats = StatsLook.empty
+      , queueAdmin = QueueAdmin.empty
       , users = Users.empty
       , usersEpoch = 0
       , userTyping = 0
@@ -581,6 +589,15 @@ type Msg
     | StatsRefreshRequested
     | GotTorrentStats Int (Result (Graphql.Http.Error TorrentStats.Statistics) TorrentStats.Statistics)
     | GotQueueStats Int (Result (Graphql.Http.Error QueueStats.Statistics) QueueStats.Statistics)
+    | QueueToggled String
+    | QueueStatusToggled QueueJobStatus
+    | QueueFormEdited QueueAdmin.Edit
+    | QueuePurgeAsked
+    | QueueReprocessAsked
+    | QueueActKept
+    | QueueActConfirmed
+    | GotQueueCount Int QueueAdmin.Scope (Result (Graphql.Http.Error QueueAdmin.Tally) QueueAdmin.Tally)
+    | GotQueueAct (Result (Graphql.Http.Error ()) ())
     | Ignored
 
 
@@ -1592,6 +1609,10 @@ update msg model =
                             -- withdrawal, a refusal, and the page that was being read.
                             , invitations = Invitations.empty
 
+                            -- The same for the queue's administration: an act asked about
+                            -- is not carried to another visit.
+                            , queueAdmin = QueueAdmin.empty
+
                             -- And abandons any measurement of that password. Without
                             -- this, one still in flight when the page was left comes
                             -- back to a form nobody has typed into and scores it.
@@ -1758,6 +1779,77 @@ update msg model =
         JobsChosen params ->
             ( model, Nav.pushUrl model.key (Route.toHref model.basePath (Route.QueueJobs params)) )
 
+        QueueToggled queue ->
+            let
+                ( queueAdmin, wanted ) =
+                    QueueAdmin.toggleQueue queue model.queueAdmin
+            in
+            askQueue wanted { model | queueAdmin = queueAdmin }
+
+        QueueStatusToggled status ->
+            let
+                ( queueAdmin, wanted ) =
+                    QueueAdmin.toggleStatus status model.queueAdmin
+            in
+            askQueue wanted { model | queueAdmin = queueAdmin }
+
+        QueueFormEdited change ->
+            ( { model | queueAdmin = QueueAdmin.edit change model.queueAdmin }, Cmd.none )
+
+        QueuePurgeAsked ->
+            ( { model | queueAdmin = QueueAdmin.askPurge model.queueAdmin }, Cmd.none )
+
+        QueueReprocessAsked ->
+            ( { model | queueAdmin = QueueAdmin.askReprocess model.queueAdmin }, Cmd.none )
+
+        QueueActKept ->
+            ( { model | queueAdmin = QueueAdmin.keep model.queueAdmin }, Cmd.none )
+
+        QueueActConfirmed ->
+            case QueueAdmin.confirm model.queueAdmin of
+                ( queueAdmin, Just wanted ) ->
+                    askQueue wanted { model | queueAdmin = queueAdmin }
+
+                ( _, Nothing ) ->
+                    ( model, Cmd.none )
+
+        GotQueueCount epoch scope result ->
+            if epoch /= model.epoch then
+                ( model, Cmd.none )
+
+            else
+                case result of
+                    Ok counts ->
+                        ( { model | queueAdmin = QueueAdmin.counted scope (Ok counts) model.queueAdmin }, Cmd.none )
+
+                    Err error ->
+                        onRequestFailure error
+                            model
+                            (\_ current ->
+                                ( { current | queueAdmin = QueueAdmin.counted scope (Err (ApiError.fromError error)) current.queueAdmin }
+                                , Cmd.none
+                                )
+                            )
+
+        GotQueueAct result ->
+            -- A refusal that says the Identity has gone stale refetches it, and that empties
+            -- the page with every other; anything else is the act's own answer.
+            let
+                answer current =
+                    case QueueAdmin.answered (Result.mapError ApiError.fromError result) current.queueAdmin of
+                        ( queueAdmin, Just wanted ) ->
+                            askQueue wanted { current | queueAdmin = queueAdmin }
+
+                        ( queueAdmin, Nothing ) ->
+                            ( { current | queueAdmin = queueAdmin }, Cmd.none )
+            in
+            case result of
+                Ok () ->
+                    answer model
+
+                Err error ->
+                    onRequestFailure error model (\_ current -> answer current)
+
         JobToggled jobId ->
             ( { model | jobs = QueueJobs.toggle jobId model.jobs }, Cmd.none )
 
@@ -1903,6 +1995,38 @@ chooseStats route model =
     else
         -- Choosing what to look at is a deliberate act, so it earns a history entry.
         ( model, Nav.pushUrl model.key (Route.toHref model.basePath route) )
+
+
+{-| Send what the queue's administration asks for. A count goes under a fresh epoch, so only the
+answer to the newest is applied; an act is the only one on its way, which the page makes sure
+of, and its answer is told apart by the page's own step.
+-}
+askQueue : QueueAdmin.Request -> Model -> ( Model, Cmd Msg )
+askQueue wanted model =
+    let
+        epoch =
+            case wanted of
+                QueueAdmin.CountJobs _ ->
+                    model.epoch + 1
+
+                _ ->
+                    model.epoch
+    in
+    ( { model | epoch = epoch }
+    , QueueAdmin.send model.apiUrl { counted = GotQueueCount epoch, acted = GotQueueAct } wanted
+    )
+
+
+queueAdminMessages : QueueAdmin.Messages Msg
+queueAdminMessages =
+    { queueToggled = QueueToggled
+    , statusToggled = QueueStatusToggled
+    , edited = QueueFormEdited
+    , purgeAsked = QueuePurgeAsked
+    , reprocessAsked = QueueReprocessAsked
+    , kept = QueueActKept
+    , confirmed = QueueActConfirmed
+    }
 
 
 torrentStatsMessages : TorrentStats.Messages Msg
@@ -2173,6 +2297,9 @@ lookAgain nudge model =
                 ( model, Cmd.none )
 
             Route.AdminInvitations ->
+                ( model, Cmd.none )
+
+            Route.AdminQueue ->
                 ( model, Cmd.none )
 
             Route.Status ->
@@ -2517,6 +2644,9 @@ routeNeedsSearch route =
         Route.AdminInvitations ->
             False
 
+        Route.AdminQueue ->
+            False
+
         Route.Status ->
             False
 
@@ -2574,6 +2704,7 @@ beginIdentityRefresh reason model =
         , jobs = QueueJobs.empty
         , torrentStats = StatsLook.empty
         , queueStats = StatsLook.empty
+        , queueAdmin = QueueAdmin.empty
 
         -- And a pending search-debounce is spent: the timer it would fire belongs to a
         -- screen that no longer holds the search it was typed into.
@@ -2641,7 +2772,9 @@ identityApplied identity model =
                     ( results, cmd ) =
                         guardedLoad model identity epoch model.route
 
-                    -- A different Identity may read different fields: workers, for one.
+                    -- A different Identity may read different fields: workers, for one. And an
+                    -- act asked about under the old one is not confirmed under this one: the
+                    -- queue's administration starts again, counting what it opens on.
                     ( refreshed, healthCmd ) =
                         refreshHealth
                             { model
@@ -2650,6 +2783,7 @@ identityApplied identity model =
                                 , results = results
                                 , epoch = epoch
                                 , infiniteList = InfiniteList.init
+                                , queueAdmin = QueueAdmin.empty
                             }
                 in
                 ( refreshed
@@ -2702,6 +2836,13 @@ load identity apiUrl epochs route =
 
         Route.AdminInvitations ->
             ( Blank, Invitations.fetch apiUrl 0 (GotInvitations epochs.identity) )
+
+        Route.AdminQueue ->
+            ( Blank
+            , QueueAdmin.send apiUrl
+                { counted = GotQueueCount epochs.query, acted = GotQueueAct }
+                (QueueAdmin.CountJobs QueueAdmin.emptyScope)
+            )
 
         -- The health report is the header's as well as this page's, so it is fetched
         -- and polled on its own rather than here: see `refreshHealth`.
@@ -2919,6 +3060,9 @@ documentTitle model =
 
         Route.AdminInvitations ->
             "Invitations — magnes"
+
+        Route.AdminQueue ->
+            "queue administration — magnes"
 
         Route.Status ->
             "status — magnes"
@@ -3171,6 +3315,9 @@ viewAllowedRoute model =
 
         Route.AdminInvitations ->
             Invitations.view model.basePath model.zone invitationsMessages model.identity model.invitations
+
+        Route.AdminQueue ->
+            QueueAdmin.view model.basePath queueAdminMessages model.queueAdmin
 
         Route.Status ->
             div []

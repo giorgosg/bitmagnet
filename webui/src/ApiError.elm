@@ -64,6 +64,7 @@ type Failure
     | PasswordInsufficientEntropy
     | EmailRequired
     | Unauthorized Refusal
+    | AuthenticationRequired Refusal
     | UserAuthenticationRequired
     | ApiKeyManagementForbidden
     | ServiceUnavailable
@@ -205,6 +206,11 @@ fromCode code refused =
         "UNAUTHORIZED" ->
             Just (Unauthorized refused)
 
+        -- The same refusal, made to an Identity that is neither a User nor an API key
+        -- (bitmagnet `4efaae142`). It carries the same extensions.
+        "AUTHENTICATION_REQUIRED" ->
+            Just (AuthenticationRequired refused)
+
         "USER_SESSION_REQUIRED" ->
             Just UserAuthenticationRequired
 
@@ -224,11 +230,19 @@ fromCode code refused =
 {-| Whether the failure says the Identity Magnes is holding is no longer the one the
 server sees, and so should be refetched. A wrong password does not: it is a statement
 about the credential just offered, not about the Identity in hand.
+
+A refusal to Anonymous does: a session ended on another device, or by an administrator,
+leaves this browser's cookie revoked, and bitmagnet then treats it as Anonymous rather than
+refusing the credential.
+
 -}
 isUnauthorized : Failure -> Bool
 isUnauthorized failure =
     case failure of
         Unauthorized _ ->
+            True
+
+        AuthenticationRequired _ ->
             True
 
         UserAuthenticationRequired ->
@@ -289,6 +303,18 @@ toMessage failure =
 
                 Nothing ->
                     "You are not allowed to do that."
+
+        AuthenticationRequired { objectAction } ->
+            case objectAction of
+                Just refused ->
+                    "Sign in first: Anonymous is not allowed to "
+                        ++ refused.action
+                        ++ " "
+                        ++ refused.object
+                        ++ "."
+
+                Nothing ->
+                    "Sign in first: Anonymous is not allowed to do that."
 
         UserAuthenticationRequired ->
             "That needs you to be signed in."

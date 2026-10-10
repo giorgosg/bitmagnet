@@ -30,6 +30,7 @@ type Route
     | AdminUsers
     | AdminRoles
     | AdminInvitations
+    | AdminQueue
     | Status
     | QueueJobs JobsParams
     | TorrentStats TorrentStatsParams
@@ -159,6 +160,7 @@ parser =
         , Parser.map AdminUsers (s "admin" </> s "users")
         , Parser.map AdminRoles (s "admin" </> s "roles")
         , Parser.map AdminInvitations (s "admin" </> s "invitations")
+        , Parser.map AdminQueue (s "admin" </> s "queue")
         , Parser.map Status (s "status")
         , Parser.map jobsWith
             (s "queue"
@@ -365,6 +367,9 @@ refreshInterval route =
         AdminInvitations ->
             Nothing
 
+        AdminQueue ->
+            Nothing
+
         Status ->
             Nothing
 
@@ -421,6 +426,9 @@ question route =
             route
 
         AdminInvitations ->
+            route
+
+        AdminQueue ->
             route
 
         Status ->
@@ -488,6 +496,9 @@ toHref (BasePath prefix) route =
 
                 AdminInvitations ->
                     Builder.absolute [ "admin", "invitations" ] []
+
+                AdminQueue ->
+                    Builder.absolute [ "admin", "queue" ] []
 
                 Status ->
                     Builder.absolute [ "status" ] []
@@ -634,6 +645,11 @@ anonymousAccess mount identity route =
         QueueStats _ ->
             requireQueue identity
 
+        -- Refused rather than sent to sign in, as the queue's other pages are: see
+        -- `requireQueueAdministration`.
+        AdminQueue ->
+            requireQueueAdministration identity
+
         UserOverview ->
             loginRedirect mount route
 
@@ -688,6 +704,9 @@ userAccess identity route =
         QueueStats _ ->
             requireQueue identity
 
+        AdminQueue ->
+            requireQueueAdministration identity
+
         _ ->
             Allowed
 
@@ -725,6 +744,25 @@ requireTorrent =
 requireAdministration : Identity.Identity -> Access
 requireAdministration =
     require "auth" "Your Identity does not permit administration."
+
+
+{-| Purging jobs and queueing a reprocessing batch both need `queue::mutate`, and the page
+needs `queue::query` as well: a purge's confirmation says how many jobs it would delete,
+which only the jobs query can count, so an Identity that may change the queue but not read
+it would be offered an act it could not be told the size of.
+
+Refused rather than sent to sign in, whoever is asking, as the queue's other pages are. The
+`anon` Role is not seeded with `queue::mutate` and the core `user` Role does not hold it, so
+signing in would rarely change the answer; an administrator may grant it to either.
+
+-}
+requireQueueAdministration : Identity.Identity -> Access
+requireQueueAdministration identity =
+    if not (Identity.can (Identity.graphql "queue" "mutate") identity) then
+        Refused "Your Identity does not permit changing bitmagnet's queue."
+
+    else
+        require "queue" "Your Identity does not permit reading bitmagnet's queue, which changing it here needs." identity
 
 
 {-| Allowed with the object's `query` action, and otherwise refused with `refusal`.
