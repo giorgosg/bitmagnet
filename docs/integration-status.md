@@ -100,6 +100,7 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#85](https://github.com/giorgosg/bitmagnet/pull/85) | Store API key secrets as SHA-256, not bcrypt                                | local — issue 0010b, review finding 03b                              | 57.6 ms → 118 ns per request; legacy rehash seen red           |
 | [#86](https://github.com/giorgosg/bitmagnet/pull/86) | Refuse `standard_conforming_strings = off`; dev binary logs to stderr       | local — issue 0002 option 1, test-fixtures ticket 03                 | Pool test, payload test with the setting off, stdout test      |
 | [#87](https://github.com/giorgosg/bitmagnet/pull/87) | Start the anonymous role empty by default                                   | local — default anonymous access issue 1                             | New-role, upgrade, GraphQL and Torznab tests observed red      |
+| [#88](https://github.com/giorgosg/bitmagnet/pull/88) | Bound facet counts and group language and content-type values               | local — fork review finding 13                                       | Pool reached 32; 62 language counts; both observed red         |
 
 ## In flight
 
