@@ -105,10 +105,10 @@ review in [porting.md](porting.md) and a test seen **red**.
 
 ## In flight
 
-The metadata request race redesign from lodestone `751a09607` / integration candidate
-`f32ebd2f0` is in flight. It races up to five peers per hash under a crawler-wide limit,
-cancels losing TCP requests, and fixes cancellation in the peer and scrape discovery
-loops. The PR link will be added when the PR is opened.
+[PR #90](https://github.com/giorgosg/bitmagnet/pull/90) redesigns the metadata request
+race from lodestone `751a09607` / integration candidate `f32ebd2f0`. It races up to five
+peers per hash under a crawler-wide limit, cancels losing TCP requests, and fixes
+cancellation in the peer and scrape discovery loops.
 
 ## The static review findings
 
