@@ -1,7 +1,6 @@
 package dao
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 
@@ -10,6 +9,7 @@ import (
 
 type costPlan struct {
 	TotalCost float64 `json:"Total Cost"`
+	PlanRows  int64   `json:"Plan Rows"`
 }
 
 type explainPlan struct {
@@ -24,35 +24,42 @@ func WithinCostBudget(db *gorm.DB, budget float64) (bool, error) {
 		return true, nil
 	}
 
-	// EXPLAIN accepts parameters in the query it plans. Keep them bound here;
-	// ToSQL inlines values and would extend the older count path's risk.
+	plan, err := explain(db)
+	if err != nil {
+		return false, err
+	}
+
+	return plan.TotalCost <= budget, nil
+}
+
+func explain(db *gorm.DB) (costPlan, error) {
+	// EXPLAIN accepts parameters in the query it plans, so the values never
+	// need to be rendered into the SQL text.
 	statement := db.Session(&gorm.Session{DryRun: true}).Find(&[]interface{}{}).Statement
 	if statement.Error != nil {
-		return false, statement.Error
+		return costPlan{}, statement.Error
 	}
 
 	var planJSON []byte
-	if err := db.Raw("EXPLAIN (FORMAT JSON) "+statement.SQL.String(), statement.Vars...).
-		Row().Scan(&planJSON); err != nil {
-		return false, err
+	// DryRun already used the PostgreSQL dialector to number placeholders ($1,
+	// $2, ...). Run that SQL on the connection directly: Raw only binds its own
+	// question-mark placeholders and would silently drop these arguments.
+	if err := statement.ConnPool.QueryRowContext(
+		statement.Context, "EXPLAIN (FORMAT JSON) "+statement.SQL.String(), statement.Vars...,
+	).Scan(&planJSON); err != nil {
+		return costPlan{}, err
 	}
 
 	var plans []explainPlan
 	if err := json.Unmarshal(planJSON, &plans); err != nil {
-		return false, err
+		return costPlan{}, err
 	}
 
 	if len(plans) != 1 {
-		return false, fmt.Errorf("unexpected EXPLAIN plan count: %d", len(plans))
+		return costPlan{}, fmt.Errorf("unexpected EXPLAIN plan count: %d", len(plans))
 	}
 
-	return plans[0].Plan.TotalCost <= budget, nil
-}
-
-func ToSQL(db *gorm.DB) string {
-	return db.ToSQL(func(tx *gorm.DB) *gorm.DB {
-		return tx.Find(&[]interface{}{})
-	})
+	return plans[0].Plan, nil
 }
 
 type BudgetedCountResult struct {
@@ -62,21 +69,27 @@ type BudgetedCountResult struct {
 }
 
 func BudgetedCount(db *gorm.DB, budget float64) (BudgetedCountResult, error) {
-	var row *sql.Row
+	result := BudgetedCountResult{}
 
-	q := ToSQL(db)
 	if budget > 0 {
-		row = db.
-			Raw("SELECT count, cost, budget_exceeded from budgeted_count(?, ?)", q, budget).
-			Row()
-	} else {
-		row = db.
-			Raw("SELECT count(*) as count, 0 as cost, false as budget_exceeded from (" + q + ") t").
-			Row()
+		plan, err := explain(db)
+		if err != nil {
+			return result, err
+		}
+
+		result.Cost = plan.TotalCost
+
+		if plan.TotalCost > budget {
+			result.Count = plan.PlanRows
+			result.BudgetExceeded = true
+
+			return result, nil
+		}
 	}
 
-	result := BudgetedCountResult{}
-	err := row.Scan(&result.Count, &result.Cost, &result.BudgetExceeded)
+	err := db.Session(&gorm.Session{NewDB: true}).
+		Raw("SELECT count(*) FROM (?) AS subquery", db).
+		Row().Scan(&result.Count)
 
 	return result, err
 }

@@ -59,24 +59,16 @@ run through the generic query in `query/query.go`. Three properties are worth kn
 - **Counting is budgeted.** `dao.BudgetedCount` asks Postgres to `EXPLAIN` the query
   first and, if the estimated cost exceeds a budget, returns the planner's row estimate
   rather than an exact count. This is what stops a broad search from sequentially scanning
-  a 33-million-row table just to render "about N results".
+  a 33-million-row table just to render "about N results". The plan and the exact count
+  are separate parameterized queries, so each value stays bound through both operations.
 
-The budgeted count and `genericQuery.checkExists` both work by **rendering the built query
-back to a SQL string** with `gorm.DB.ToSQL` and re-executing that string — in the budgeted
-case by passing it as text to a plpgsql function that `EXECUTE`s it
-(`migrations/00010_budgeted_count.sql`). This is upstream's design. It is the single most
-structurally risky thing in the codebase and is written up in
-the issue notes below; read them before extending the pattern.
-
-Rendering inlines every value with its quotes doubled, which is sound **only while
-`standard_conforming_strings` is on**. With it off, a backslash escapes the next quote, so
-`\'` in a search term or a tag name closes the literal and the rest runs as SQL. PostgreSQL
-has defaulted it on since 9.1, so it is off only when someone set it — per database, per
-role, in a DSN's `options`, or in a pooler — and `internal/database/postgres` therefore
-**refuses to start** when it reads anything but `on`.
-`search/injection_integration_test.go` pins that the escaping holds on a conforming
-server, through the search string, tag criteria and a tag facet filter, under both count
-paths.
+The existence check and limited CTE item strategy also pass GORM subqueries with bound
+parameters. Search no longer renders user values into SQL text. The historical
+`budgeted_count(text, double precision)` function in `migrations/00010_budgeted_count.sql`
+is unused by the application; it remains in existing databases for compatibility with
+older instances during an upgrade. `search/injection_integration_test.go` checks search
+strings, tag criteria and tag facet filters with both counting modes, including with
+`standard_conforming_strings` off.
 
 ## Migrations
 

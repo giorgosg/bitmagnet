@@ -1,8 +1,9 @@
 package search_test
 
 import (
-	"bytes"
-	"log"
+	"context"
+	"database/sql"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -13,17 +14,19 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
-	gormlogger "gorm.io/gorm/logger"
 )
 
-type budgetedCountLog struct{ calls atomic.Int64 }
+type planningQueryCounter struct {
+	gorm.ConnPool
+	calls atomic.Int64
+}
 
-func (w *budgetedCountLog) Write(p []byte) (int, error) {
-	if bytes.Contains(p, []byte("budgeted_count(")) {
-		w.calls.Add(1)
+func (c *planningQueryCounter) QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row {
+	if strings.HasPrefix(query, "EXPLAIN (FORMAT JSON)") {
+		c.calls.Add(1)
 	}
 
-	return len(p), nil
+	return c.ConnPool.QueryRowContext(ctx, query, args...)
 }
 
 func TestLanguageFacetGroupsCountsInsteadOfQueryingEveryLanguage(t *testing.T) {
@@ -51,10 +54,10 @@ func TestLanguageFacetGroupsCountsInsteadOfQueryingEveryLanguage(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	logOutput := &budgetedCountLog{}
-	gormDB := db.Gorm.Session(&gorm.Session{Logger: gormlogger.New(
-		log.New(logOutput, "", 0), gormlogger.Config{LogLevel: gormlogger.Info},
-	)})
+	planQueries := &planningQueryCounter{ConnPool: db.Gorm.Statement.ConnPool}
+	gormDB := db.Gorm.Session(&gorm.Session{NewDB: true})
+	gormDB.ConnPool = planQueries
+	gormDB.Statement.ConnPool = planQueries
 	searchService, err := search.New(search.Params{
 		Query: lazy.New(func() (*dao.Query, error) { return dao.Use(gormDB), nil }),
 	}).Search.Get()
@@ -71,10 +74,10 @@ func TestLanguageFacetGroupsCountsInsteadOfQueryingEveryLanguage(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint(2), result.Aggregations[search.LanguageFacetKey].Items["en"].Count)
 	require.Equal(t, uint(1), result.Aggregations[search.LanguageFacetKey].Items["fr"].Count)
-	require.LessOrEqual(t, logOutput.calls.Load(), int64(2),
+	require.LessOrEqual(t, planQueries.calls.Load(), int64(2),
 		"language aggregation must not issue one count for every language")
 
-	logOutput.calls.Store(0)
+	planQueries.calls.Store(0)
 
 	limited, err := searchService.TorrentContent(ctx,
 		query.Limit(0),
@@ -85,7 +88,7 @@ func TestLanguageFacetGroupsCountsInsteadOfQueryingEveryLanguage(t *testing.T) {
 		)),
 	)
 	require.NoError(t, err)
-	require.Greater(t, logOutput.calls.Load(), int64(2),
+	require.Greater(t, planQueries.calls.Load(), int64(2),
 		"an over-budget grouped plan must fall back to per-value estimates")
 	require.True(t, limited.Aggregations[search.LanguageFacetKey].Items["fr"].IsEstimate)
 
@@ -106,10 +109,10 @@ func TestLanguageFacetUsesGroupedCountsOnSeededCorpus(t *testing.T) {
 	t.Parallel()
 
 	db := dbtest.NewSeeded(t)
-	logOutput := &budgetedCountLog{}
-	gormDB := db.Gorm.Session(&gorm.Session{Logger: gormlogger.New(
-		log.New(logOutput, "", 0), gormlogger.Config{LogLevel: gormlogger.Info},
-	)})
+	planQueries := &planningQueryCounter{ConnPool: db.Gorm.Statement.ConnPool}
+	gormDB := db.Gorm.Session(&gorm.Session{NewDB: true})
+	gormDB.ConnPool = planQueries
+	gormDB.Statement.ConnPool = planQueries
 	searchService, err := search.New(search.Params{
 		Query: lazy.New(func() (*dao.Query, error) { return dao.Use(gormDB), nil }),
 	}).Search.Get()
@@ -122,6 +125,6 @@ func TestLanguageFacetUsesGroupedCountsOnSeededCorpus(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.NotEmpty(t, result.Aggregations[search.LanguageFacetKey].Items)
-	require.LessOrEqual(t, logOutput.calls.Load(), int64(2),
+	require.LessOrEqual(t, planQueries.calls.Load(), int64(2),
 		"a realistic corpus should use the grouped plan rather than exhausting the pool")
 }
