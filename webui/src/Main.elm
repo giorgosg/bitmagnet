@@ -32,7 +32,6 @@ import Roles
 import Route exposing (Route)
 import Set exposing (Set)
 import Sort exposing (Sort)
-import StatsControls
 import Svg
 import Svg.Attributes as SvgAttr
 import Task
@@ -422,7 +421,7 @@ subscriptions model =
 
           else
             Sub.none
-        , statsRefresh model
+        , statsTimer model
         ]
 
 
@@ -1397,8 +1396,8 @@ update msg model =
 
                 -- And so is a chart that was asked to keep itself fresh.
                 ( looked, statsCmd ) =
-                    if refreshesItself refreshed.route then
-                        refreshStatistics refreshed
+                    if Route.refreshInterval refreshed.route /= Nothing then
+                        lookAgain Regardless refreshed
 
                     else
                         ( refreshed, Cmd.none )
@@ -1506,7 +1505,7 @@ update msg model =
                 -- Same query re-submitted; don't throw away results to fetch them again.
                 ( model, Cmd.none )
 
-            else if asksTheSame model.route route then
+            else if Route.withoutRefresh model.route == Route.withoutRefresh route then
                 -- How often to look again is not what to look at. The chart stays, and the
                 -- timer is the subscription's to restart.
                 ( { model | route = route }, Cmd.none )
@@ -1763,44 +1762,46 @@ update msg model =
                             )
 
         StatsChosen params ->
-            -- Choosing what to look at is a deliberate act, so it earns a history entry. The
-            -- chip already in force asks for what is already on screen.
             if Route.TorrentStats params == model.route then
+                -- A chip already in force, or a number typed that came to the multiplier
+                -- already in force: nothing to ask for, and no history entry. Elm draws the
+                -- page again all the same, which puts a field's value back to what the page
+                -- says, so a number that was typed and not kept does not stay in it.
                 ( model, Cmd.none )
 
             else
+                -- Choosing what to look at is a deliberate act, so it earns a history entry.
                 ( model, Nav.pushUrl model.key (Route.toHref model.basePath (Route.TorrentStats params)) )
 
         StatsRefreshDue ->
             if model.visible then
-                refreshStatistics model
+                lookAgain IfIdle model
 
             else
                 ( model, Cmd.none )
 
         StatsRefreshRequested ->
-            refreshStatistics model
+            lookAgain Regardless model
 
         GotTorrentStats epoch result ->
-            if epoch /= model.epoch then
-                ( model, Cmd.none )
+            case ( epoch == model.epoch, model.route ) of
+                ( True, Route.TorrentStats params ) ->
+                    case result of
+                        Ok fetched ->
+                            ( { model | torrentStats = TorrentStats.loaded params fetched model.torrentStats }, Cmd.none )
 
-            else
-                case ( result, model.route ) of
-                    ( Ok fetched, Route.TorrentStats params ) ->
-                        ( { model | torrentStats = TorrentStats.loaded params fetched model.torrentStats }, Cmd.none )
-
-                    ( Ok _, _ ) ->
-                        ( model, Cmd.none )
-
-                    ( Err error, _ ) ->
-                        onRequestFailure error
-                            model
-                            (\_ current ->
-                                ( { current | torrentStats = TorrentStats.failed (ApiError.fromError error) current.torrentStats }
-                                , Cmd.none
+                        Err error ->
+                            onRequestFailure error
+                                model
+                                (\_ current ->
+                                    ( { current | torrentStats = TorrentStats.failed params (ApiError.fromError error) current.torrentStats }
+                                    , Cmd.none
+                                    )
                                 )
-                            )
+
+                -- Asked under a look that has been left, or a newer one was asked for.
+                _ ->
+                    ( model, Cmd.none )
 
         GotResults epoch result ->
             if epoch /= model.epoch then
@@ -2006,73 +2007,89 @@ onRequestFailure error model toFailed =
         toFailed (ApiError.toMessage failure) model
 
 
-{-| Whether a page asks again by itself while it is on screen, so it must also when the tab
-comes back to the front.
--}
-refreshesItself : Route -> Bool
-refreshesItself route =
-    case route of
-        Route.TorrentStats params ->
-            params.controls.refresh /= StatsControls.Off
-
-        _ ->
-            False
-
-
-{-| Whether two routes ask bitmagnet the same question, and differ only in how often the
-page looks again.
--}
-asksTheSame : Route -> Route -> Bool
-asksTheSame one other =
-    case ( one, other ) of
-        ( Route.TorrentStats first, Route.TorrentStats second ) ->
-            TorrentStats.asksTheSame first second
-
-        _ ->
-            False
-
-
 {-| The timer of a page that looks again by itself. It runs only while the tab is showing:
 a chart nobody can see is not worth the requests, and `VisibilityChanged` looks again the
-moment the tab returns.
+moment the tab returns. Which pages have one is `Route.refreshInterval`'s to say.
 -}
-statsRefresh : Model -> Sub Msg
-statsRefresh model =
-    case model.route of
-        Route.TorrentStats params ->
-            case ( model.visible, StatsControls.refreshMillis params.controls.refresh ) of
-                ( True, Just interval ) ->
-                    Time.every interval (\_ -> StatsRefreshDue)
-
-                _ ->
-                    Sub.none
+statsTimer : Model -> Sub Msg
+statsTimer model =
+    case ( model.visible, Route.refreshInterval model.route ) of
+        ( True, Just interval ) ->
+            Time.every interval (\_ -> StatsRefreshDue)
 
         _ ->
             Sub.none
 
 
-{-| Look again, under a fresh epoch so that only the newest answer lands. Nothing is asked
-while an answer is still to come: a timer that fires over a slow request waits for the next
-tick rather than piling another on.
+{-| How firmly a page is told to look again. A timer asks `IfIdle`: one that fires over a slow
+request waits for the next tick rather than piling another on. A person asking, or a tab
+coming back to the front, asks `Regardless`, and the request on its way, which may be one that
+is never answered, is given up on.
 -}
-refreshStatistics : Model -> ( Model, Cmd Msg )
-refreshStatistics model =
-    case ( model.route, Route.guard model.basePath model.identity model.route ) of
-        ( Route.TorrentStats params, Route.Allowed ) ->
-            if TorrentStats.inFlight model.torrentStats then
+type Nudge
+    = IfIdle
+    | Regardless
+
+
+{-| Look again, under a fresh epoch so that only the newest answer lands. Every route is
+listed, with no catch-all, so that a page that is given a timer (`Route.refreshInterval`)
+cannot be left without the look it asks for.
+-}
+lookAgain : Nudge -> Model -> ( Model, Cmd Msg )
+lookAgain nudge model =
+    if Route.guard model.basePath model.identity model.route /= Route.Allowed then
+        ( model, Cmd.none )
+
+    else
+        case model.route of
+            Route.TorrentStats params ->
+                if nudge == IfIdle && TorrentStats.inFlight model.torrentStats then
+                    ( model, Cmd.none )
+
+                else
+                    let
+                        epoch =
+                            model.epoch + 1
+                    in
+                    ( { model | epoch = epoch, torrentStats = TorrentStats.refreshing model.torrentStats }
+                    , TorrentStats.fetch model.apiUrl params (GotTorrentStats epoch)
+                    )
+
+            Route.Search _ ->
                 ( model, Cmd.none )
 
-            else
-                let
-                    epoch =
-                        model.epoch + 1
-                in
-                ( { model | epoch = epoch, torrentStats = TorrentStats.refreshing model.torrentStats }
-                , TorrentStats.fetch model.apiUrl params (GotTorrentStats epoch)
-                )
+            Route.Torrent _ ->
+                ( model, Cmd.none )
 
-        _ ->
-            ( model, Cmd.none )
+            Route.Login _ ->
+                ( model, Cmd.none )
+
+            Route.Register _ ->
+                ( model, Cmd.none )
+
+            Route.UserOverview ->
+                ( model, Cmd.none )
+
+            Route.APIKeys ->
+                ( model, Cmd.none )
+
+            Route.AdminUsers ->
+                ( model, Cmd.none )
+
+            Route.AdminRoles ->
+                ( model, Cmd.none )
+
+            Route.AdminInvitations ->
+                ( model, Cmd.none )
+
+            Route.Status ->
+                ( model, Cmd.none )
+
+            Route.QueueJobs _ ->
+                ( model, Cmd.none )
+
+            Route.NotFound ->
+                ( model, Cmd.none )
 
 
 {-| Ask for the health report again, under a fresh epoch so that only the newest answer

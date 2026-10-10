@@ -1,4 +1,4 @@
-module Route exposing (Access(..), BasePath, JobsParams, LoginParams, RegisterParams, Route(..), SearchParams, TorrentStatsParams, basePath, emptyJobs, emptySearch, emptyTorrentStats, fromUrl, guard, returnDestination, toHref)
+module Route exposing (Access(..), BasePath, JobsParams, LoginParams, RegisterParams, Route(..), SearchParams, TorrentStatsParams, basePath, emptyJobs, emptySearch, emptyTorrentStats, fromUrl, guard, refreshInterval, returnDestination, toHref, withoutRefresh)
 
 {-| Routes are real paths, not fragments — see the README.
 
@@ -12,7 +12,7 @@ import Identity
 import JobOrder exposing (JobOrder)
 import Magnes.Api.Enum.QueueJobStatus as QueueJobStatus exposing (QueueJobStatus)
 import Sort exposing (Sort)
-import StatsControls exposing (Controls, Timeframe(..))
+import StatsControls exposing (Controls)
 import Url exposing (Url)
 import Url.Builder as Builder
 import Url.Parser as Parser exposing ((</>), (<?>), Parser, oneOf, s, top)
@@ -201,8 +201,8 @@ jobsWith queues statuses order direction page =
 
 
 {-| As the jobs' filters do, drops what it does not recognise. The timeframe of everything is
-the queue's alone: the torrent query is not bounded by what the index holds, and a link
-to it is read as the default.
+for a page bounded by what it holds, as the queue's statistics will be; the torrent query is
+not, so a link to it is read as the default.
 -}
 torrentStatsWith : Maybe String -> Maybe String -> Maybe Int -> Maybe String -> List String -> Route
 torrentStatsWith timeframe resolution every refresh sources =
@@ -210,7 +210,7 @@ torrentStatsWith timeframe resolution every refresh sources =
         { controls =
             StatsControls.fromParams
                 { defaults = StatsControls.default
-                , timeframes = List.filter ((/=) AllTime) StatsControls.allTimeframes
+                , timeframes = StatsControls.boundedTimeframes
                 , timeframe = timeframe
                 , resolution = resolution
                 , every = every
@@ -261,6 +261,99 @@ pathWithin prefix path =
 
     else
         Nothing
+
+
+{-| How often the page on this route asks again by itself, if it does. Every route is
+listed, with no catch-all, so that a page that is given a timer is not forgotten here.
+-}
+refreshInterval : Route -> Maybe Float
+refreshInterval route =
+    case route of
+        Search _ ->
+            Nothing
+
+        Torrent _ ->
+            Nothing
+
+        Login _ ->
+            Nothing
+
+        Register _ ->
+            Nothing
+
+        UserOverview ->
+            Nothing
+
+        APIKeys ->
+            Nothing
+
+        AdminUsers ->
+            Nothing
+
+        AdminRoles ->
+            Nothing
+
+        AdminInvitations ->
+            Nothing
+
+        Status ->
+            Nothing
+
+        QueueJobs _ ->
+            Nothing
+
+        TorrentStats params ->
+            StatsControls.refreshMillis params.controls.refresh
+
+        NotFound ->
+            Nothing
+
+
+{-| The same route, not asked again by itself. Two routes that are the same one in this
+sense ask the same question: how often to look again is not what to look at. Every route is
+listed, with no catch-all, for the reason `refreshInterval` is.
+-}
+withoutRefresh : Route -> Route
+withoutRefresh route =
+    case route of
+        Search _ ->
+            route
+
+        Torrent _ ->
+            route
+
+        Login _ ->
+            route
+
+        Register _ ->
+            route
+
+        UserOverview ->
+            route
+
+        APIKeys ->
+            route
+
+        AdminUsers ->
+            route
+
+        AdminRoles ->
+            route
+
+        AdminInvitations ->
+            route
+
+        Status ->
+            route
+
+        QueueJobs _ ->
+            route
+
+        TorrentStats params ->
+            TorrentStats { params | controls = StatsControls.withoutRefresh params.controls }
+
+        NotFound ->
+            route
 
 
 toHref : BasePath -> Route -> String
@@ -523,9 +616,10 @@ requireQueue =
 
 
 {-| Refused rather than sent to sign in, as the other guards here refuse, and the refusal
-says what is missing. `torrent::query` is in the core `user` Role, so a User can open the page
-unless their Role was given less; Anonymous can only if the `anon` Role has been granted it,
-which it starts without (bitmagnet #87).
+says what is missing. `torrent::query` is in the core `user` Role and in the `anon` Role while
+anonymous access is on and an administrator has granted it, which a development fixture does
+(`--anonymous-access`) and a new installation does not. An Identity refused it has been given
+a Role without it.
 -}
 requireTorrent : Identity.Identity -> Access
 requireTorrent =

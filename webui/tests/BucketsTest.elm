@@ -21,6 +21,11 @@ minutes n =
     Time.millisToPosix (tenOClock + n * 60000)
 
 
+hours : Int -> Int
+hours n =
+    n * 60
+
+
 {-| The window of a timeframe that ends at 10:00: the last `length` minutes.
 -}
 lastMinutes : Int -> Buckets.Window
@@ -33,12 +38,31 @@ sample series at count =
     { series = series, at = at, count = count }
 
 
-{-| A slot as a person would write it down: when it starts, and what is in it.
+{-| A grid that begins on the boundaries of its unit, as one in UTC does.
+-}
+plain : MetricsBucketDuration -> Int -> Buckets.Grid
+plain unit every =
+    { unit = unit, every = every, offset = 0 }
+
+
+{-| A slot as a person would write it down: when it starts, in minutes from 10:00, and what
+is in it.
 -}
 slotsOf : Buckets.Grid -> Buckets.Window -> List (Buckets.Sample String) -> List ( Int, List ( String, Int ) )
 slotsOf resolved window samples =
     Buckets.slots resolved window samples
         |> List.map (\slot -> ( (Time.posixToMillis slot.start - tenOClock) // 60000, Dict.toList slot.counts ))
+
+
+{-| The grid and the slots a resolution comes to for some samples, which is how a page asks.
+-}
+drawn : { unit : MetricsBucketDuration, every : Maybe Int } -> Buckets.Window -> List (Buckets.Sample String) -> ( Buckets.Grid, List ( Int, List ( String, Int ) ) )
+drawn resolution window samples =
+    let
+        resolved =
+            Buckets.grid resolution window samples
+    in
+    ( resolved, slotsOf resolved window samples )
 
 
 suite : Test
@@ -48,82 +72,202 @@ suite =
             [ test "keeps a multiplier that was asked for" <|
                 \_ ->
                     Buckets.grid { unit = Hour, every = Just 3 } (lastMinutes 360) []
-                        |> Expect.equal { unit = Hour, every = 3 }
+                        |> Expect.equal (plain Hour 3)
             , test "chooses one bucket a minute over an hour, as the Angular UI does" <|
                 \_ ->
                     -- 60 minutes of span is under the 100 that earns a step of five.
                     Buckets.grid { unit = Minute, every = Nothing } (lastMinutes 60) []
-                        |> Expect.equal { unit = Minute, every = 1 }
+                        |> Expect.equal (plain Minute 1)
             , test "chooses fifteen minutes over six hours" <|
                 \_ ->
                     -- 360 minutes: floor (360 / 100) = 3 steps of five.
                     Buckets.grid { unit = Minute, every = Nothing } (lastMinutes 360) []
-                        |> Expect.equal { unit = Minute, every = 15 }
+                        |> Expect.equal (plain Minute 15)
+            , test "chooses thirty-five minutes over twelve hours" <|
+                \_ ->
+                    Buckets.grid { unit = Minute, every = Nothing } (lastMinutes 720) []
+                        |> Expect.equal (plain Minute 35)
             , test "never chooses more than an hour of minutes" <|
                 \_ ->
                     Buckets.grid { unit = Minute, every = Nothing } (lastMinutes (7 * 24 * 60)) []
-                        |> Expect.equal { unit = Minute, every = 60 }
+                        |> .every
+                        |> Expect.atMost 60
             , test "chooses five hours over a week of hours, and a day over a week of days" <|
                 \_ ->
                     ( Buckets.grid { unit = Hour, every = Nothing } (lastMinutes (7 * 24 * 60)) []
                     , Buckets.grid { unit = Day, every = Nothing } (lastMinutes (7 * 24 * 60)) []
                     )
-                        |> Expect.equal ( { unit = Hour, every = 5 }, { unit = Day, every = 1 } )
-            , test "raises a multiplier that was asked for when it would make more columns than a chart can draw" <|
+                        |> Expect.equal ( plain Hour 5, plain Day 1 )
+            , test "decides on the window alone when there is a start, whatever came back" <|
                 \_ ->
-                    -- A week of minutes is 10,081 columns; 6 of them to a bucket is under 2,000.
-                    Buckets.grid { unit = Minute, every = Just 1 } (lastMinutes (7 * 24 * 60)) []
-                        |> Expect.equal { unit = Minute, every = 6 }
-            , test "keeps what a chart can draw: a day of minutes, and 1,998 of them, are left as asked" <|
-                \_ ->
-                    ( Buckets.grid { unit = Minute, every = Just 1 } (lastMinutes (24 * 60)) []
-                    , Buckets.grid { unit = Minute, every = Just 1 } (lastMinutes 1998) []
-                    )
-                        |> Expect.equal ( { unit = Minute, every = 1 }, { unit = Minute, every = 1 } )
-            , test "never makes more than 2,000 columns, however long the window" <|
-                \_ ->
-                    let
-                        window =
-                            { from = Nothing, to = minutes 0 }
-
-                        years =
-                            [ sample "a" (minutes (-5 * 365 * 24 * 60)) 1 ]
-
-                        chosen =
-                            Buckets.grid { unit = Minute, every = Nothing } window years
-                    in
-                    Buckets.slots chosen window years
-                        |> List.length
-                        |> Expect.atMost 2000
+                    -- The request was made for the window, and so was its start rounded down.
+                    -- A sample from beyond it (a browser clock behind the server's) is drawn, but
+                    -- is not what the multiplier is chosen from.
+                    Buckets.grid { unit = Minute, every = Nothing }
+                        { from = Just (minutes -60), to = minutes -60 }
+                        [ sample "a" (minutes 300) 1 ]
+                        |> Expect.equal (plain Minute 1)
             , test "without a start, spans from the earliest sample to the end of the window" <|
                 \_ ->
                     -- Six hours of data and no start to the window: as six hours would be.
                     Buckets.grid { unit = Minute, every = Nothing }
                         { from = Nothing, to = minutes 0 }
                         [ sample "a" (minutes -360) 1 ]
-                        |> Expect.equal { unit = Minute, every = 15 }
-            , test "counts a sample later than the end of the window, as the Angular UI does" <|
+                        |> Expect.equal (plain Minute 15)
+            , test "without a start, counts a sample later than the end of the window, as the Angular UI does" <|
                 \_ ->
                     -- The browser's clock can run behind the server's.
                     Buckets.grid { unit = Minute, every = Nothing }
-                        { from = Just (minutes -60), to = minutes -60 }
+                        { from = Nothing, to = minutes -60 }
                         [ sample "a" (minutes 300) 1 ]
-                        |> Expect.equal { unit = Minute, every = 15 }
+                        |> Expect.equal (plain Minute 15)
+            , describe "in the largest whole unit"
+                [ test "is an hour where the multiplier made one, however it was chosen" <|
+                    \_ ->
+                        ( Buckets.grid { unit = Minute, every = Just 60 } (lastMinutes (hours 6)) []
+                        , Buckets.grid { unit = Minute, every = Just 120 } (lastMinutes (hours 6)) []
+                        )
+                            |> Expect.equal ( plain Hour 1, plain Hour 2 )
+                , test "is a day where the multiplier made one" <|
+                    \_ ->
+                        [ Buckets.grid { unit = Minute, every = Just 1440 } (lastMinutes (hours 72)) []
+                        , Buckets.grid { unit = Minute, every = Just 2880 } (lastMinutes (hours 72)) []
+                        , Buckets.grid { unit = Hour, every = Just 24 } (lastMinutes (hours 72)) []
+                        , Buckets.grid { unit = Hour, every = Just 48 } (lastMinutes (hours 72)) []
+                        ]
+                            |> Expect.equal [ plain Day 1, plain Day 2, plain Day 1, plain Day 2 ]
+                , test "is left alone where it is not a whole number of the larger unit" <|
+                    \_ ->
+                        ( Buckets.grid { unit = Minute, every = Just 90 } (lastMinutes (hours 72)) []
+                        , Buckets.grid { unit = Hour, every = Just 5 } (lastMinutes (hours 72)) []
+                        )
+                            |> Expect.equal ( plain Minute 90, plain Hour 5 )
+                , test "makes a day or a week of the default minutes into hours, so bitmagnet is not asked for them by the minute" <|
+                    \_ ->
+                        ( Buckets.grid { unit = Minute, every = Nothing } (lastMinutes (hours 24)) []
+                        , Buckets.grid { unit = Minute, every = Nothing } (lastMinutes (7 * hours 24)) []
+                        )
+                            |> Expect.equal ( plain Hour 1, plain Hour 1 )
+                ]
+            , describe "never more than 2,000 columns"
+                [ test "raises a multiplier that was asked for when it would make more, and says what was asked for" <|
+                    \_ ->
+                        -- A week of minutes is 10,081 columns; 6 of them to a bucket is under 2,000.
+                        ( Buckets.grid { unit = Minute, every = Just 1 } (lastMinutes (7 * 24 * 60)) []
+                        , Buckets.unlimited { unit = Minute, every = Just 1 } (lastMinutes (7 * 24 * 60)) []
+                        )
+                            |> Expect.equal ( plain Minute 6, plain Minute 1 )
+                , test "raises one that was left to Magnes just the same, over a window with no start" <|
+                    \_ ->
+                        let
+                            window =
+                                { from = Nothing, to = minutes 0 }
+
+                            years =
+                                [ sample "a" (minutes (-5 * 365 * 24 * 60)) 1 ]
+
+                            resolution =
+                                { unit = Minute, every = Nothing }
+                        in
+                        ( List.length (Buckets.slots (Buckets.grid resolution window years) window years) <= 2000
+                        , Buckets.grid resolution window years /= Buckets.unlimited resolution window years
+                        )
+                            |> Expect.equal ( True, True )
+                , test "leaves what a chart can draw as asked: a day of minutes, and 1,998 of them" <|
+                    \_ ->
+                        ( Buckets.grid { unit = Minute, every = Just 1 } (lastMinutes (24 * 60)) []
+                        , Buckets.grid { unit = Minute, every = Just 1 } (lastMinutes 1998) []
+                        )
+                            |> Expect.equal ( plain Minute 1, plain Minute 1 )
+                ]
+            , describe "in a time zone of its own"
+                [ test "begins a day where bitmagnet began it, three hours ahead of UTC" <|
+                    \_ ->
+                        -- Athens in October: a day begins at 21:00 UTC. The first column is the one the
+                        -- window opens in, 12:00 UTC on 8 October, which began at 21:00 on the 7th.
+                        drawn { unit = Day, every = Just 1 }
+                            { from = Just (minutes -2760), to = minutes 0 }
+                            [ sample "a" (minutes -2220) 5, sample "a" (minutes -780) 7 ]
+                            |> Expect.equal
+                                ( { unit = Day, every = 1, offset = 21 * 3600 * 1000 }
+                                , [ ( -3660, [] ), ( -2220, [ ( "a", 5 ) ] ), ( -780, [ ( "a", 7 ) ] ) ]
+                                )
+                , test "begins a day where bitmagnet began it, five hours behind UTC" <|
+                    \_ ->
+                        -- A zone five hours behind UTC, as New York is in winter: a day begins at 05:00 UTC.
+                        drawn { unit = Day, every = Just 1 }
+                            { from = Just (minutes -2760), to = minutes 0 }
+                            [ sample "a" (minutes -1740) 4, sample "a" (minutes -300) 9 ]
+                            |> Expect.equal
+                                ( { unit = Day, every = 1, offset = 5 * 3600 * 1000 }
+                                , [ ( -3180, [] ), ( -1740, [ ( "a", 4 ) ] ), ( -300, [ ( "a", 9 ) ] ) ]
+                                )
+                , test "begins an hour at the half hour in a zone that is half an hour out, and keeps merged hours to it" <|
+                    \_ ->
+                        -- India: hours begin at :30. Two hours to a bucket, counted from the epoch and
+                        -- shifted by the half hour.
+                        drawn { unit = Hour, every = Just 2 }
+                            { from = Just (minutes -30), to = minutes 30 }
+                            [ sample "a" (minutes -30) 3, sample "a" (minutes 30) 4 ]
+                            |> Expect.equal
+                                ( { unit = Hour, every = 2, offset = 30 * 60 * 1000 }
+                                , [ ( -90, [ ( "a", 3 ) ] ), ( 30, [ ( "a", 4 ) ] ) ]
+                                )
+                , test "takes the offset most of the buckets have, so a day an hour out across a clock change does not move the rest" <|
+                    \_ ->
+                        Buckets.grid { unit = Day, every = Just 1 }
+                            (lastMinutes (hours 72))
+                            [ sample "a" (minutes -780) 1, sample "a" (minutes -2220) 1, sample "a" (minutes -3600) 1 ]
+                            |> .offset
+                            |> Expect.equal (21 * 3600 * 1000)
+                , test "keeps every count: none is lost to a grid that began elsewhere" <|
+                    \_ ->
+                        let
+                            counts =
+                                [ sample "a" (minutes -2220) 5, sample "a" (minutes -780) 7, sample "b" (minutes -780) 11 ]
+
+                            window =
+                                { from = Just (minutes -2760), to = minutes 0 }
+                        in
+                        Buckets.slots (Buckets.grid { unit = Day, every = Just 1 } window counts) window counts
+                            |> List.concatMap (.counts >> Dict.values)
+                            |> List.sum
+                            |> Expect.equal 23
+                ]
+            ]
+        , describe "columnStart"
+            [ test "is where the column a moment falls in begins, so a window can open on a whole one" <|
+                \_ ->
+                    ( Buckets.columnStart (plain Minute 15) (Time.millisToPosix (tenOClock + 7 * 60000 + 30000))
+                    , Buckets.columnStart (plain Hour 6) (minutes 7)
+                    , Buckets.columnStart { unit = Hour, every = 2, offset = 30 * 60 * 1000 } (minutes 7)
+                    )
+                        |> Expect.equal ( minutes 0, minutes -240, minutes -90 )
+            ]
+        , describe "widthIn"
+            [ test "says how many of a smaller unit a bucket is, for a field that names the unit chosen" <|
+                \_ ->
+                    [ Buckets.widthIn Minute (plain Hour 1)
+                    , Buckets.widthIn Hour (plain Day 1)
+                    , Buckets.widthIn Minute (plain Minute 15)
+                    , Buckets.widthIn Minute (plain Hour 6)
+                    ]
+                        |> Expect.equal [ 60, 24, 15, 360 ]
             ]
         , test "names a bucket by its length" <|
             \_ ->
                 List.map Buckets.label
-                    [ { unit = Minute, every = 1 }
-                    , { unit = Minute, every = 15 }
-                    , { unit = Hour, every = 1 }
-                    , { unit = Hour, every = 3 }
-                    , { unit = Day, every = 1 }
+                    [ plain Minute 1
+                    , plain Minute 15
+                    , plain Hour 1
+                    , plain Hour 3
+                    , plain Day 1
                     ]
                     |> Expect.equal [ "minute", "15 minutes", "hour", "3 hours", "day" ]
         , describe "slots"
             [ test "adds up the samples of a merged bucket, and starts the next one on the multiple" <|
                 \_ ->
-                    slotsOf { unit = Minute, every = 5 }
+                    slotsOf (plain Minute 5)
                         { from = Just (minutes 0), to = minutes 5 }
                         [ sample "a" (minutes 1) 2
                         , sample "a" (minutes 3) 3
@@ -132,7 +276,7 @@ suite =
                         |> Expect.equal [ ( 0, [ ( "a", 5 ) ] ), ( 5, [ ( "a", 4 ) ] ) ]
             , test "keeps series apart within a bucket" <|
                 \_ ->
-                    slotsOf { unit = Minute, every = 5 }
+                    slotsOf (plain Minute 5)
                         { from = Just (minutes 0), to = minutes 4 }
                         [ sample "b" (minutes 1) 7
                         , sample "a" (minutes 2) 1
@@ -142,19 +286,19 @@ suite =
             , test "starts a merged bucket on a multiple of its length since the epoch, not on the window" <|
                 \_ ->
                     -- 10:00 UTC is the fifth hour of its block of five, so the block begins at 06:00.
-                    slotsOf { unit = Hour, every = 5 }
+                    slotsOf (plain Hour 5)
                         { from = Just (minutes 0), to = minutes 30 }
-                        [ sample "a" (minutes 30) 7 ]
+                        [ sample "a" (minutes 0) 7 ]
                         |> Expect.equal [ ( -240, [ ( "a", 7 ) ] ) ]
             , test "starts a day on UTC midnight" <|
                 \_ ->
-                    slotsOf { unit = Day, every = 1 }
+                    slotsOf (plain Day 1)
                         { from = Just (minutes 0), to = minutes 30 }
-                        [ sample "a" (minutes 30) 7 ]
+                        [ sample "a" (minutes -600) 7 ]
                         |> Expect.equal [ ( -600, [ ( "a", 7 ) ] ) ]
             , test "keeps an empty bucket between two that are not, so a gap shows as one" <|
                 \_ ->
-                    slotsOf { unit = Minute, every = 5 }
+                    slotsOf (plain Minute 5)
                         { from = Just (minutes -3), to = minutes 22 }
                         [ sample "a" (minutes 0) 1
                         , sample "a" (minutes 20) 2
@@ -169,51 +313,51 @@ suite =
                             ]
             , test "runs to the end of the window even where nothing has happened lately" <|
                 \_ ->
-                    slotsOf { unit = Minute, every = 1 }
+                    slotsOf (plain Minute 1)
                         { from = Just (minutes 0), to = minutes 3 }
                         [ sample "a" (minutes 0) 1 ]
                         |> Expect.equal [ ( 0, [ ( "a", 1 ) ] ), ( 1, [] ), ( 2, [] ), ( 3, [] ) ]
             , test "draws the window with nothing counted in it when there are no samples" <|
                 \_ ->
-                    slotsOf { unit = Minute, every = 1 }
+                    slotsOf (plain Minute 1)
                         { from = Just (minutes 0), to = minutes 2 }
                         []
                         |> Expect.equal [ ( 0, [] ), ( 1, [] ), ( 2, [] ) ]
-            , test "drops a sample from before the window's first bucket" <|
+            , test "puts a sample from before the window's first bucket in the first bucket, and loses none" <|
                 \_ ->
-                    slotsOf { unit = Minute, every = 5 }
+                    slotsOf (plain Minute 5)
                         { from = Just (minutes 0), to = minutes 5 }
-                        [ sample "a" (minutes -2) 9 ]
-                        |> Expect.equal [ ( 0, [] ), ( 5, [] ) ]
+                        [ sample "a" (minutes -2) 9, sample "a" (minutes -60) 1 ]
+                        |> Expect.equal [ ( 0, [ ( "a", 10 ) ] ), ( 5, [] ) ]
             , test "keeps a sample from before the window that shares its first bucket" <|
                 \_ ->
                     -- The window opens at 10:03; the merged bucket it opens in began at 10:00.
-                    slotsOf { unit = Minute, every = 5 }
+                    slotsOf (plain Minute 5)
                         { from = Just (minutes 3), to = minutes 4 }
                         [ sample "a" (minutes 1) 9 ]
                         |> Expect.equal [ ( 0, [ ( "a", 9 ) ] ) ]
             , test "reaches a sample that is later than the end of the window" <|
                 \_ ->
                     -- The browser's clock can run behind the server's; the data is not thrown away.
-                    slotsOf { unit = Minute, every = 5 }
+                    slotsOf (plain Minute 5)
                         { from = Just (minutes 0), to = minutes 5 }
                         [ sample "a" (minutes 12) 3 ]
                         |> Expect.equal [ ( 0, [] ), ( 5, [] ), ( 10, [ ( "a", 3 ) ] ) ]
             , test "without a start, begins at the earliest sample" <|
                 \_ ->
-                    slotsOf { unit = Minute, every = 5 }
+                    slotsOf (plain Minute 5)
                         { from = Nothing, to = minutes 10 }
                         [ sample "a" (minutes 7) 1, sample "a" (minutes 2) 1 ]
                         |> Expect.equal [ ( 0, [ ( "a", 1 ) ] ), ( 5, [ ( "a", 1 ) ] ), ( 10, [] ) ]
             , test "without a start or any samples, has nothing to draw" <|
                 \_ ->
-                    slotsOf { unit = Minute, every = 5 }
+                    slotsOf (plain Minute 5)
                         { from = Nothing, to = minutes 10 }
                         []
                         |> Expect.equal []
             , test "is empty for a window that ends before it begins" <|
                 \_ ->
-                    slotsOf { unit = Minute, every = 1 }
+                    slotsOf (plain Minute 1)
                         { from = Just (minutes 5), to = minutes 0 }
                         []
                         |> Expect.equal []

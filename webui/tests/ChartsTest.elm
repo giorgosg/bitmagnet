@@ -244,6 +244,16 @@ suite =
                                     ]
                                 >> Query.count (Expect.equal 1)
                             ]
+            , test "opens its box at the latest end, which is the end a timeline is read for, and a bar chart's does not" <|
+                \_ ->
+                    ( timeline (hourly 48)
+                        |> Query.findAll [ Selector.class "chart-plot", Selector.class "chart-timeline" ]
+                        |> Query.count (Expect.equal 1)
+                    , stackedBars totals
+                        |> Query.findAll [ Selector.class "chart-timeline" ]
+                        |> Query.count (Expect.equal 0)
+                    )
+                        |> (\( timelineBox, barBox ) -> Expect.all [ always timelineBox, always barBox ] ())
             , test "with a single bucket, marks it with a dot in each series' ink" <|
                 \_ ->
                     -- A line through one point draws nothing.

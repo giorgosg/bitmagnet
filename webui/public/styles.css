@@ -1409,6 +1409,17 @@ main {
   min-width: 44rem;
 }
 
+/* A timeline is read for its right-hand end, now. On a phone it is wider than the box and
+   scrolls, so the box opens at that end: a box that scrolls right-to-left starts there, and
+   the chart inside it is put back left-to-right. */
+.chart-timeline {
+  direction: rtl;
+}
+
+.chart-timeline > * {
+  direction: ltr;
+}
+
 .chart-empty {
   margin: 0;
   color: var(--dim);
@@ -1738,13 +1749,3 @@ main {
   font-size: 0.8125rem;
 }
 
-/* On a phone the chart is wider than the screen and scrolls inside its box. What a timeline
-   is for is the end of it, now, so the box opens at its right edge: a box that scrolls
-   right-to-left starts there, and the chart inside it is put back left-to-right. */
-.torrent-stats .chart-plot {
-  direction: rtl;
-}
-
-.torrent-stats .chart-plot > * {
-  direction: ltr;
-}

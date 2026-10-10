@@ -133,6 +133,27 @@ suite =
                     )
                         |> Expect.equal ( Route.Allowed, Route.Allowed )
             ]
+        , describe "looking again by itself"
+            [ test "a page that asks for it says how often, and every other page says it never does" <|
+                \_ ->
+                    List.map Route.refreshInterval
+                        (Route.TorrentStats chosenStats :: Route.TorrentStats Route.emptyTorrentStats :: List.filter (not << isTorrentStats) routes)
+                        |> Expect.equal (Just 30000 :: Nothing :: List.map (always Nothing) (List.filter (not << isTorrentStats) routes))
+            , test "two looks that differ only in how often to look again are the same look" <|
+                \_ ->
+                    let
+                        slower =
+                            { chosenStats | controls = withRefresh Every5Minutes chosenStats.controls }
+                    in
+                    ( Route.withoutRefresh (Route.TorrentStats chosenStats) == Route.withoutRefresh (Route.TorrentStats slower)
+                    , Route.withoutRefresh (Route.TorrentStats chosenStats) == Route.withoutRefresh (Route.TorrentStats { chosenStats | sources = [] })
+                    )
+                        |> Expect.equal ( True, False )
+            , test "leaves a page that does not look again by itself as it is" <|
+                \_ ->
+                    List.map Route.withoutRefresh (List.filter (not << isTorrentStats) routes)
+                        |> Expect.equal (List.filter (not << isTorrentStats) routes)
+            ]
         , test "Unknown waits and bootstrap failure remains a refusal" <|
             \_ ->
                 ( Route.guard mount Identity.Unknown Route.UserOverview
@@ -281,3 +302,18 @@ user =
     , createdAt = Time.millisToPosix 0
     , updatedAt = Time.millisToPosix 0
     }
+
+
+isTorrentStats : Route.Route -> Bool
+isTorrentStats route =
+    case route of
+        Route.TorrentStats _ ->
+            True
+
+        _ ->
+            False
+
+
+withRefresh : AutoRefresh -> StatsControls.Controls -> StatsControls.Controls
+withRefresh refresh controls =
+    { controls | refresh = refresh }

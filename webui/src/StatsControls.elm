@@ -5,18 +5,20 @@ module StatsControls exposing
     , Timeframe(..)
     , allRefreshes
     , allTimeframes
+    , boundedTimeframes
     , default
     , fromParams
     , refreshMillis
     , rows
     , toParams
     , window
+    , withoutRefresh
     )
 
 {-| The controls the statistics pages share: how far back to look, how coarsely to cut it
 into buckets, and whether to look again by itself. The torrent timeline and the queue's
-differ in their query and their series, not in how time is cut up, so this is one module
-for both (tickets 05 and 06 in `.scratch/dashboard`).
+statistics will differ in their query and their series, not in how time is cut up, so this
+is one module for both (tickets 06 and 05 in `.scratch/dashboard`).
 
 Every choice is in the URL (`docs/adr/0002-put-shareable-search-state-in-real-urls.md`),
 and each page's own filters ride beside these in its own query string.
@@ -48,14 +50,13 @@ type Timeframe
     | AllTime
 
 
-{-| The unit is what bitmagnet buckets by. A multiplier left to Magnes (`Nothing`) is picked
-to give about twenty buckets (`Buckets.grid`), which is what the Angular UI does for a
-resolution nobody typed a number for.
+{-| What a person chose to cut time into: a unit, and a multiplier of it or none, which
+leaves it to Magnes to pick one from how long the timeframe is (`Buckets.grid`, which is the
+Angular UI's rule). Bitmagnet is asked for the largest whole unit the result makes, so the
+unit that was chosen is not always the one it buckets by.
 -}
 type alias Resolution =
-    { unit : MetricsBucketDuration
-    , every : Maybe Int
-    }
+    Buckets.Resolution
 
 
 {-| How often the page asks again by itself. Off is the default: a page that polls is
@@ -76,9 +77,9 @@ type alias Controls =
     }
 
 
-{-| The Angular UI's starting point for the torrent page: the last hour, a bucket a minute,
-and, unlike there, no refreshing until it is asked for. A page that starts elsewhere, as the
-queue's does, says so in `toParams` and `fromParams`.
+{-| The Angular UI's starting point for the torrent page: the last hour, minutes, and, unlike
+there, no refreshing until it is asked for. A page that starts elsewhere, as the queue's
+statistics will, says so in `toParams` and `fromParams`.
 -}
 default : Controls
 default =
@@ -91,6 +92,14 @@ default =
 allTimeframes : List Timeframe
 allTimeframes =
     [ Minutes15, Minutes30, Hours1, Hours6, Hours12, Days1, Weeks1, AllTime ]
+
+
+{-| The timeframes of a page that is bounded by what it asks for: all of them but the one of
+everything, which is for a page whose query is bounded by what it holds.
+-}
+boundedTimeframes : List Timeframe
+boundedTimeframes =
+    List.filter ((/=) AllTime) allTimeframes
 
 
 allRefreshes : List AutoRefresh
@@ -116,6 +125,14 @@ multiplier every =
 
     else
         Nothing
+
+
+{-| The same look, not asked again by itself: what two looks are compared by, since how
+often to look again is not what to look at.
+-}
+withoutRefresh : Controls -> Controls
+withoutRefresh controls =
+    { controls | refresh = Off }
 
 
 
@@ -307,14 +324,14 @@ fromParams params =
 {-| The rows of chips every statistics page opens with, to be joined by the page's own
 filters in the same `facets` box: the timeframe, the resolution, and how often to look again.
 
-`resolved` is the multiplier the page's chart came to, which is shown in the multiplier's
-field where none was chosen. `change` is told the controls as they would be, and the page
-decides where that goes (the address bar).
+`picked` is the multiplier the page's chart came to, in the unit that was chosen, which is
+shown in the multiplier's field where none was typed. `change` is told the controls as they
+would be, and the page decides where that goes (the address bar).
 
 -}
 rows :
     { timeframes : List Timeframe
-    , resolved : Maybe Int
+    , picked : Maybe Int
     , change : Controls -> msg
     , refreshRequested : msg
     }
@@ -365,10 +382,11 @@ rows config controls =
 
 
 {-| Applied when it is left, as the Angular UI's is: a number typed a digit at a time
-would otherwise ask the server for each prefix. Empty, or not a number, hands the choice
-back to Magnes.
+would otherwise ask the server for each prefix. A number is brought to the nearest whole one a
+multiplier can be, so that what was meant is kept, and anything that is not a number hands the
+choice back to Magnes.
 -}
-multiplierField : { a | resolved : Maybe Int, change : Controls -> msg } -> Controls -> Html msg
+multiplierField : { a | picked : Maybe Int, change : Controls -> msg } -> Controls -> Html msg
 multiplierField config controls =
     input
         [ type_ "number"
@@ -378,7 +396,7 @@ multiplierField config controls =
         , step "1"
         , attribute "aria-label" "Buckets of how many"
         , value (controls.resolution.every |> Maybe.map String.fromInt |> Maybe.withDefault "")
-        , placeholder (config.resolved |> Maybe.map String.fromInt |> Maybe.withDefault "auto")
+        , placeholder (config.picked |> Maybe.map String.fromInt |> Maybe.withDefault "auto")
         , Events.on "change"
             (Events.targetValue
                 |> Decode.map
@@ -391,7 +409,7 @@ multiplierField config controls =
                             { controls
                                 | resolution =
                                     { resolution
-                                        | every = String.toInt raw |> Maybe.andThen multiplier
+                                        | every = String.toFloat raw |> Maybe.map (round >> clamp 1 largestMultiplier)
                                     }
                             }
                     )

@@ -1,9 +1,16 @@
 module StatsControlsTest exposing (suite)
 
 import Expect
+import Html
+import Html.Attributes
+import Json.Decode as Decode
+import Json.Encode as Encode
 import Magnes.Api.Enum.MetricsBucketDuration exposing (MetricsBucketDuration(..))
 import StatsControls exposing (AutoRefresh(..), Controls, Timeframe(..))
 import Test exposing (Test, describe, test)
+import Test.Html.Event as Event
+import Test.Html.Query as Query
+import Test.Html.Selector as Selector
 import Time
 import Url.Builder as Builder
 
@@ -123,6 +130,45 @@ suite =
                         }
                         |> Expect.equal shifted
             ]
+        , describe "boundedTimeframes"
+            [ test "are every timeframe but the one of everything, which only a page bounded by what it holds offers" <|
+                \_ ->
+                    StatsControls.boundedTimeframes
+                        |> Expect.equal (List.filter ((/=) AllTime) StatsControls.allTimeframes)
+            ]
+        , describe "withoutRefresh"
+            [ test "is the same look, not asked again by itself" <|
+                \_ ->
+                    StatsControls.withoutRefresh { timeframe = Days1, resolution = { unit = Hour, every = Just 3 }, refresh = Every30Seconds }
+                        |> Expect.equal { timeframe = Days1, resolution = { unit = Hour, every = Just 3 }, refresh = Off }
+            ]
+        , describe "the multiplier's field"
+            [ test "keeps a number typed, and hands the choice back for none" <|
+                \_ ->
+                    [ "15", "", "abc" ]
+                        |> List.map typedMultiplier
+                        |> Expect.equal [ Just (Just 15), Just Nothing, Just Nothing ]
+            , test "brings a number outside what a multiplier can be to the nearest it can, instead of dropping it" <|
+                \_ ->
+                    [ "0", "-3", "20000", "10000" ]
+                        |> List.map typedMultiplier
+                        |> Expect.equal [ Just (Just 1), Just (Just 1), Just (Just 10000), Just (Just 10000) ]
+            , test "rounds a number that is not whole" <|
+                \_ ->
+                    [ "2.4", "2.5", "2.6" ]
+                        |> List.map typedMultiplier
+                        |> Expect.equal [ Just (Just 2), Just (Just 3), Just (Just 3) ]
+            , test "shows the multiplier in force, and where none was chosen the one the chart came to" <|
+                \_ ->
+                    ( fieldOf { defaults | resolution = { unit = Hour, every = Just 4 } } (Just 60)
+                        |> Query.has [ Selector.attribute (Html.Attributes.value "4") ]
+                    , fieldOf defaults (Just 60)
+                        |> Query.has [ Selector.attribute (Html.Attributes.value ""), Selector.attribute (Html.Attributes.placeholder "60") ]
+                    , fieldOf defaults Nothing
+                        |> Query.has [ Selector.attribute (Html.Attributes.placeholder "auto") ]
+                    )
+                        |> (\( chosen, picked, unknown ) -> Expect.all [ always chosen, always picked, always unknown ] ())
+            ]
         , describe "window"
             [ test "reaches back from now by the length of the timeframe" <|
                 \_ ->
@@ -235,3 +281,42 @@ multiplierFrom every =
         }
         |> .resolution
         |> .every
+
+
+{-| The rows a page draws, around a message that says what the controls would be.
+-}
+rowsFor : Controls -> Maybe Int -> Query.Single Controls
+rowsFor controls picked =
+    Html.div []
+        (StatsControls.rows
+            { timeframes = StatsControls.boundedTimeframes
+            , picked = picked
+            , change = identity
+            , refreshRequested = controls
+            }
+            controls
+        )
+        |> Query.fromHtml
+
+
+fieldOf : Controls -> Maybe Int -> Query.Single Controls
+fieldOf controls picked =
+    rowsFor controls picked
+        |> Query.find [ Selector.tag "input" ]
+
+
+{-| What the controls become when `raw` is typed into the field and committed, or `Nothing`
+when nothing is asked for.
+-}
+typedMultiplier : String -> Maybe (Maybe Int)
+typedMultiplier raw =
+    fieldOf defaults Nothing
+        |> Event.simulate (changeTo raw)
+        |> Event.toResult
+        |> Result.toMaybe
+        |> Maybe.map (\controls -> controls.resolution.every)
+
+
+changeTo : String -> ( String, Decode.Value )
+changeTo value =
+    Event.custom "change" (Encode.object [ ( "target", Encode.object [ ( "value", Encode.string value ) ] ) ])
