@@ -92,11 +92,11 @@ suite =
         , describe "totals"
             [ test "are none when the queue answered with nothing" <|
                 \_ ->
-                    QueueMetrics.totals []
+                    QueueMetrics.totals lastDay []
                         |> Expect.equal []
-            , test "add up every job in the answer by queue and status, the queues by name" <|
+            , test "add up the jobs of the timeframe by queue and status, the queues by name" <|
                 \_ ->
-                    QueueMetrics.totals
+                    QueueMetrics.totals lastDay
                         [ job "process_torrent_batch" Status.Failed -60 (Just -60) 1
                         , job "process_torrent" Status.Pending -60 Nothing 2
                         , job "process_torrent" Status.Pending -120 Nothing 3
@@ -108,6 +108,72 @@ suite =
                             [ { queue = "process_torrent", pending = 5, retry = 4, failed = 5, processed = 6 }
                             , { queue = "process_torrent_batch", pending = 0, retry = 0, failed = 1, processed = 0 }
                             ]
+            , test "leave out a job that last ran before the timeframe, which bitmagnet answers with whatever the timeframe" <|
+                \_ ->
+                    -- bitmagnet's filter lets every job that is not pending through (see the module's
+                    -- comment), so the last day's answer has the jobs that ran two days ago too.
+                    QueueMetrics.totals lastDay
+                        [ job "process_torrent" Status.Processed (-3 * 1440) (Just (-2 * 1440)) 7
+                        , job "process_torrent" Status.Failed (-3 * 1440) (Just (-2 * 1440)) 3
+                        , job "process_torrent" Status.Processed -120 (Just -60) 1
+                        ]
+                        |> Expect.equal [ { queue = "process_torrent", pending = 0, retry = 0, failed = 0, processed = 1 } ]
+            , test "count a pending job by when it was queued, and any other by when it last ran" <|
+                \_ ->
+                    QueueMetrics.totals lastDay
+                        [ job "process_torrent" Status.Pending (-2 * 1440) Nothing 1
+                        , job "process_torrent" Status.Pending -60 Nothing 2
+                        , job "process_torrent" Status.Retry (-2 * 1440) (Just -60) 4
+                        , job "process_torrent" Status.Processed -60 Nothing 8
+                        ]
+                        |> Expect.equal [ { queue = "process_torrent", pending = 2, retry = 4, failed = 0, processed = 0 } ]
+            , test "keep a bucket that began before the timeframe but reaches into it, as the timeline does" <|
+                \_ ->
+                    QueueMetrics.totals { bucketDuration = Day, startTime = Just (minutes -600) }
+                        [ job "process_torrent" Status.Processed (-780 - 1440) (Just -780) 2
+                        , job "process_torrent" Status.Processed (-780 - 1440) (Just (-780 - 1440)) 5
+                        ]
+                        |> Expect.equal [ { queue = "process_torrent", pending = 0, retry = 0, failed = 0, processed = 2 } ]
+            , test "count everything the queue holds for a timeframe with no start, a job with no run among it" <|
+                \_ ->
+                    QueueMetrics.totals { bucketDuration = Hour, startTime = Nothing }
+                        [ job "process_torrent" Status.Processed (-30 * 1440) (Just (-30 * 1440)) 2
+                        , job "process_torrent" Status.Failed (-30 * 1440) Nothing 1
+                        ]
+                        |> Expect.equal [ { queue = "process_torrent", pending = 0, retry = 0, failed = 1, processed = 2 } ]
+            ]
+        , describe "queues"
+            [ test "are every queue the answer names, by name, once each, whether or not it falls in the timeframe" <|
+                \_ ->
+                    QueueMetrics.queues
+                        [ job "process_torrent_batch" Status.Processed (-3 * 1440) (Just (-2 * 1440)) 1
+                        , job "process_torrent" Status.Pending -60 Nothing 1
+                        , job "process_torrent" Status.Retry -60 (Just -30) 1
+                        ]
+                        |> Expect.equal [ "process_torrent", "process_torrent_batch" ]
+            ]
+        , describe "beganBefore"
+            [ test "says whether the answer kept a bucket that began before the timeframe, which bitmagnet counts only part of" <|
+                \_ ->
+                    let
+                        athensDays =
+                            { bucketDuration = Day, startTime = Just (minutes -600) }
+                    in
+                    [ QueueMetrics.beganBefore athensDays [ job "process_torrent" Status.Pending -780 Nothing 1 ]
+                    , QueueMetrics.beganBefore athensDays [ job "process_torrent" Status.Processed (-780 - 1440) (Just -780) 1 ]
+
+                    -- Wholly before it, so left out, and not part of anything drawn.
+                    , QueueMetrics.beganBefore athensDays [ job "process_torrent" Status.Processed (-780 - 1440) (Just (-780 - 1440)) 1 ]
+                    , QueueMetrics.beganBefore lastDay [ job "process_torrent" Status.Processed (-3 * 1440) (Just -60) 1 ]
+                    , QueueMetrics.beganBefore { bucketDuration = Hour, startTime = Nothing } [ job "process_torrent" Status.Pending -60 Nothing 1 ]
+                    ]
+                        |> Expect.equal [ True, True, False, False, False ]
+            ]
+        , describe "eventKey"
+            [ test "orders the events as a job lives them, and tells each apart" <|
+                \_ ->
+                    List.map QueueMetrics.eventKey QueueMetrics.allEvents
+                        |> Expect.equal [ 0, 1, 2 ]
             ]
         , describe "events in the address"
             [ test "are written in Magnes's words and read back" <|

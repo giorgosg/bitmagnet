@@ -14,6 +14,8 @@ import QueueMetrics exposing (Event(..))
 import QueueStats
 import Route
 import StatsControls exposing (AutoRefresh(..), Timeframe(..))
+import StatsLook
+import Svg.Attributes
 import Test exposing (Test, describe, test)
 import Test.Html.Event as Event
 import Test.Html.Query as Query
@@ -56,6 +58,7 @@ suite =
                         |> Expect.equal
                             (Ok
                                 { asked = asked
+                                , request = { bucketDuration = Hour, startTime = Nothing }
                                 , buckets =
                                     [ job "process_torrent" Status.Pending -120 Nothing 2
                                     , job "process_torrent" Status.Processed -120 (Just -60) 3
@@ -66,7 +69,7 @@ suite =
         , describe "plot"
             [ test "has nothing to draw when the queue answered with nothing" <|
                 \_ ->
-                    QueueStats.plot emptyParams (statistics [])
+                    plotOf emptyParams []
                         |> Expect.all
                             [ .slots >> Expect.equal []
                             , .lines >> Expect.equal []
@@ -74,12 +77,10 @@ suite =
                             ]
             , test "draws a line for each event of each queue, inked by the event, the queues by name" <|
                 \_ ->
-                    QueueStats.plot emptyParams
-                        (statistics
-                            [ job "process_torrent_batch" Status.Pending -120 Nothing 1
-                            , job "process_torrent" Status.Pending -120 Nothing 1
-                            ]
-                        )
+                    plotOf emptyParams
+                        [ job "process_torrent_batch" Status.Pending -120 Nothing 1
+                        , job "process_torrent" Status.Pending -120 Nothing 1
+                        ]
                         |> .lines
                         |> List.map (\line -> ( line.label, line.ink ))
                         |> Expect.equal
@@ -94,13 +95,11 @@ suite =
                 \_ ->
                     let
                         plotted =
-                            QueueStats.plot (withResolution { unit = Hour, every = Just 2 } (withTimeframe Hours12 emptyParams))
-                                (statistics
-                                    [ job "process_torrent" Status.Processed -600 (Just -540) 3
-                                    , job "process_torrent" Status.Failed -540 (Just -120) 2
-                                    , job "process_torrent" Status.Pending -60 Nothing 4
-                                    ]
-                                )
+                            plotOf (withResolution { unit = Hour, every = Just 2 } (withTimeframe Hours12 emptyParams))
+                                [ job "process_torrent" Status.Processed -600 (Just -540) 3
+                                , job "process_torrent" Status.Failed -540 (Just -120) 2
+                                , job "process_torrent" Status.Pending -60 Nothing 4
+                                ]
                     in
                     Expect.all
                         [ .grid >> Expect.equal { unit = Hour, every = 2, offset = 0, bucketedBy = Hour }
@@ -120,13 +119,13 @@ suite =
             , test "picks the multiplier itself when none was chosen, from the earliest thing counted for everything" <|
                 \_ ->
                     -- Twenty days of hours is 480 of them: twenty columns of 20 hours.
-                    QueueStats.plot emptyParams (statistics [ job "process_torrent" Status.Pending (-20 * 1440) Nothing 1 ])
+                    plotOf emptyParams [ job "process_torrent" Status.Pending (-20 * 1440) Nothing 1 ]
                         |> .grid
                         |> Expect.equal { unit = Hour, every = 20, offset = 0, bucketedBy = Hour }
             , test "leaves out the creation of a job queued before the timeframe, so the chart does not reach back to it" <|
                 \_ ->
-                    QueueStats.plot (withTimeframe Hours1 minutesParams)
-                        (statistics [ job "process_torrent" Status.Processed (-3 * 1440) (Just -30) 1 ])
+                    plotOf (withTimeframe Hours1 minutesParams)
+                        [ job "process_torrent" Status.Processed (-3 * 1440) (Just -30) 1 ]
                         |> .slots
                         |> List.head
                         |> Maybe.map .start
@@ -134,18 +133,16 @@ suite =
             , describe "with queues and events chosen"
                 [ test "draws only the chosen events, in the order of a job's life" <|
                     \_ ->
-                        QueueStats.plot { emptyParams | events = [ Failed, Created ] } (statistics [ job "process_torrent" Status.Pending -120 Nothing 1 ])
+                        plotOf { emptyParams | events = [ Failed, Created ] } [ job "process_torrent" Status.Pending -120 Nothing 1 ]
                             |> .lines
                             |> List.map .label
                             |> Expect.equal [ "process_torrent: created", "process_torrent: failed" ]
                 , test "draws only the chosen queues, inked by their place in the order they were chosen in" <|
                     \_ ->
-                        QueueStats.plot { emptyParams | queues = [ "process_torrent_batch" ] }
-                            (statistics
-                                [ job "process_torrent" Status.Pending -120 Nothing 1
-                                , job "process_torrent_batch" Status.Pending -120 Nothing 1
-                                ]
-                            )
+                        plotOf { emptyParams | queues = [ "process_torrent_batch" ] }
+                            [ job "process_torrent" Status.Pending -120 Nothing 1
+                            , job "process_torrent_batch" Status.Pending -120 Nothing 1
+                            ]
                             |> Expect.all
                                 [ .lines
                                     >> List.map (\line -> ( line.label, line.ink ))
@@ -156,21 +153,48 @@ suite =
                                         ]
                                 , .totals >> List.map .queue >> Expect.equal [ "process_torrent_batch" ]
                                 ]
+                , test "gives a chosen queue with nothing in the timeframe no place, so the others keep their inks and are not added together" <|
+                    \_ ->
+                        ( plotOf { emptyParams | queues = [ "ghost", "a", "b" ] } [ job "a" Status.Pending -60 Nothing 1, job "b" Status.Pending -60 Nothing 1 ]
+                        , plotOf { emptyParams | queues = [ "ghost", "a" ] } [ job "a" Status.Pending -60 Nothing 1 ]
+                        )
+                            |> Expect.all
+                                [ Tuple.first
+                                    >> .lines
+                                    >> List.map .label
+                                    >> Expect.equal [ "a: created", "a: processed", "a: failed", "b: created", "b: processed", "b: failed" ]
+                                , Tuple.first >> .others >> Expect.equal []
+                                , Tuple.second
+                                    >> .lines
+                                    >> List.map (\line -> ( line.label, line.ink ))
+                                    >> Expect.equal [ ( "a: created", Charts.Muted ), ( "a: processed", Charts.Strong ), ( "a: failed", Charts.Accent ) ]
+                                ]
+                , test "gives a queue that is in the answer but not the timeframe no place either" <|
+                    \_ ->
+                        -- bitmagnet answers the last hour with jobs that ran days ago (see QueueMetrics).
+                        plotOf (withTimeframe Hours1 minutesParams)
+                            [ job "old" Status.Processed (-3 * 1440) (Just (-2 * 1440)) 9
+                            , job "a" Status.Pending -30 Nothing 1
+                            , job "b" Status.Pending -30 Nothing 1
+                            ]
+                            |> Expect.all
+                                [ .lines >> List.map .label >> List.filter (String.startsWith "b: ") >> Expect.equal [ "b: created", "b: processed", "b: failed" ]
+                                , .others >> Expect.equal []
+                                , .totals >> List.map .queue >> Expect.equal [ "a", "b" ]
+                                ]
                 , test "has no chart when nothing chosen was counted, rather than lines along zero" <|
                     \_ ->
-                        QueueStats.plot { emptyParams | events = [ Failed ] } (statistics [ job "process_torrent" Status.Pending -120 Nothing 1 ])
+                        plotOf { emptyParams | events = [ Failed ] } [ job "process_torrent" Status.Pending -120 Nothing 1 ]
                             |> .slots
                             |> Expect.equal []
                 , test "keeps a chosen event at zero for a queue that had something else happen, beside one that had it" <|
                     \_ ->
                         let
                             plotted =
-                                QueueStats.plot { emptyParams | events = [ Failed ] }
-                                    (statistics
-                                        [ job "process_torrent" Status.Failed -120 (Just -120) 2
-                                        , job "process_torrent_batch" Status.Pending -120 Nothing 1
-                                        ]
-                                    )
+                                plotOf { emptyParams | events = [ Failed ] }
+                                    [ job "process_torrent" Status.Failed -120 (Just -120) 2
+                                    , job "process_torrent_batch" Status.Pending -120 Nothing 1
+                                    ]
                         in
                         ( List.map .label plotted.lines
                         , plotted.slots |> List.map (valuesOf plotted) |> List.filter (List.any ((/=) 0))
@@ -185,13 +209,11 @@ suite =
                     \_ ->
                         let
                             plotted =
-                                QueueStats.plot emptyParams
-                                    (statistics
-                                        [ job "a" Status.Pending -60 Nothing 1
-                                        , job "b" Status.Pending -60 Nothing 2
-                                        , job "c" Status.Pending -60 Nothing 3
-                                        ]
-                                    )
+                                plotOf emptyParams
+                                    [ job "a" Status.Pending -60 Nothing 1
+                                    , job "b" Status.Pending -60 Nothing 2
+                                    , job "c" Status.Pending -60 Nothing 3
+                                    ]
                         in
                         ( List.map .label plotted.lines
                         , plotted.slots |> List.map (valuesOf plotted) |> List.filter (List.any ((/=) 0))
@@ -204,18 +226,26 @@ suite =
                                 )
                 , test "has none to name when each is drawn apart" <|
                     \_ ->
-                        QueueStats.plot emptyParams (statistics [ job "a" Status.Pending -60 Nothing 1, job "b" Status.Pending -60 Nothing 1 ])
+                        plotOf emptyParams [ job "a" Status.Pending -60 Nothing 1, job "b" Status.Pending -60 Nothing 1 ]
                             |> .others
                             |> Expect.equal []
                 ]
+            , test "totals only the jobs of the timeframe, though bitmagnet answers with jobs that ran before it" <|
+                \_ ->
+                    plotOf (withTimeframe Hours1 minutesParams)
+                        [ job "process_torrent" Status.Processed (-3 * 1440) (Just (-2 * 1440)) 9
+                        , job "process_torrent" Status.Failed (-3 * 1440) (Just (-2 * 1440)) 5
+                        , job "process_torrent" Status.Processed -40 (Just -30) 1
+                        , job "process_torrent" Status.Pending -20 Nothing 2
+                        ]
+                        |> .totals
+                        |> Expect.equal [ { queue = "process_torrent", pending = 2, retry = 0, failed = 0, processed = 1 } ]
             , test "totals the jobs of each queue by status, whatever was chosen of the events" <|
                 \_ ->
-                    QueueStats.plot { emptyParams | events = [ Created ] }
-                        (statistics
-                            [ job "process_torrent" Status.Retry (-3 * 1440) (Just -60) 4
-                            , job "process_torrent" Status.Pending -60 Nothing 2
-                            ]
-                        )
+                    plotOf { emptyParams | events = [ Created ] }
+                        [ job "process_torrent" Status.Retry (-3 * 1440) (Just -60) 4
+                        , job "process_torrent" Status.Pending -60 Nothing 2
+                        ]
                         |> .totals
                         |> Expect.equal [ { queue = "process_torrent", pending = 2, retry = 4, failed = 0, processed = 0 } ]
             , test "says what would have been drawn, where the chart was cut down to fit" <|
@@ -225,31 +255,15 @@ suite =
                             withResolution { unit = Minute, every = Just 1 } (withTimeframe Weeks1 emptyParams)
 
                         plotted =
-                            QueueStats.plot aWeekOfMinutes (statistics [ job "process_torrent" Status.Pending -2 Nothing 4 ])
+                            plotOf aWeekOfMinutes [ job "process_torrent" Status.Pending -2 Nothing 4 ]
                     in
                     ( plotted.grid.every, plotted.wanted.every )
                         |> Expect.equal ( 6, 1 )
             ]
-        , describe "timerDue"
-            [ test "is a look an idle page that was asked to keep itself fresh makes when its timer fires" <|
-                \_ ->
-                    QueueStats.timerDue (withRefresh Every10Seconds emptyParams) shown
-                        |> Expect.equal True
-            , test "is not one a tick that was already on its way makes after refreshing was turned off" <|
-                \_ ->
-                    QueueStats.timerDue emptyParams shown
-                        |> Expect.equal False
-            , test "waits for a look that is still on its way, and for the first one" <|
-                \_ ->
-                    ( QueueStats.timerDue (withRefresh Every10Seconds emptyParams) (QueueStats.refreshing shown)
-                    , QueueStats.timerDue (withRefresh Every10Seconds emptyParams) QueueStats.empty
-                    )
-                        |> Expect.equal ( False, False )
-            ]
         , describe "view"
             [ test "says it is loading, with the controls already there to change, everything among the timeframes" <|
                 \_ ->
-                    viewed emptyParams QueueStats.empty
+                    viewed emptyParams StatsLook.empty
                         |> Expect.all
                             [ Query.has [ Selector.text "Loading statistics…" ]
                             , Query.find [ Selector.class "chip", Selector.attribute (Html.Attributes.attribute "aria-pressed" "true"), Selector.containing [ Selector.text "all time" ] ]
@@ -307,7 +321,7 @@ suite =
             , describe "a look that fails"
                 [ test "says why, alone, when there was nothing to show" <|
                     \_ ->
-                        viewed emptyParams (QueueStats.failed emptyParams ApiError.ServiceUnavailable QueueStats.empty)
+                        viewed emptyParams (QueueStats.failed emptyParams ApiError.ServiceUnavailable StatsLook.empty)
                             |> Expect.all
                                 [ Query.find [ Selector.attribute (Html.Attributes.attribute "role" "alert") ]
                                     >> Query.has [ Selector.text (ApiError.toMessage ApiError.ServiceUnavailable) ]
@@ -345,16 +359,55 @@ suite =
                 ]
             , test "keeps the old chart, dimmed and busy, while another look is on its way" <|
                 \_ ->
-                    viewed emptyParams (QueueStats.refreshing shown)
+                    viewed emptyParams (StatsLook.refreshing shown)
                         |> Query.find [ Selector.class "stats-refreshing" ]
                         |> Query.has [ Selector.attribute (Html.Attributes.attribute "aria-busy" "true"), Selector.tag "figure" ]
             , test "with nothing counted, says so rather than drawing either chart" <|
                 \_ ->
-                    viewed emptyParams (QueueStats.loaded emptyParams (statistics []) QueueStats.empty)
+                    viewed emptyParams (QueueStats.loaded emptyParams (statistics []) StatsLook.empty)
                         |> Expect.all
                             [ Query.findAll [ Selector.class "chart-empty" ] >> Query.count (Expect.equal 2)
                             , Query.findAll [ Selector.tag "svg", Selector.attribute (Html.Attributes.attribute "role" "img") ] >> Query.count (Expect.equal 0)
                             ]
+            , test "draws retry in an ink no line has, so a held-back failure line is not read as retry" <|
+                \_ ->
+                    viewed emptyParams shown
+                        |> Query.findAll [ Selector.class "chart-legend" ]
+                        |> Expect.all
+                            [ Query.index 1
+                                >> Query.findAll [ Selector.tag "li" ]
+                                >> Query.index 1
+                                >> Query.has [ Selector.text "retry", Selector.attribute (Svg.Attributes.fill "var(--bg)"), Selector.attribute (Svg.Attributes.stroke "var(--accent)") ]
+                            , Query.index 0 >> Query.hasNot [ Selector.attribute (Svg.Attributes.fill "var(--bg)") ]
+                            ]
+            , test "says that the events chosen narrow the timeline and not the totals, when some are chosen" <|
+                \_ ->
+                    ( viewed { emptyParams | events = [ Failed ] } shown
+                        |> Query.has [ Selector.text "The events chosen narrow the timeline only" ]
+                    , viewed emptyParams shown
+                        |> Query.hasNot [ Selector.text "The events chosen narrow the timeline only" ]
+                    )
+                        |> (\( chosen, none ) -> Expect.all [ always chosen, always none ] ())
+            , test "says the first column is only part of one, when bitmagnet's day began before the timeframe" <|
+                \_ ->
+                    let
+                        aWeekOfDays =
+                            withResolution { unit = Day, every = Nothing } (withTimeframe Weeks1 emptyParams)
+
+                        -- Asked at 10:00 UTC, a week of days opens at 00:00 UTC on the 3rd; in
+                        -- Athens that day began at 21:00 UTC on the 2nd.
+                        athens =
+                            [ job "process_torrent" Status.Pending (-600 - 7 * 1440 - 180) Nothing 1 ]
+
+                        utc =
+                            [ job "process_torrent" Status.Pending (-600 - 7 * 1440) Nothing 1 ]
+                    in
+                    ( viewed aWeekOfDays (QueueStats.loaded aWeekOfDays (statisticsFor aWeekOfDays athens) StatsLook.empty)
+                        |> Query.has [ Selector.text "The first column began before the timeframe did" ]
+                    , viewed aWeekOfDays (QueueStats.loaded aWeekOfDays (statisticsFor aWeekOfDays utc) StatsLook.empty)
+                        |> Query.hasNot [ Selector.text "The first column began before the timeframe did" ]
+                    )
+                        |> (\( partial, whole ) -> Expect.all [ always partial, always whole ] ())
             , test "says when it was asked, and how to read the counts" <|
                 \_ ->
                     viewed emptyParams shown
@@ -369,9 +422,9 @@ suite =
                             withResolution { unit = Minute, every = Just 1 } (withTimeframe Weeks1 emptyParams)
 
                         many =
-                            statistics [ job "a" Status.Pending -60 Nothing 1, job "b" Status.Pending -60 Nothing 1, job "c" Status.Pending -60 Nothing 1 ]
+                            [ job "a" Status.Pending -60 Nothing 1, job "b" Status.Pending -60 Nothing 1, job "c" Status.Pending -60 Nothing 1 ]
                     in
-                    viewed aWeekOfMinutes (QueueStats.loaded aWeekOfMinutes many QueueStats.empty)
+                    viewed aWeekOfMinutes (QueueStats.loaded aWeekOfMinutes (statisticsFor aWeekOfMinutes many) StatsLook.empty)
                         |> Expect.all
                             [ Query.has [ Selector.text "Other queues are b, c." ]
                             , Query.has [ Selector.text "Drawn per 6 minutes, not per minute: that many buckets are more than the chart can draw." ]
@@ -507,9 +560,23 @@ job queue status created ran count =
     }
 
 
+{-| An answer to the look `params` asks for at 10:00.
+-}
+statisticsFor : Route.QueueStatsParams -> List QueueMetrics.Bucket -> QueueStats.Statistics
+statisticsFor params buckets =
+    { asked = asked, request = StatsControls.request asked params.controls, buckets = buckets }
+
+
 statistics : List QueueMetrics.Bucket -> QueueStats.Statistics
-statistics buckets =
-    { asked = asked, buckets = buckets }
+statistics =
+    statisticsFor emptyParams
+
+
+{-| What `params` draws of an answer to the look it asks for.
+-}
+plotOf : Route.QueueStatsParams -> List QueueMetrics.Bucket -> QueueStats.Plot
+plotOf params buckets =
+    QueueStats.plot params (QueueStats.answer (statisticsFor params buckets))
 
 
 withRefresh : AutoRefresh -> Route.QueueStatsParams -> Route.QueueStatsParams
@@ -534,7 +601,7 @@ shown =
             , job "process_torrent_batch" Status.Processed -120 (Just -60) 4
             ]
         )
-        QueueStats.empty
+        StatsLook.empty
 
 
 {-| What a view's event asks for: the page it navigates to, or `Nothing` for a plain refresh,
@@ -553,7 +620,7 @@ viewed params state =
 
 {-| What each line of a plot reads in a slot, in the order the lines are drawn.
 -}
-valuesOf : QueueStats.Plot -> { a | counts : Dict.Dict ( Int, String ) Int } -> List Int
+valuesOf : QueueStats.Plot -> { a | counts : Dict.Dict ( Int, Int ) Int } -> List Int
 valuesOf plotted slot =
     List.map (\line -> Dict.get line.key slot.counts |> Maybe.withDefault 0) plotted.lines
 

@@ -6,9 +6,15 @@
 // read what bitmagnet answers and work out from it what the page should draw, rather than
 // using the seed's numbers, so a change to the seed does not read as a defect here. What they
 // rely on is that the seed leaves something in every status, in more than one queue, inside the
-// last day.
+// last day, and nothing that has run inside the last hour.
+//
+// bitmagnet's answer is not limited to the timeframe: its filter lets every job that is not
+// pending through, whatever `startTime` says (see the comment at the top of src/QueueMetrics.elm).
+// So what the page should draw is worked out here as the page works it out, with the timeframe
+// applied, and one test checks that the answer does hold jobs from before it.
 
 import { registerUser, signIn, signInAt, expect, test } from "../support/credentialed.js";
+import { afterFrames, answeredLooks, chip, drawn, holdLooks, quietMoment, setHidden } from "../support/stats.js";
 
 function isQueueMetrics(request) {
   const body = request.postData() ?? "";
@@ -47,19 +53,35 @@ function askedIn(query) {
   return { unit: units[query.match(/bucketDuration: (\w+)/)[1]], start: start ? Date.parse(start[1]) : null };
 }
 
+// Whether something in the bucket that began at `at` is the timeframe's: the bucket reaches past
+// the start of it, or there is no start.
+function inTimeframe(query, at) {
+  const { unit, start } = askedIn(query);
+  return start === null || (at !== null && Date.parse(at) + unit > start);
+}
+
+// The moment a job is the timeframe's by: when it was queued if it is pending, when it last ran
+// otherwise, as the Angular UI and the page have it.
+function windowedBy(bucket) {
+  return bucket.status === "pending" ? bucket.createdAtBucket : bucket.ranAtBucket;
+}
+
+// The answer's rows that are the timeframe's, by that test. Without a start, all of them.
+function ofTimeframe(buckets, query) {
+  return askedIn(query).start === null ? buckets : buckets.filter((bucket) => inTimeframe(query, windowedBy(bucket)));
+}
+
 // What happened to the jobs of an answer, as the ticket says to read it: created where a job
 // was queued, whatever became of it; processed or failed where it last ran, for jobs now in that
 // status. A bucket that was over before the timeframe began is not the timeframe's: bitmagnet
 // answers with jobs queued long before that ran inside it.
 function occurrences(buckets, query) {
-  const { unit, start } = askedIn(query);
-  const reaches = (at) => start === null || Date.parse(at) + unit > start;
   const happened = [];
   for (const bucket of buckets) {
-    if (reaches(bucket.createdAtBucket)) {
+    if (inTimeframe(query, bucket.createdAtBucket)) {
       happened.push({ queue: bucket.queue, event: "created", count: bucket.count });
     }
-    if (["processed", "failed"].includes(bucket.status) && bucket.ranAtBucket && reaches(bucket.ranAtBucket)) {
+    if (["processed", "failed"].includes(bucket.status) && bucket.ranAtBucket && inTimeframe(query, bucket.ranAtBucket)) {
       happened.push({ queue: bucket.queue, event: bucket.status, count: bucket.count });
     }
   }
@@ -74,13 +96,22 @@ function total(items, predicate = () => true) {
   return items.filter(predicate).reduce((all, item) => all + item.count, 0);
 }
 
+// The queues with anything in the timeframe, by name: the ones the page draws.
+function queuesInTimeframe(buckets, query) {
+  return [
+    ...new Set([...ofTimeframe(buckets, query), ...occurrences(buckets, query)].map((item) => item.queue)),
+  ].sort();
+}
+
 // What the timeline's table should hold for an answer: a line for each event chosen (all of
-// them where none was) of each queue that had anything happen, as the page draws them. Two
-// queues are drawn apart; with more, the first is, and the rest are added together. With
-// nothing chosen counted, there is no chart and no table.
+// them where none was) of each queue that had anything happen, as the page draws them. The
+// queues are those with anything in the timeframe: by name, or the chosen ones among them. Two
+// are drawn apart; with more, the first is, and the rest are added together. With nothing chosen
+// counted, there is no chart and no table.
 function expectedLines(buckets, query, chosen = {}) {
   const happened = occurrences(buckets, query);
-  const order = chosen.queues?.length ? chosen.queues : queuesOf(buckets);
+  const present = queuesInTimeframe(buckets, query);
+  const order = chosen.queues?.length ? chosen.queues.filter((queue) => present.includes(queue)) : present;
   const groups =
     order.length <= 2
       ? order.map((queue) => ({ name: queue, members: [queue] }))
@@ -99,17 +130,19 @@ function expectedLines(buckets, query, chosen = {}) {
   return Object.values(lines).some((count) => count > 0) ? lines : {};
 }
 
-// What the totals' table should hold: every job in the answer, by queue and status.
-function expectedTotals(buckets, queues = queuesOf(buckets)) {
+// What the totals' table should hold: the jobs of the timeframe, by queue and status, for the
+// queues chosen among them, or all of them.
+function expectedTotals(buckets, query, chosen = []) {
+  const windowed = ofTimeframe(buckets, query);
+  const present = [...new Set(windowed.map((bucket) => bucket.queue))].sort();
+  const queues = chosen.length ? chosen.filter((queue) => present.includes(queue)) : present;
   return Object.fromEntries(
-    queues
-      .filter((queue) => buckets.some((bucket) => bucket.queue === queue))
-      .map((queue) => [
-        queue,
-        Object.fromEntries(
-          statuses.map((status) => [status, total(buckets, (bucket) => bucket.queue === queue && bucket.status === status)]),
-        ),
-      ]),
+    queues.map((queue) => [
+      queue,
+      Object.fromEntries(
+        statuses.map((status) => [status, total(windowed, (bucket) => bucket.queue === queue && bucket.status === status)]),
+      ),
+    ]),
   );
 }
 
@@ -149,41 +182,6 @@ async function totalsCounts(page) {
   );
 }
 
-function chip(page, label) {
-  return page.getByRole("button", { name: label, exact: true });
-}
-
-// The look is drawn, and none is on its way.
-async function drawn(page) {
-  await expect(page.getByRole("figure").first()).toBeVisible();
-  await expect(page.locator('.stats[aria-busy="false"]')).toBeVisible();
-}
-
-// Overrides what the page reads as its visibility, then tells it, the way the browser does
-// when a tab is switched away from and back.
-async function setHidden(page, hidden) {
-  await page.evaluate((value) => {
-    Object.defineProperty(document, "hidden", { configurable: true, get: () => value });
-    Object.defineProperty(document, "visibilityState", {
-      configurable: true,
-      get: () => (value ? "hidden" : "visible"),
-    });
-    document.dispatchEvent(new Event("visibilitychange"));
-  }, hidden);
-}
-
-// A request the page should not have made would have been sent by now: the page is given a
-// real moment, not a faked one.
-async function settle(page) {
-  await page.waitForTimeout(500);
-}
-
-// Two frames on, whatever the page was going to do with an answer it has been handed, it has
-// done: Elm draws on the animation frame after it updates.
-async function afterFrames(page) {
-  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
-}
-
 // An answer from a queue nobody else would answer with, so it can be told from the real one.
 const staleAnswer = {
   data: {
@@ -197,29 +195,10 @@ const staleAnswer = {
   },
 };
 
-// Holds back the first `count` looks the page asks for, and answers each with the stale answer
-// once it is let go. `release()` lets them all go, and `delivered()` resolves when the last has
-// arrived at the page.
-async function holdLooks(page, count) {
-  let release;
-  const held = new Promise((resolve) => {
-    release = resolve;
-  });
-  let remaining = count;
-  await page.route("**/graphql", async (route) => {
-    if (remaining > 0 && isQueueMetrics(route.request())) {
-      remaining -= 1;
-      await held;
-      await route.fulfill({ json: staleAnswer });
-    } else {
-      await route.continue();
-    }
-  });
-  return {
-    release,
-    delivered: () =>
-      page.waitForResponse(async (response) => (await response.text().catch(() => "")).includes("stale_queue")),
-  };
+// Holds back the page's next look, answered when let go with a queue nobody else would answer
+// with.
+function holdLook(page) {
+  return holdLooks(page, { count: 1, isLook: isQueueMetrics, stale: staleAnswer, marker: "stale_queue" });
 }
 
 test("an administrator finds the queue's statistics from the status page, and both charts draw what bitmagnet counted", async ({
@@ -252,7 +231,7 @@ test("an administrator finds the queue's statistics from the status page, and bo
   const lines = expectedLines(buckets, query);
   expect(lines[`${queuesOf(buckets)[0]}: failed`], "the fixture's failed jobs are on the timeline").toBeGreaterThan(0);
   expect(await timelineCounts(page)).toEqual(lines);
-  expect(await totalsCounts(page)).toEqual(expectedTotals(buckets));
+  expect(await totalsCounts(page)).toEqual(expectedTotals(buckets, query));
   await expect(page.locator('svg[role="img"]')).toHaveCount(2);
 });
 
@@ -269,7 +248,7 @@ test("Anonymous is offered the page on the status page and may open it", async (
   await drawn(page);
   expect(total(buckets), "the fixture seeds queue jobs").toBeGreaterThan(0);
   expect(await timelineCounts(page)).toEqual(expectedLines(buckets, query));
-  expect(await totalsCounts(page)).toEqual(expectedTotals(buckets));
+  expect(await totalsCounts(page)).toEqual(expectedTotals(buckets, query));
 });
 
 test("every control is in the URL, choosing a queue or an event picks it out without asking again, and the link opens the same look", async ({
@@ -310,7 +289,7 @@ test("every control is in the URL, choosing a queue or an event picks it out wit
   await chip(page, queue).click();
   await expect(page).toHaveURL(new RegExp(`/stats/queue\\?timeframe=1d&resolution=minute&every=30&queue=${queue}$`));
   await expect.poll(() => timelineCounts(page)).toEqual(expectedLines(buckets, query, { queues: [queue] }));
-  expect(await totalsCounts(page)).toEqual(expectedTotals(buckets, [queue]));
+  expect(await totalsCounts(page)).toEqual(expectedTotals(buckets, query, [queue]));
 
   // An event, the same way: only that queue's failures are drawn.
   const failures = expectedLines(buckets, query, { queues: [queue], events: ["failed"] });
@@ -326,7 +305,7 @@ test("every control is in the URL, choosing a queue or an event picks it out wit
   await expect(page).toHaveURL(
     new RegExp(`/stats/queue\\?timeframe=1d&resolution=minute&every=30&refresh=5m&queue=${queue}&event=failed$`),
   );
-  await settle(page);
+  await quietMoment(page);
   expect(asked.length, "choosing a queue, an event or how often to look asks nothing").toBe(looks);
 
   // Opened afresh, the link is the same look.
@@ -351,10 +330,38 @@ test("every control is in the URL, choosing a queue or an event picks it out wit
   expect(asked.length).toBe(reloaded);
 });
 
+test("a short timeframe draws only its own jobs, though bitmagnet answers with jobs that ran long before it", async ({
+  page,
+  credentials,
+}) => {
+  const answered = nextMetrics(page);
+  await signInAt(page, credentials, "/stats/queue?timeframe=1h", "Queue statistics");
+  const { buckets, query } = await answered;
+  await drawn(page);
+
+  // The seed's jobs ran an hour or more ago, and bitmagnet answers with them all the same.
+  expect(askedIn(query).start, "an hour has a start").not.toBeNull();
+  const before = buckets.filter((bucket) => !inTimeframe(query, windowedBy(bucket)));
+  expect(
+    total(before),
+    "bitmagnet answers the last hour with jobs that ran before it: its filter lets every job that is not pending through",
+  ).toBeGreaterThan(0);
+
+  // The page leaves them out of both charts.
+  const totals = await totalsCounts(page);
+  expect(totals).toEqual(expectedTotals(buckets, query));
+  const counted = Object.values(totals)
+    .flatMap((byStatus) => Object.values(byStatus))
+    .reduce((all, count) => all + count, 0);
+  expect(counted).toBe(total(ofTimeframe(buckets, query)));
+  expect(counted).toBeLessThan(total(buckets));
+  expect(await timelineCounts(page)).toEqual(expectedLines(buckets, query));
+});
+
 test.describe("auto-refresh", () => {
   // Elm's Time.every is a setInterval, so the page's clock decides when a look is due. Only the
-  // requests are counted: the faked clock also holds back requestAnimationFrame, so what is
-  // drawn is not the thing to look at.
+  // requests are counted, and the answers from inside the page: the faked clock also holds back
+  // requestAnimationFrame, so what is drawn is not the thing to look at.
   test.beforeEach(async ({ page, credentials }) => {
     await signInAt(page, credentials, "/stats/queue", "Queue statistics");
     await page.clock.install();
@@ -364,25 +371,25 @@ test.describe("auto-refresh", () => {
     page,
   }) => {
     const asked = metricsRequests(page);
+    const answered = await answeredLooks(page, "metrics");
 
     await page.goto("/stats/queue");
-    await expect.poll(() => asked.length).toBe(1);
-    await settle(page);
+    await expect.poll(answered).toBe(1);
     await page.clock.runFor(10 * 60_000);
-    await settle(page);
+    await quietMoment(page);
     expect(asked.length).toBe(1);
 
     await page.goto("/stats/queue?refresh=10s");
-    await expect.poll(() => asked.length).toBe(2);
-    await settle(page);
+    await expect.poll(answered).toBe(1);
+    expect(asked.length).toBe(2);
 
     await page.clock.runFor(10_000);
-    await expect.poll(() => asked.length).toBe(3);
-    await settle(page);
+    await expect.poll(answered).toBe(2);
+    expect(asked.length).toBe(3);
 
     await setHidden(page, true);
     await page.clock.runFor(60_000);
-    await settle(page);
+    await quietMoment(page);
     expect(asked.length).toBe(3);
 
     // Coming back asks at once rather than at the next tick: what is on screen is as old as the
@@ -395,41 +402,40 @@ test.describe("auto-refresh", () => {
     page,
   }) => {
     const asked = metricsRequests(page);
+    const answered = await answeredLooks(page, "metrics");
     await page.goto("/stats/queue?refresh=10s");
-    await expect.poll(() => asked.length).toBe(1);
-    await settle(page);
+    await expect.poll(answered).toBe(1);
 
     await chip(page, "processed").click();
     await expect(page).toHaveURL(/\/stats\/queue\?refresh=10s&event=processed$/);
-    await settle(page);
+    await quietMoment(page);
     expect(asked.length).toBe(1);
 
     await page.clock.runFor(10_000);
-    await expect.poll(() => asked.length).toBe(2);
-    await settle(page);
+    await expect.poll(answered).toBe(2);
+    expect(asked.length).toBe(2);
 
     await chip(page, "off").click();
     await expect(page).toHaveURL(/\/stats\/queue\?event=processed$/);
     await page.clock.runFor(60_000);
-    await settle(page);
+    await quietMoment(page);
     expect(asked.length).toBe(2);
   });
 
   test("does not pile a look on one that is still on its way", async ({ page }) => {
     const asked = metricsRequests(page);
+    const answered = await answeredLooks(page, "metrics");
     await page.goto("/stats/queue?refresh=10s");
-    await expect.poll(() => asked.length).toBe(1);
-    await settle(page);
+    await expect.poll(answered).toBe(1);
 
     // The next look is never answered, as far as the page can tell.
-    const looks = await holdLooks(page, 1);
+    const looks = await holdLook(page);
     await page.clock.runFor(10_000);
     await expect.poll(() => asked.length).toBe(2);
-    await settle(page);
 
     // The timer fires twice more over it, and asks for nothing.
     await page.clock.runFor(20_000);
-    await settle(page);
+    await quietMoment(page);
     expect(asked.length).toBe(2);
     looks.release();
   });
@@ -443,7 +449,7 @@ test("an answer that comes back after the controls moved on does not replace the
 
   // The first look, at everything, is held back, and answered long after the page has moved
   // on, with a queue nobody else would answer with.
-  const looks = await holdLooks(page, 1);
+  const looks = await holdLook(page);
   await page.goto("/stats/queue");
   await expect(page.getByRole("heading", { name: "Queue statistics" })).toBeVisible();
 
@@ -460,7 +466,7 @@ test("an answer that comes back after the controls moved on does not replace the
   await expect(page.getByText("stale_queue")).toHaveCount(0);
   await expect(chip(page, "1 day")).toHaveAttribute("aria-pressed", "true");
   expect(await timelineCounts(page)).toEqual(expectedLines(buckets, query));
-  expect(await totalsCounts(page)).toEqual(expectedTotals(buckets));
+  expect(await totalsCounts(page)).toEqual(expectedTotals(buckets, query));
 });
 
 test("asking for a look at once gives up on one that is not answered, and its answer, if it comes, is dropped", async ({
@@ -471,7 +477,7 @@ test("asking for a look at once gives up on one that is not answered, and its an
   await drawn(page);
 
   // The next look is held back, as if the instance were not answering.
-  const looks = await holdLooks(page, 1);
+  const looks = await holdLook(page);
   await page.getByRole("button", { name: "Refresh now" }).click();
   await expect(page.locator('.stats[aria-busy="true"]')).toBeVisible();
 

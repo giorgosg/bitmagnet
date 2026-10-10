@@ -33,6 +33,7 @@ import Roles
 import Route exposing (Route)
 import Set exposing (Set)
 import Sort exposing (Sort)
+import StatsLook
 import Svg
 import Svg.Attributes as SvgAttr
 import Task
@@ -355,8 +356,8 @@ init flags url key =
       , register = Register.prefilled (invitationCodeFor route)
       , invitations = Invitations.empty
       , jobs = QueueJobs.empty
-      , torrentStats = TorrentStats.empty
-      , queueStats = QueueStats.empty
+      , torrentStats = StatsLook.empty
+      , queueStats = StatsLook.empty
       , users = Users.empty
       , usersEpoch = 0
       , userTyping = 0
@@ -574,7 +575,8 @@ type Msg
     | JobsChosen Route.JobsParams
     | JobToggled String
     | GotJobs Int (Result (Graphql.Http.Error QueueJobs.Page) QueueJobs.Page)
-    | StatsChosen Route
+    | TorrentStatsChosen Route.TorrentStatsParams
+    | QueueStatsChosen Route.QueueStatsParams
     | StatsRefreshDue
     | StatsRefreshRequested
     | GotTorrentStats Int (Result (Graphql.Http.Error TorrentStats.Statistics) TorrentStats.Statistics)
@@ -1512,7 +1514,7 @@ update msg model =
                 -- Same query re-submitted; don't throw away results to fetch them again.
                 ( model, Cmd.none )
 
-            else if Route.question model.route == Route.question route then
+            else if Route.sameQuestion model.route route then
                 -- The page has the answer to this already: how often to look again is not
                 -- what to look at, and the queue's statistics pick their queues and events out
                 -- of the answer they have. The chart stays, drawn as the route now says, and
@@ -1546,22 +1548,22 @@ update msg model =
                                     _ ->
                                         QueueJobs.empty
 
-                            -- The same for the timeline: the old chart stays, quieter,
-                            -- until the new one comes.
+                            -- The same for the torrent timeline and the queue's statistics:
+                            -- the old chart stays, quieter, until the new one comes.
                             , torrentStats =
                                 case ( model.route, route ) of
                                     ( Route.TorrentStats _, Route.TorrentStats _ ) ->
-                                        TorrentStats.refreshing model.torrentStats
+                                        StatsLook.refreshing model.torrentStats
 
                                     _ ->
-                                        TorrentStats.empty
+                                        StatsLook.empty
                             , queueStats =
                                 case ( model.route, route ) of
                                     ( Route.QueueStats _, Route.QueueStats _ ) ->
-                                        QueueStats.refreshing model.queueStats
+                                        StatsLook.refreshing model.queueStats
 
                                     _ ->
-                                        QueueStats.empty
+                                        StatsLook.empty
                         }
 
                     epoch =
@@ -1777,17 +1779,11 @@ update msg model =
                                 )
                             )
 
-        StatsChosen route ->
-            if route == model.route then
-                -- A chip already in force, or a number typed that came to the multiplier
-                -- already in force: nothing to ask for, and no history entry. Elm draws the
-                -- page again all the same, which puts a field's value back to what the page
-                -- says, so a number that was typed and not kept does not stay in it.
-                ( model, Cmd.none )
+        TorrentStatsChosen params ->
+            chooseStats (Route.TorrentStats params) model
 
-            else
-                -- Choosing what to look at is a deliberate act, so it earns a history entry.
-                ( model, Nav.pushUrl model.key (Route.toHref model.basePath route) )
+        QueueStatsChosen params ->
+            chooseStats (Route.QueueStats params) model
 
         StatsRefreshDue ->
             if model.visible then
@@ -1868,16 +1864,33 @@ update msg model =
                             )
 
 
+{-| A statistics page's controls, or its queues, events or sources, chosen: `route` is the page
+as they would make it.
+-}
+chooseStats : Route -> Model -> ( Model, Cmd Msg )
+chooseStats route model =
+    if route == model.route then
+        -- A chip already in force, or a number typed that came to the multiplier already in
+        -- force: nothing to ask for, and no history entry. Elm draws the page again all the
+        -- same, which puts a field's value back to what the page says, so a number that was
+        -- typed and not kept does not stay in it.
+        ( model, Cmd.none )
+
+    else
+        -- Choosing what to look at is a deliberate act, so it earns a history entry.
+        ( model, Nav.pushUrl model.key (Route.toHref model.basePath route) )
+
+
 torrentStatsMessages : TorrentStats.Messages Msg
 torrentStatsMessages =
-    { navigate = StatsChosen << Route.TorrentStats
+    { navigate = TorrentStatsChosen
     , refreshRequested = StatsRefreshRequested
     }
 
 
 queueStatsMessages : QueueStats.Messages Msg
 queueStatsMessages =
-    { navigate = StatsChosen << Route.QueueStats
+    { navigate = QueueStatsChosen
     , refreshRequested = StatsRefreshRequested
     }
 
@@ -2086,7 +2099,7 @@ lookAgain nudge model =
     else
         case model.route of
             Route.TorrentStats params ->
-                if nudge == IfIdle && not (TorrentStats.timerDue params model.torrentStats) then
+                if nudge == IfIdle && not (StatsLook.timerDue params.controls model.torrentStats) then
                     ( model, Cmd.none )
 
                 else
@@ -2094,12 +2107,12 @@ lookAgain nudge model =
                         epoch =
                             model.epoch + 1
                     in
-                    ( { model | epoch = epoch, torrentStats = TorrentStats.refreshing model.torrentStats }
+                    ( { model | epoch = epoch, torrentStats = StatsLook.refreshing model.torrentStats }
                     , TorrentStats.fetch model.apiUrl params (GotTorrentStats epoch)
                     )
 
             Route.QueueStats params ->
-                if nudge == IfIdle && not (QueueStats.timerDue params model.queueStats) then
+                if nudge == IfIdle && not (StatsLook.timerDue params.controls model.queueStats) then
                     ( model, Cmd.none )
 
                 else
@@ -2107,7 +2120,7 @@ lookAgain nudge model =
                         epoch =
                             model.epoch + 1
                     in
-                    ( { model | epoch = epoch, queueStats = QueueStats.refreshing model.queueStats }
+                    ( { model | epoch = epoch, queueStats = StatsLook.refreshing model.queueStats }
                     , QueueStats.fetch model.apiUrl params (GotQueueStats epoch)
                     )
 
@@ -2535,8 +2548,8 @@ beginIdentityRefresh reason model =
         , roles = Roles.empty
         , rolesEpoch = model.rolesEpoch + 1
         , jobs = QueueJobs.empty
-        , torrentStats = TorrentStats.empty
-        , queueStats = QueueStats.empty
+        , torrentStats = StatsLook.empty
+        , queueStats = StatsLook.empty
 
         -- And a pending search-debounce is spent: the timer it would fire belongs to a
         -- screen that no longer holds the search it was typed into.

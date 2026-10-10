@@ -1707,7 +1707,10 @@ main {
   color: var(--accent);
 }
 
-/* The statistics pages (src/TorrentStats.elm, src/QueueStats.elm, src/StatsControls.elm) */
+/* The statistics pages ---------------------------------------------------- */
+
+/* src/TorrentStats.elm and src/QueueStats.elm, with src/StatsControls.elm and
+   src/StatsLook.elm. */
 
 /* The same rows of chips the jobs page has, with longer labels ("timeframe",
    "resolution") than its "queue" and "status" to make room for. */

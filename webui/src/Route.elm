@@ -1,4 +1,4 @@
-module Route exposing (Access(..), BasePath, JobsParams, LoginParams, QueueStatsParams, RegisterParams, Route(..), SearchParams, TorrentStatsParams, basePath, emptyJobs, emptyQueueStats, emptySearch, emptyTorrentStats, fromUrl, guard, question, refreshInterval, returnDestination, toHref)
+module Route exposing (Access(..), BasePath, JobsParams, LoginParams, QueueStatsParams, RegisterParams, Route(..), SearchParams, TorrentStatsParams, basePath, emptyJobs, emptyQueueStats, emptySearch, emptyTorrentStats, fromUrl, guard, refreshInterval, returnDestination, sameQuestion, toHref)
 
 {-| Routes are real paths, not fragments — see the README.
 
@@ -10,7 +10,6 @@ variant breaks it at compile time rather than producing a dead link.
 import Facet exposing (Filters)
 import Identity
 import JobOrder exposing (JobOrder)
-import Magnes.Api.Enum.MetricsBucketDuration exposing (MetricsBucketDuration(..))
 import Magnes.Api.Enum.QueueJobStatus as QueueJobStatus exposing (QueueJobStatus)
 import QueueMetrics
 import Sort exposing (Sort)
@@ -136,19 +135,9 @@ type alias QueueStatsParams =
     }
 
 
-{-| The queue's statistics open where the Angular UI's do: on everything the queue holds, by
-the hour, and, unlike there, not looking again until asked to.
--}
 emptyQueueStats : QueueStatsParams
 emptyQueueStats =
-    { controls =
-        { timeframe = StatsControls.AllTime
-        , resolution = { unit = Hour, every = Nothing }
-        , refresh = StatsControls.Off
-        }
-    , queues = []
-    , events = []
-    }
+    { controls = StatsControls.queueDefault, queues = [], events = [] }
 
 
 parser : Parser (Route -> a) a
@@ -259,7 +248,7 @@ torrentStatsWith timeframe resolution every refresh sources =
                 , every = every
                 , refresh = refresh
                 }
-        , sources = List.filterMap nonBlank sources
+        , sources = unique (List.filterMap nonBlank sources)
         }
 
 
@@ -271,16 +260,33 @@ queueStatsWith timeframe resolution every refresh queues events =
     QueueStats
         { controls =
             StatsControls.fromParams
-                { defaults = emptyQueueStats.controls
+                { defaults = StatsControls.queueDefault
                 , timeframes = StatsControls.allTimeframes
                 , timeframe = timeframe
                 , resolution = resolution
                 , every = every
                 , refresh = refresh
                 }
-        , queues = List.filterMap nonBlank queues
-        , events = List.filterMap QueueMetrics.eventFromName events
+        , queues = unique (List.filterMap nonBlank queues)
+        , events = unique (List.filterMap QueueMetrics.eventFromName events)
         }
+
+
+{-| Each value once, where it was first named. A value named twice is chosen once: a chip is
+on or off, and `toHref` writes it once.
+-}
+unique : List a -> List a
+unique values =
+    List.foldl
+        (\value seen ->
+            if List.member value seen then
+                seen
+
+            else
+                seen ++ [ value ]
+        )
+        []
+        values
 
 
 nonBlank : String -> Maybe String
@@ -375,11 +381,17 @@ refreshInterval route =
             Nothing
 
 
-{-| The route reduced to what its page asks bitmagnet. Two routes that come to the same one
-ask the same question, and the page need not ask it again to show either: how often to look
-again is not what to look at, and the queue's statistics pick their queues and events out of an
-answer about all of them. Every route is listed, with no catch-all, for the reason
-`refreshInterval` is.
+{-| Whether two routes ask bitmagnet the same question, so that a page showing the answer to
+one need not ask again to show the other: how often to look again is not what to look at, and
+the queue's statistics pick their queues and events out of an answer about all of them.
+-}
+sameQuestion : Route -> Route -> Bool
+sameQuestion one other =
+    question one == question other
+
+
+{-| The route reduced to what its page asks bitmagnet. Every route is listed, with no catch-all,
+for the reason `refreshInterval` is.
 -}
 question : Route -> Route
 question route =
@@ -501,7 +513,7 @@ toHref (BasePath prefix) route =
 
                 QueueStats params ->
                     Builder.absolute [ "stats", "queue" ]
-                        (StatsControls.toParams emptyQueueStats.controls params.controls
+                        (StatsControls.toParams StatsControls.queueDefault params.controls
                             ++ List.map (Builder.string "queue") params.queues
                             ++ List.map (Builder.string "event" << QueueMetrics.eventName) params.events
                         )

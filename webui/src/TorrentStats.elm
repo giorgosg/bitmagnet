@@ -1,20 +1,17 @@
 module TorrentStats exposing
-    ( Bucket
+    ( Answer
+    , Bucket
     , Line
     , Messages
     , Plot
-    , Shown
     , Source
     , State
     , Statistics
-    , empty
     , failed
     , fetch
     , loaded
     , plot
     , query
-    , refreshing
-    , timerDue
     , view
     )
 
@@ -28,14 +25,13 @@ torrent first reported in one bucket and updated again later moves to the later 
 new to updated: what an earlier bucket counted as new can shrink.
 
 What is looked at is in the URL (`Route.TorrentStatsParams`); the timeframe, resolution and
-refresh are `StatsControls`', shared with the queue's statistics, and the buckets are cut up
-by `Buckets`. This module is what is particular to torrents: the query, the sources, and
-the lines they make.
+refresh are `StatsControls`', shared with the queue's statistics, the buckets are cut up by
+`Buckets`, and how a look goes is `StatsLook`'s. This module is what is particular to torrents:
+the query, the sources, and the lines they make.
 
 -}
 
 import ApiError
-import Bitmagnet
 import Buckets
 import Charts
 import Chip
@@ -46,7 +42,7 @@ import Graphql.Operation exposing (RootQuery)
 import Graphql.OptionalArgument exposing (OptionalArgument(..))
 import Graphql.SelectionSet as SelectionSet exposing (SelectionSet)
 import Html exposing (Html, div, h1, p, text)
-import Html.Attributes exposing (attribute, class, classList)
+import Html.Attributes exposing (class)
 import Magnes.Api.InputObject as InputObject
 import Magnes.Api.Object
 import Magnes.Api.Object.TorrentListSourcesResult as ListSourcesResult
@@ -57,7 +53,7 @@ import Magnes.Api.Object.TorrentSource as TorrentSource
 import Magnes.Api.Query as Query
 import Route
 import StatsControls
-import Task
+import StatsLook
 import Time
 
 
@@ -93,20 +89,9 @@ type alias Statistics =
 -- REQUESTS
 
 
-{-| The clock is read as the request is made, so the start of the timeframe and the end of
-the chart are the same moment, and the answer carries it.
--}
 fetch : String -> Route.TorrentStatsParams -> (Result (Graphql.Http.Error Statistics) Statistics -> msg) -> Cmd msg
-fetch apiUrl params toMsg =
-    Time.now
-        |> Task.andThen
-            (\now ->
-                query now params
-                    |> Bitmagnet.queryRequest apiUrl
-                    |> Graphql.Http.withTimeout StatsControls.requestTimeout
-                    |> Graphql.Http.toTask
-            )
-        |> Task.attempt toMsg
+fetch apiUrl params =
+    StatsLook.fetch apiUrl (\now -> query now params)
 
 
 {-| bitmagnet is asked what `StatsControls.request` says: the unit to bucket by, and where the
@@ -188,8 +173,7 @@ type alias Plot =
 
 
 {-| How each source is inked: a new line and an updated one, by the source's place in the
-order its sources go in. A source is drawn as a pair of lines, so this is also how many are
-drawn apart.
+order its sources go in.
 -}
 inkPairs : List ( Charts.Ink, Charts.Ink )
 inkPairs =
@@ -199,8 +183,11 @@ inkPairs =
     ]
 
 
-largestGroups : Int
-largestGroups =
+{-| How many pairs of lines there are inks for. While there are no more sources than this, each
+is a pair of its own; with more, one fewer are, and the rest are added together into the last.
+-}
+groupLimit : Int
+groupLimit =
     List.length inkPairs
 
 
@@ -291,8 +278,8 @@ plot params statistics =
             |> List.filter (Tuple.second >> hasCounts)
             |> List.concatMap (\( index, group ) -> linesOf index group)
     , others =
-        if List.length order > largestGroups then
-            List.drop (largestGroups - 1) order
+        if List.length order > groupLimit then
+            List.drop (groupLimit - 1) order
                 |> List.filter (\key -> Dict.member key counted)
                 |> List.map (nameOf statistics)
 
@@ -359,12 +346,12 @@ groupsOf nameFor order =
         alone key =
             { name = nameFor key, members = [ key ] }
     in
-    if List.length order <= largestGroups then
+    if List.length order <= groupLimit then
         List.map alone order
 
     else
-        List.map alone (List.take (largestGroups - 1) order)
-            ++ [ addedTogether (List.drop (largestGroups - 1) order) ]
+        List.map alone (List.take (groupLimit - 1) order)
+            ++ [ addedTogether (List.drop (groupLimit - 1) order) ]
 
 
 {-| The sources there are no more inks for, drawn as one.
@@ -391,116 +378,29 @@ linesOf index group =
 -- STATE
 
 
-{-| What is on screen: the chart, with the choices it was drawn for and when it was asked.
+{-| An answer as the page keeps it: drawn once, when it comes, for the choices it was asked
+with, and the sources bitmagnet listed, by which chosen sources go on being named across looks
+that fail (`StatsLook.State`'s `latest`).
 -}
-type alias Shown =
-    { params : Route.TorrentStatsParams
-    , asked : Time.Posix
+type alias Answer =
+    { asked : Time.Posix
     , plot : Plot
-    }
-
-
-type Listing
-    = Loading
-    | Failed ApiError.Failure
-    | Loaded Shown
-
-
-{-| `refreshing` is set while another look is on its way over one already shown, which
-stays on screen, quieter, until it arrives. `lastFailure` is a look that did not arrive over a
-chart drawn for the same choices: the chart stays, with the reason, because a refresh that
-fails is not a reason to take away what was there.
-
-`sources` are those of the last answer, kept across looks that fail, so that a chosen source
-goes on being named as bitmagnet names it.
-
--}
-type alias State =
-    { listing : Listing
-    , refreshing : Bool
-    , lastFailure : Maybe ApiError.Failure
     , sources : List Source
     }
 
 
-empty : State
-empty =
-    { listing = Loading, refreshing = False, lastFailure = Nothing, sources = [] }
-
-
-{-| Another look has been asked for.
--}
-refreshing : State -> State
-refreshing state =
-    { state | refreshing = True }
-
-
-{-| Whether an answer is still to come, so a timer does not ask again over the top of it.
--}
-inFlight : State -> Bool
-inFlight state =
-    case state.listing of
-        Loading ->
-            True
-
-        _ ->
-            state.refreshing
-
-
-{-| Whether the page's timer firing is to be a look: it was asked to keep itself fresh, and
-no look is on its way. A tick can already be on its way when refreshing is turned off, and
-fires once more, so the timer's own word that it was due is not enough.
--}
-timerDue : Route.TorrentStatsParams -> State -> Bool
-timerDue params state =
-    Route.refreshInterval (Route.TorrentStats params) /= Nothing && not (inFlight state)
-
-
-shownOf : State -> Maybe Shown
-shownOf state =
-    case state.listing of
-        Loaded shown ->
-            Just shown
-
-        _ ->
-            Nothing
+type alias State =
+    StatsLook.State Route.TorrentStatsParams Answer
 
 
 loaded : Route.TorrentStatsParams -> Statistics -> State -> State
-loaded params statistics state =
-    { state
-        | listing = Loaded { params = params, asked = statistics.asked, plot = plot params statistics }
-        , refreshing = False
-        , lastFailure = Nothing
-        , sources = statistics.sources
-    }
+loaded params statistics =
+    StatsLook.loaded params { asked = statistics.asked, plot = plot params statistics, sources = statistics.sources }
 
 
-{-| A look that did not come, asked for under `params`. A chart that was drawn for the same
-look stays with the reason, so that a poll that fails does not take it away. One drawn for
-other choices would be left under chips that are not its own, with a heading that says
-something else, so it goes, and the reason is shown alone.
--}
 failed : Route.TorrentStatsParams -> ApiError.Failure -> State -> State
-failed params failure state =
-    case state.listing of
-        Loaded shown ->
-            if sameLook shown.params params then
-                { state | refreshing = False, lastFailure = Just failure }
-
-            else
-                { state | listing = Failed failure, refreshing = False, lastFailure = Nothing }
-
-        _ ->
-            { state | listing = Failed failure, refreshing = False }
-
-
-{-| Whether two looks ask bitmagnet the same question: how often to look again is not what
-to look at.
--}
-sameLook : Route.TorrentStatsParams -> Route.TorrentStatsParams -> Bool
-sameLook one other =
-    Route.question (Route.TorrentStats one) == Route.question (Route.TorrentStats other)
+failed =
+    StatsLook.failed Route.TorrentStats
 
 
 
@@ -518,15 +418,7 @@ view zone messages params state =
     div [ class "page torrent-stats" ]
         [ h1 [] [ text "Torrent statistics" ]
         , choices messages params state
-        , case state.listing of
-            Loading ->
-                p [ class "notice" ] [ text "Loading statistics…" ]
-
-            Failed failure ->
-                p [ class "notice error", attribute "role" "alert" ] [ text (ApiError.toMessage failure) ]
-
-            Loaded shown ->
-                viewShown zone state shown
+        , StatsLook.view zone .asked (.answer >> viewChart zone) state
         ]
 
 
@@ -539,11 +431,11 @@ choices messages params state =
         -- The multiplier the chart on screen came to, in the unit now chosen: a chart that
         -- was drawn for another unit says nothing of this one.
         picked =
-            shownOf state
+            StatsLook.shownOf state
                 |> Maybe.andThen
                     (\shown ->
                         if shown.params.controls.resolution.unit == params.controls.resolution.unit then
-                            Just (Buckets.widthIn params.controls.resolution.unit shown.plot.grid)
+                            Just (Buckets.widthIn params.controls.resolution.unit shown.answer.plot.grid)
 
                         else
                             Nothing
@@ -564,10 +456,10 @@ choices messages params state =
                                 { label = source.name
                                 , count = Nothing
                                 , selected = List.member source.key params.sources
-                                , onToggle = messages.navigate { params | sources = toggleIn source.key params.sources }
+                                , onToggle = messages.navigate { params | sources = Chip.toggle source.key params.sources }
                                 }
                         )
-                        (withChosen params.sources state.sources)
+                        (withChosen params.sources (state.latest |> Maybe.map .sources |> Maybe.withDefault []))
                     )
                ]
         )
@@ -590,85 +482,32 @@ withChosen chosen known =
             chosen
 
 
-toggleIn : a -> List a -> List a
-toggleIn value values =
-    if List.member value values then
-        List.filter ((/=) value) values
-
-    else
-        values ++ [ value ]
-
-
-{-| The chart, dimmed while another look is on its way, with the reason when a look did not
-come, and how to read what it counts.
+{-| The chart, and how to read what it counts.
 -}
-viewShown : Time.Zone -> State -> Shown -> Html msg
-viewShown zone state shown =
-    div
-        [ classList [ ( "stats", True ), ( "stats-refreshing", state.refreshing ) ]
-        , attribute "aria-busy"
-            (if state.refreshing then
-                "true"
-
-             else
-                "false"
-            )
-        ]
-        [ case state.lastFailure of
-            Just failure ->
-                p [ class "notice error", attribute "role" "alert" ]
-                    [ text
-                        (ApiError.toMessage failure
-                            ++ " Showing the answer as of "
-                            ++ Format.dateTime zone shown.asked
-                            ++ "."
-                        )
-                    ]
-
-            Nothing ->
-                text ""
-        , Charts.timeline
-            { title = "Torrents per " ++ Buckets.label shown.plot.grid
-            , description = "Line chart: torrents new and updated per " ++ Buckets.label shown.plot.grid ++ ", by source."
-            , zone = zone
-            , time = .start
-            , series =
-                List.map
-                    (\line ->
-                        { label = line.label
-                        , value = \slot -> Dict.get line.key slot.counts |> Maybe.withDefault 0
-                        , ink = line.ink
-                        }
-                    )
-                    shown.plot.lines
-            }
-            shown.plot.slots
-        , viewCapNote shown.plot
-        , viewOthers shown.plot
-        , p [ class "stats-note" ] [ text ("As of " ++ Format.dateTime zone shown.asked) ]
-        , p [ class "stats-note" ]
-            [ text "Counted by when a source last updated a torrent: as new if that was within an hour of the source first reporting it, as updated if later." ]
-        ]
-
-
-{-| Said whenever the chart was cut down to fit, however the multiplier came about, of the
-chart that was drawn and not of the choices since made.
--}
-viewCapNote : Plot -> Html msg
-viewCapNote drawn =
-    if drawn.grid.unit == drawn.wanted.unit && drawn.grid.every == drawn.wanted.every then
-        text ""
-
-    else
-        p [ class "stats-note" ]
-            [ text
-                ("Drawn per "
-                    ++ Buckets.label drawn.grid
-                    ++ ", not per "
-                    ++ Buckets.label drawn.wanted
-                    ++ ": that many buckets are more than the chart can draw."
+viewChart : Time.Zone -> Answer -> List (Html msg)
+viewChart zone drawn =
+    [ Charts.timeline
+        { title = "Torrents per " ++ Buckets.label drawn.plot.grid
+        , description = "Line chart: torrents new and updated per " ++ Buckets.label drawn.plot.grid ++ ", by source."
+        , zone = zone
+        , time = .start
+        , series =
+            List.map
+                (\line ->
+                    { label = line.label
+                    , value = \slot -> Dict.get line.key slot.counts |> Maybe.withDefault 0
+                    , ink = line.ink
+                    }
                 )
-            ]
+                drawn.plot.lines
+        }
+        drawn.plot.slots
+    , StatsControls.capNote drawn.plot
+    , viewOthers drawn.plot
+    , p [ class "stats-note" ] [ text ("As of " ++ Format.dateTime zone drawn.asked) ]
+    , p [ class "stats-note" ]
+        [ text "Counted by when a source last updated a torrent: as new if that was within an hour of the source first reporting it, as updated if later." ]
+    ]
 
 
 {-| Who "Other sources" are, since a pair of lines that adds up several cannot say.

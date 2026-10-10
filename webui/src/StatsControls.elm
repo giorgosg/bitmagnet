@@ -1,16 +1,18 @@
 module StatsControls exposing
     ( AutoRefresh(..)
     , Controls
+    , Request
     , Resolution
     , Timeframe(..)
     , allRefreshes
     , allTimeframes
     , boundedTimeframes
+    , capNote
     , default
     , fromParams
+    , queueDefault
     , refreshMillis
     , request
-    , requestTimeout
     , rows
     , toParams
     , window
@@ -29,7 +31,7 @@ and each page's own filters ride beside these in its own query string.
 
 import Buckets
 import Chip
-import Html exposing (Html, button, input, text)
+import Html exposing (Html, button, input, p, text)
 import Html.Attributes exposing (attribute, class, placeholder, type_, value)
 import Html.Events as Events
 import Json.Decode as Decode
@@ -81,12 +83,23 @@ type alias Controls =
 
 {-| The Angular UI's starting point for the torrent page: the last hour, minutes, and, unlike
 there, no refreshing until it is asked for. A page that starts elsewhere, as the queue's
-statistics will, says so in `toParams` and `fromParams`.
+statistics do, says so in `toParams` and `fromParams`.
 -}
 default : Controls
 default =
     { timeframe = Hours1
     , resolution = { unit = Minute, every = Nothing }
+    , refresh = Off
+    }
+
+
+{-| The Angular UI's starting point for the queue's statistics: everything the queue holds, by
+the hour, and, unlike there, no refreshing until it is asked for.
+-}
+queueDefault : Controls
+queueDefault =
+    { timeframe = AllTime
+    , resolution = { unit = Hour, every = Nothing }
     , refresh = Off
     }
 
@@ -152,6 +165,15 @@ window now controls =
     }
 
 
+{-| What a page asks bitmagnet for: the unit to bucket by, and where the timeframe's first column
+begins, or nothing for everything. An answer is read by the request it answers.
+-}
+type alias Request =
+    { bucketDuration : MetricsBucketDuration
+    , startTime : Maybe Time.Posix
+    }
+
+
 {-| What to ask bitmagnet for, as of `now`. It buckets by the unit the resolution comes to,
 which is the largest whole one it makes (`Buckets.grid`): a week of minutes merged into hours is
 asked for as hours. `startTime` is where the timeframe's first column begins, not the moment the
@@ -164,7 +186,7 @@ hours in a zone that is not a whole number of hours from UTC, in its database's 
 against a database that is not on UTC the first of those can still be short.
 
 -}
-request : Time.Posix -> Controls -> { bucketDuration : MetricsBucketDuration, startTime : Maybe Time.Posix }
+request : Time.Posix -> Controls -> Request
 request now controls =
     let
         span =
@@ -176,16 +198,6 @@ request now controls =
     { bucketDuration = planned.bucketedBy
     , startTime = Maybe.map (Buckets.columnStart planned) span.from
     }
-
-
-{-| How long a look is waited for before it is given up on, so that a request that is never
-answered does not hold a page's refresh back for good. On a real instance the torrent page's
-default look took about five seconds, and nine days of minutes more than thirty, so this is a
-good deal longer than either.
--}
-requestTimeout : Float
-requestTimeout =
-    120 * 1000
 
 
 timeframeMillis : Timeframe -> Maybe Int
@@ -458,6 +470,28 @@ multiplierField config controls =
             )
         ]
         []
+
+
+{-| Said whenever a chart was cut down to fit, however its multiplier came about: `grid` is what
+was drawn and `wanted` what would have been, had a chart been able to draw any number of
+columns (`Buckets.grid` and `Buckets.unlimited`). It is said of the chart drawn, not of the
+choices since made.
+-}
+capNote : { a | grid : Buckets.Grid, wanted : Buckets.Grid } -> Html msg
+capNote drawn =
+    if drawn.grid.unit == drawn.wanted.unit && drawn.grid.every == drawn.wanted.every then
+        text ""
+
+    else
+        p [ class "stats-note" ]
+            [ text
+                ("Drawn per "
+                    ++ Buckets.label drawn.grid
+                    ++ ", not per "
+                    ++ Buckets.label drawn.wanted
+                    ++ ": that many buckets are more than the chart can draw."
+                )
+            ]
 
 
 timeframeLabel : Timeframe -> String

@@ -112,6 +112,12 @@ suite =
                         |> Url.fromString
                         |> Maybe.map (Route.fromUrl mount)
                         |> Expect.equal (Just (Route.TorrentStats Route.emptyTorrentStats))
+            , test "reads a source named twice as named once" <|
+                \_ ->
+                    "https://example.test/magnes/stats/torrents?source=dht&source=rarbg&source=dht"
+                        |> Url.fromString
+                        |> Maybe.map (Route.fromUrl mount)
+                        |> Expect.equal (Just (Route.TorrentStats { emptyStats | sources = [ "dht", "rarbg" ] }))
             , test "has no timeframe of everything, which only the queue's statistics offer" <|
                 \_ ->
                     "https://example.test/magnes/stats/torrents?timeframe=all"
@@ -159,6 +165,12 @@ suite =
                         |> Url.fromString
                         |> Maybe.map (Route.fromUrl mount)
                         |> Expect.equal (Just (Route.QueueStats Route.emptyQueueStats))
+            , test "reads a queue or an event named twice as named once, in the order first named" <|
+                \_ ->
+                    "https://example.test/magnes/stats/queue?queue=b&queue=a&queue=b&event=failed&event=created&event=failed"
+                        |> Url.fromString
+                        |> Maybe.map (Route.fromUrl mount)
+                        |> Expect.equal (Just (Route.QueueStats { emptyQueueStats | queues = [ "b", "a" ], events = [ QueueMetrics.Failed, QueueMetrics.Created ] }))
             , test "is refused, not redirected, to an Identity without queue::query" <|
                 \_ ->
                     ( Route.guard mount (Identity.Anonymous [ Identity.graphql "health" "query", Identity.graphql "torrent" "query" ]) (Route.QueueStats Route.emptyQueueStats)
@@ -187,31 +199,38 @@ suite =
                         )
                         |> Expect.equal (Just 30000 :: Nothing :: Just 10000 :: Nothing :: List.map (always Nothing) (List.filter (not << isStats) routes))
             ]
-        , describe "question"
+        , describe "sameQuestion"
             [ test "two looks at the torrents that differ only in how often to look again ask the same" <|
                 \_ ->
                     let
                         slower =
                             { chosenStats | controls = withRefresh Every5Minutes chosenStats.controls }
                     in
-                    ( Route.question (Route.TorrentStats chosenStats) == Route.question (Route.TorrentStats slower)
-                    , Route.question (Route.TorrentStats chosenStats) == Route.question (Route.TorrentStats { chosenStats | sources = [] })
+                    ( Route.sameQuestion (Route.TorrentStats chosenStats) (Route.TorrentStats slower)
+                    , Route.sameQuestion (Route.TorrentStats chosenStats) (Route.TorrentStats { chosenStats | sources = [] })
                     )
                         |> Expect.equal ( True, False )
             , test "two looks at the queue ask the same whatever they look again at, and whichever queues and events they pick out of the answer" <|
                 \_ ->
-                    let
-                        asked =
-                            Route.question (Route.QueueStats chosenQueueStats)
-                    in
-                    ( asked == Route.question (Route.QueueStats { chosenQueueStats | controls = withRefresh Off chosenQueueStats.controls, queues = [], events = [] })
-                    , asked == Route.question (Route.QueueStats { chosenQueueStats | controls = { timeframe = Hours1, resolution = chosenQueueStats.controls.resolution, refresh = Every10Seconds } })
+                    ( Route.sameQuestion (Route.QueueStats chosenQueueStats)
+                        (Route.QueueStats { chosenQueueStats | controls = withRefresh Off chosenQueueStats.controls, queues = [], events = [] })
+                    , Route.sameQuestion (Route.QueueStats chosenQueueStats)
+                        (Route.QueueStats { chosenQueueStats | controls = { timeframe = Hours1, resolution = chosenQueueStats.controls.resolution, refresh = Every10Seconds } })
                     )
                         |> Expect.equal ( True, False )
-            , test "leaves a page that does not look again by itself as it is" <|
+            , test "for every other page, is the same route" <|
                 \_ ->
-                    List.map Route.question (List.filter (not << isStats) routes)
-                        |> Expect.equal (List.filter (not << isStats) routes)
+                    let
+                        others =
+                            List.filter (not << isStats) routes
+                    in
+                    List.concatMap (\one -> List.map (\other -> Route.sameQuestion one other == (one == other)) others) others
+                        |> List.all identity
+                        |> Expect.equal True
+            , test "is never asked across two pages" <|
+                \_ ->
+                    Route.sameQuestion (Route.QueueStats Route.emptyQueueStats) (Route.TorrentStats Route.emptyTorrentStats)
+                        |> Expect.equal False
             ]
         , test "Unknown waits and bootstrap failure remains a refusal" <|
             \_ ->

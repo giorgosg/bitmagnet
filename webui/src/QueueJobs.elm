@@ -416,7 +416,7 @@ controls messages params jobsPage =
                         { label = queue
                         , count = Just n
                         , selected = List.member queue params.queues
-                        , onToggle = startOver { params | queues = toggleIn queue params.queues }
+                        , onToggle = startOver { params | queues = Chip.toggle queue params.queues }
                         }
                 )
                 (withChosen params.queues jobsPage.queues)
@@ -428,7 +428,7 @@ controls messages params jobsPage =
                         { label = QueueJobStatus.toString status
                         , count = Just n
                         , selected = List.member status params.statuses
-                        , onToggle = startOver { params | statuses = toggleIn status params.statuses }
+                        , onToggle = startOver { params | statuses = Chip.toggle status params.statuses }
                         }
                 )
                 jobsPage.statuses
@@ -484,15 +484,6 @@ withChosen chosen counted =
 unfiltered : Route.JobsParams -> Bool
 unfiltered params =
     List.isEmpty params.queues && List.isEmpty params.statuses
-
-
-toggleIn : a -> List a -> List a
-toggleIn value values =
-    if List.member value values then
-        List.filter ((/=) value) values
-
-    else
-        values ++ [ value ]
 
 
 listing : Route.BasePath -> Time.Zone -> Messages msg -> Route.JobsParams -> State -> Page -> Html msg

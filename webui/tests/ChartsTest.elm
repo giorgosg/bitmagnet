@@ -466,6 +466,22 @@ suite =
                             [ Selector.attribute (Svg.Attributes.fill "var(--faint)")
                             , Selector.attribute (Svg.Attributes.stroke "var(--fg)")
                             ]
+            , test "draws a hollow accent ink as a bar of the background edged in the accent, unlike the soft accent's pale fill" <|
+                \_ ->
+                    Charts.stackedBars
+                        { title = "Jobs by queue and status"
+                        , description = "Stacked bar chart."
+                        , categoryHeading = "Queue"
+                        , category = .queue
+                        , segments = [ { label = "Retry", value = .retry, ink = Charts.AccentHollow } ]
+                        }
+                        totals
+                        |> Query.fromHtml
+                        |> Query.find [ Selector.tag "li" ]
+                        |> Query.has
+                            [ Selector.attribute (Svg.Attributes.fill "var(--bg)")
+                            , Selector.attribute (Svg.Attributes.stroke "var(--accent)")
+                            ]
             , test "gives the numbers in a visually hidden table, a row per category" <|
                 \_ ->
                     stackedBars totals

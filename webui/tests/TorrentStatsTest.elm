@@ -11,6 +11,7 @@ import Json.Encode as Encode
 import Magnes.Api.Enum.MetricsBucketDuration exposing (MetricsBucketDuration(..))
 import Route
 import StatsControls exposing (AutoRefresh(..), Timeframe(..))
+import StatsLook
 import Test exposing (Test, describe, test)
 import Test.Html.Event as Event
 import Test.Html.Query as Query
@@ -312,30 +313,10 @@ suite =
                     ]
                 ]
             ]
-        , describe "timerDue"
-            [ test "is a look an idle page that was asked to keep itself fresh makes when its timer fires" <|
-                \_ ->
-                    TorrentStats.timerDue (withControls emptyParams (\c -> { c | refresh = Every10Seconds })) shown
-                        |> Expect.equal True
-            , test "is not one a tick that was already on its way makes after refreshing was turned off" <|
-                \_ ->
-                    TorrentStats.timerDue emptyParams shown
-                        |> Expect.equal False
-            , test "waits for a look that is still on its way, and for the first one" <|
-                \_ ->
-                    let
-                        everyTen =
-                            withControls emptyParams (\c -> { c | refresh = Every10Seconds })
-                    in
-                    ( TorrentStats.timerDue everyTen (TorrentStats.refreshing shown)
-                    , TorrentStats.timerDue everyTen TorrentStats.empty
-                    )
-                        |> Expect.equal ( False, False )
-            ]
         , describe "view"
             [ test "says it is loading, with the controls already there to change" <|
                 \_ ->
-                    viewed emptyParams TorrentStats.empty
+                    viewed emptyParams StatsLook.empty
                         |> Expect.all
                             [ Query.has [ Selector.text "Loading statistics…" ]
                             , Query.findAll [ Selector.class "chip" ] >> Query.count (Expect.atLeast 5)
@@ -343,7 +324,7 @@ suite =
             , describe "a look that fails"
                 [ test "says why, alone, when there was nothing to show" <|
                     \_ ->
-                        viewed emptyParams (TorrentStats.failed emptyParams ApiError.ServiceUnavailable TorrentStats.empty)
+                        viewed emptyParams (TorrentStats.failed emptyParams ApiError.ServiceUnavailable StatsLook.empty)
                             |> Query.find [ Selector.attribute (Html.Attributes.attribute "role" "alert") ]
                             |> Query.has [ Selector.text (ApiError.toMessage ApiError.ServiceUnavailable) ]
                 , test "keeps a chart that was drawn for the same look, and says why and as of when" <|
@@ -446,7 +427,7 @@ suite =
                                 withResolution { unit = Minute, every = Just 1 } (withTimeframe Weeks1 emptyParams)
                         in
                         -- Asked again for the last hour, the old chart is still on screen, dimmed.
-                        viewed emptyParams (TorrentStats.refreshing (loadedWith aWeekOfMinutes))
+                        viewed emptyParams (StatsLook.refreshing (loadedWith aWeekOfMinutes))
                             |> Query.has [ Selector.text "Drawn per 6 minutes, not per minute" ]
                 ]
             , test "says when it was asked, and how to read the counts" <|
@@ -458,7 +439,7 @@ suite =
                             ]
             , test "names the sources that were added together" <|
                 \_ ->
-                    viewed emptyParams (TorrentStats.loaded emptyParams (manySources [ bucket "a" 0 False 10, bucket "c" 0 False 2, bucket "e" 0 False 3 ]) TorrentStats.empty)
+                    viewed emptyParams (TorrentStats.loaded emptyParams (manySources [ bucket "a" 0 False 10, bucket "c" 0 False 2, bucket "e" 0 False 3 ]) StatsLook.empty)
                         |> Query.has [ Selector.text "Other sources are Charlie, Echo." ]
             , test "has no such sentence where each source is drawn apart" <|
                 \_ ->
@@ -466,14 +447,14 @@ suite =
                         |> Query.hasNot [ Selector.text "Other sources are" ]
             , test "with nothing counted, says so rather than drawing a chart" <|
                 \_ ->
-                    viewed emptyParams (TorrentStats.loaded emptyParams { statistics | buckets = [] } TorrentStats.empty)
+                    viewed emptyParams (TorrentStats.loaded emptyParams { statistics | buckets = [] } StatsLook.empty)
                         |> Expect.all
                             [ Query.has [ Selector.text "Nothing to show." ]
                             , Query.findAll [ Selector.tag "svg", Selector.attribute (Html.Attributes.attribute "role" "img") ] >> Query.count (Expect.equal 0)
                             ]
             , test "keeps the old chart, dimmed and busy, while another look is on its way" <|
                 \_ ->
-                    viewed emptyParams (TorrentStats.refreshing shown)
+                    viewed emptyParams (StatsLook.refreshing shown)
                         |> Query.find [ Selector.class "stats-refreshing" ]
                         |> Query.has [ Selector.attribute (Html.Attributes.attribute "aria-busy" "true"), Selector.tag "figure" ]
             , describe "controls"
@@ -718,7 +699,7 @@ withControls params change =
 
 loadedWith : Route.TorrentStatsParams -> TorrentStats.State
 loadedWith params =
-    TorrentStats.loaded params counted TorrentStats.empty
+    TorrentStats.loaded params counted StatsLook.empty
 
 
 {-| Counted for DHT and RARBG, both new and updated.
