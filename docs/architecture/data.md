@@ -49,7 +49,10 @@ A search is assembled as `query.Option`s — criteria, facets, orderings, hydrat
 run through the generic query in `query/query.go`. Three properties are worth knowing:
 
 - **Facets** (`query/facets.go`, `search/facet_*.go`) run as additional aggregate queries
-  in the same request. Each facet is a separate scan.
+  in the same request. Language and content-type values use one grouped count when its
+  planned cost fits the combined per-value aggregation budget; otherwise they use the
+  estimate-capable per-value path. Other facets still count per value. All facet counts
+  share an eight-slot limit so a search cannot take the whole database pool.
 - **Full text** goes through `fts.AppQueryToTsquery`, which lexes the user's search string
   into a Postgres `tsquery` (`&`, `|`, `<->`, `!`, `:*`) and binds it as a **parameter**
   — `tsv @@ ?::tsquery`. Ranking uses `ts_rank_cd`.

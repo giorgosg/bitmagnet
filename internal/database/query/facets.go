@@ -28,6 +28,12 @@ type Facet interface {
 	Criteria(filter FacetFilter) []Criteria
 }
 
+// GroupedFacet can count all values with one query. It returns false when the
+// grouped plan exceeds the aggregation budget and per-value counts are needed.
+type GroupedFacet interface {
+	GroupedCounts(FacetContext, int) (map[string]uint, bool, error)
+}
+
 type FacetFilter map[string]struct{}
 
 // Values allows iteration over deterministically sorted filter values, which helps with query caching.
@@ -84,10 +90,15 @@ type AggregationGroup struct {
 
 type Aggregations = maps.StringMap[AggregationGroup]
 
+// Facet counts share the database pool with item queries, auth and ingestion.
+// Bound them across requests, not just within one search.
+var facetCountSlots = make(chan struct{}, 8)
+
 type FacetContext interface {
 	DBContext
 	Context() context.Context
-	NewAggregationQuery(options ...Option) (SubQuery, error)
+	AggregationBudget() float64
+	NewAggregationQueryForFacet(key string, options ...Option) (SubQuery, error)
 }
 
 type facetContext struct {
@@ -111,8 +122,12 @@ func (ctx facetContext) Context() context.Context {
 	return ctx.ctx
 }
 
-func (ctx facetContext) NewAggregationQuery(options ...Option) (SubQuery, error) {
-	subCtx, subErr := Options(options...)(ctx.optionBuilder)
+func (ctx facetContext) AggregationBudget() float64 {
+	return ctx.optionBuilder.AggregationBudget()
+}
+
+func (ctx facetContext) NewAggregationQueryForFacet(key string, options ...Option) (SubQuery, error) {
+	subCtx, subErr := Options(append([]Option{withCurrentFacet(key)}, options...)...)(ctx.optionBuilder)
 	if subErr != nil {
 		return nil, subErr
 	}
@@ -282,6 +297,43 @@ func (b optionBuilder) calculateAggregations(ctx context.Context) (Aggregations,
 
 			filter := facet.Filter()
 			items := make(AggregationItems, len(values))
+
+			if groupedFacet, ok := facet.(GroupedFacet); ok {
+				select {
+				case facetCountSlots <- struct{}{}:
+				case <-ctx.Done():
+					addErr(ctx.Err())
+					return
+				}
+
+				counts, withinBudget, groupErr := groupedFacet.GroupedCounts(facetContext{
+					optionBuilder: b,
+					ctx:           ctx,
+				}, len(values))
+
+				<-facetCountSlots
+
+				if groupErr != nil {
+					addErr(fmt.Errorf("failed to group counts for key '%s': %w", facet.Key(), groupErr))
+					return
+				}
+
+				if withinBudget {
+					for key, label := range values {
+						count := counts[key]
+						if count > 0 || filter.HasKey(key) {
+							items[key] = AggregationItem{Label: label, Count: count}
+						}
+					}
+
+					addAggregation(facet.Key(), AggregationGroup{
+						Label: facet.Label(), Logic: facet.Logic(), Items: items,
+					})
+
+					return
+				}
+			}
+
 			addItem := func(key string, item AggregationItem) {
 				mtx.Lock()
 				defer mtx.Unlock()
@@ -294,6 +346,14 @@ func (b optionBuilder) calculateAggregations(ctx context.Context) (Aggregations,
 			for key, label := range values {
 				go func(key, label string) {
 					defer wgInner.Done()
+
+					select {
+					case facetCountSlots <- struct{}{}:
+						defer func() { <-facetCountSlots }()
+					case <-ctx.Done():
+						addErr(ctx.Err())
+						return
+					}
 
 					criterias := facet.Criteria(FacetFilter{key: struct{}{}})
 

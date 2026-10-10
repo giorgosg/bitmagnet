@@ -34,6 +34,14 @@ type torrentContentTypeFacet struct {
 	torrentContentAttributeFacet[model.ContentType]
 }
 
+func (f torrentContentTypeFacet) GroupedCounts(ctx query.FacetContext, valueCount int) (map[string]uint, bool, error) {
+	return groupFacetCounts(ctx, f, valueCount,
+		"torrent_contents.content_type::text AS key",
+		"(?) AS facet_rows",
+		"facet_rows.key",
+	)
+}
+
 func (torrentContentTypeFacet) Values(query.FacetContext) (map[string]string, error) {
 	values := make(map[string]string)
 	values["null"] = "Unknown"
