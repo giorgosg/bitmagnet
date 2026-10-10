@@ -223,11 +223,12 @@ func build(t *testing.T, db *dbtest.DB, cfg authconfig.Config) (*fixtureserver.S
 	t.Helper()
 
 	stack, err := fixtureserver.Build(t.Context(), fixtureserver.Options{
-		Config:              cfg,
-		Provider:            daoProvider{query: db.Query},
-		Logger:              zap.NewNop().Sugar(),
-		JWTSecret:           "fixtureserver-test-secret",
-		PasswordHashingCost: bcrypt.MinCost,
+		Config:                    cfg,
+		GrantAnonymousReadSurface: cfg.AnonymousAccess,
+		Provider:                  daoProvider{query: db.Query},
+		Logger:                    zap.NewNop().Sugar(),
+		JWTSecret:                 "fixtureserver-test-secret",
+		PasswordHashingCost:       bcrypt.MinCost,
 	})
 	require.NoError(t, err)
 
@@ -247,11 +248,12 @@ func buildWithOptions(
 	t.Helper()
 
 	opts := fixtureserver.Options{
-		Config:              authconfig.NewDefaultConfig(),
-		Provider:            daoProvider{query: db.Query},
-		Logger:              zap.NewNop().Sugar(),
-		JWTSecret:           "fixtureserver-test-secret",
-		PasswordHashingCost: bcrypt.MinCost,
+		Config:                    authconfig.NewDefaultConfig(),
+		GrantAnonymousReadSurface: true,
+		Provider:                  daoProvider{query: db.Query},
+		Logger:                    zap.NewNop().Sugar(),
+		JWTSecret:                 "fixtureserver-test-secret",
+		PasswordHashingCost:       bcrypt.MinCost,
 	}
 	adjust(&opts)
 
@@ -324,7 +326,7 @@ func TestBootstrapInvitationRegistersAnAdministrator(t *testing.T) {
 	// identity. That is the state the credentialed suite needs to test against.
 	refused := query(t, server, "", `{ torrentContent { search(input:{limit:1}) { totalCount } } }`)
 	require.NotEmpty(t, refused.Errors)
-	assert.Equal(t, "UNAUTHORIZED", refused.Errors[0].Extensions["code"])
+	assert.Equal(t, "AUTHENTICATION_REQUIRED", refused.Errors[0].Extensions["code"])
 
 	registered := query(t, server, "", `mutation { self { register(input:{
 		username:"harness",

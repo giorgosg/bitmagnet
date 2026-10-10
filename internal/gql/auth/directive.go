@@ -11,7 +11,13 @@ import (
 var ErrUnauthorized = errors.New("unauthorized")
 
 type unauthorizedError struct {
-	objAct rbac.ObjectAction
+	objAct    rbac.ObjectAction
+	anonymous bool
+}
+
+func IsAnonymousRefusal(err error) bool {
+	var refusal unauthorizedError
+	return errors.As(err, &refusal) && refusal.anonymous
 }
 
 func (unauthorizedError) Error() string {
@@ -58,6 +64,7 @@ func NewDirective() Directive {
 		}
 
 		allow := false
+		anonymous := true
 
 		objAct := rbac.ObjectAction{
 			Namespace: Namespace,
@@ -67,6 +74,9 @@ func NewDirective() Directive {
 
 		identity, ok := IdentityFromContext(ctx)
 		if ok {
+			self := identity.Self()
+			anonymous = self.User == nil && self.APIKey == nil
+
 			var err error
 
 			allow, err = identity.Enforce(ctx, objAct)
@@ -77,7 +87,8 @@ func NewDirective() Directive {
 
 		if !allow {
 			return nil, unauthorizedError{
-				objAct: objAct,
+				objAct:    objAct,
+				anonymous: anonymous,
 			}
 		}
 

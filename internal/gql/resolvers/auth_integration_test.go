@@ -900,7 +900,7 @@ func TestGraphQLDeniesAnonymousWhenAnonymousAccessIsOff(t *testing.T) {
 			res := query(t, server, "", testCase.query)
 
 			require.NotEmpty(t, res.Errors, "unauthenticated request must be refused")
-			assert.Equal(t, "unauthorized", res.Errors[0].Message)
+			assert.Equal(t, "authentication required", res.Errors[0].Message)
 		})
 	}
 }
@@ -1193,11 +1193,9 @@ func TestAPIKeyCannotManageAPIKeys(t *testing.T) {
 	requireNoGqlErrors(t, granted)
 }
 
-// The open default must remain usable without becoming a trapdoor. Anonymous
-// callers keep the baseline but never auth administration: role grants persist
-// in the database, so letting anon write a wildcard would survive switching
-// anonymous access off.
-func TestOpenAnonymousBaselineExcludesAuthAdministration(t *testing.T) {
+// The fresh anon role has no access to auth administration. The recovery
+// boundary still lets a caller register and log in.
+func TestFreshAnonymousRoleExcludesAuthAdministration(t *testing.T) {
 	t.Parallel()
 
 	server, _ := newAuthTestServer(t)
@@ -1222,18 +1220,13 @@ func TestOpenAnonymousBaselineExcludesAuthAdministration(t *testing.T) {
 
 			res := query(t, server, "", testCase.query)
 			require.NotEmpty(t, res.Errors, "anonymous callers must not administer auth")
-			assert.Equal(t, "unauthorized", res.Errors[0].Message)
+			assert.Equal(t, "authentication required", res.Errors[0].Message)
 		})
 	}
 }
 
-// The open baseline is the *read* surface, not every object action. It used to be
-// everything except auth, which meant an anonymous caller could delete torrents
-// and purge the queue — and with allowed_origins defaulting to "*" and
-// Content-Type: application/json allowed, any page the operator visited could do
-// it cross-origin. For a delete the side effect is the damage, so an unreadable
-// response bought nothing.
-func TestOpenAnonymousBaselineExcludesWrites(t *testing.T) {
+// A fresh installation must refuse anonymous mutations and deletes.
+func TestFreshAnonymousRoleExcludesWrites(t *testing.T) {
 	t.Parallel()
 
 	server, _ := newAuthTestServer(t)
@@ -1266,14 +1259,14 @@ func TestOpenAnonymousBaselineExcludesWrites(t *testing.T) {
 
 			res := query(t, server, "", testCase.query)
 			require.NotEmpty(t, res.Errors, "anonymous callers must not write")
-			assert.Equal(t, "unauthorized", res.Errors[0].Message)
+			assert.Equal(t, "authentication required", res.Errors[0].Message)
 		})
 	}
 }
 
-// And the reads an open installation has always served stay served, because
-// that is the whole point of the open default.
-func TestOpenAnonymousBaselineKeepsReads(t *testing.T) {
+// A fresh installation has no anonymous role grants, even while the
+// anonymous_access flag permits the role to be used.
+func TestFreshInstallationRequiresAuthenticationForCatalogueReads(t *testing.T) {
 	t.Parallel()
 
 	server, _ := newAuthTestServer(t)
@@ -1282,7 +1275,6 @@ func TestOpenAnonymousBaselineKeepsReads(t *testing.T) {
 		name  string
 		query string
 	}{
-		{name: "version", query: `{ version }`},
 		{
 			name:  "search",
 			query: `{ torrentContent { search(input: {limit: 1}) { items { infoHash } } } }`,
@@ -1292,7 +1284,9 @@ func TestOpenAnonymousBaselineKeepsReads(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
-			requireNoGqlErrors(t, query(t, server, "", testCase.query))
+			res := query(t, server, "", testCase.query)
+			gqlErr := requireGraphQLErrorCode(t, res, "AUTHENTICATION_REQUIRED")
+			assert.Equal(t, "authentication required", gqlErr.Message)
 		})
 	}
 }
@@ -1322,7 +1316,7 @@ func TestAnonymousAccessOffOverridesAStoredAnonGrant(t *testing.T) {
 	// and `health` regardless of the flag - see TestClosedInstanceStillServesTheShell.
 	denied := query(t, server, "", `{ torrentContent { search(input: {}) { totalCount } } }`)
 	require.NotEmpty(t, denied.Errors)
-	assert.Equal(t, "unauthorized", denied.Errors[0].Message)
+	assert.Equal(t, "authentication required", denied.Errors[0].Message)
 
 	// The grant is still reported as configured, which is the decision the spec
 	// records: listRoles tells the truth about the role, and that the override makes
@@ -1335,14 +1329,9 @@ func TestAnonymousAccessOffOverridesAStoredAnonGrant(t *testing.T) {
 		"a stored grant must still be reported as configured while it is overridden")
 }
 
-// Anonymous access is now administered through the role, in the running process:
-// no restart, and revocation works as well as granting. Before this, revoking
-// meant editing the configuration file, because the flag was the only thing that
-// could take the baseline away.
-//
-// The first assertion is also what proves the startup translation ran: an
-// anonymous read succeeds here only because the seed wrote the read surface into
-// role_permissions.
+// Anonymous access is administered through the role in the running process.
+// A fresh installation starts closed; granting and revoking both take effect
+// without a restart.
 func TestAnonymousGrantsAreAdministeredThroughTheRole(t *testing.T) {
 	t.Parallel()
 
@@ -1350,9 +1339,14 @@ func TestAnonymousGrantsAreAdministeredThroughTheRole(t *testing.T) {
 
 	search := `{ torrentContent { search(input: {}) { totalCount } } }`
 
-	requireNoGqlErrors(t, query(t, server, "", search))
+	initial := query(t, server, "", search)
+	require.NotEmpty(t, initial.Errors)
 
 	token := loginAsAdmin(t, server, code)
+	requireNoGqlErrors(t, query(t, server, token, `mutation { auth { putRole(role: "anon", objectActions: [
+		{namespace: "graphql", object: "torrentContent", action: "query"}
+	]) { name } } }`))
+	requireNoGqlErrors(t, query(t, server, "", search))
 
 	// Revoke everything. An empty object action set is a revocation.
 	requireNoGqlErrors(t, query(t, server, token,
@@ -1360,7 +1354,7 @@ func TestAnonymousGrantsAreAdministeredThroughTheRole(t *testing.T) {
 
 	denied := query(t, server, "", search)
 	require.NotEmpty(t, denied.Errors, "a revoked anon role must stop reading, in the same process")
-	assert.Equal(t, "unauthorized", denied.Errors[0].Message)
+	assert.Equal(t, "authentication required", denied.Errors[0].Message)
 
 	// Grant one object action back, and only that one.
 	requireNoGqlErrors(t, query(t, server, token, `mutation { auth { putRole(role: "anon", objectActions: [
@@ -1371,7 +1365,7 @@ func TestAnonymousGrantsAreAdministeredThroughTheRole(t *testing.T) {
 
 	narrowed := query(t, server, "", `{ queue { jobs(input: {}) { totalCount } } }`)
 	require.NotEmpty(t, narrowed.Errors, "anon holds exactly what was granted, no more")
-	assert.Equal(t, "unauthorized", narrowed.Errors[0].Message)
+	assert.Equal(t, "authentication required", narrowed.Errors[0].Message)
 }
 
 // The anon role's row must stay, so that its permissions cannot be cascaded away
@@ -1416,7 +1410,7 @@ func TestClosedInstanceStillServesTheShell(t *testing.T) {
 	// The catalogue, which is a stored grant, stays closed.
 	denied := query(t, server, "", `{ torrentContent { search(input: {}) { totalCount } } }`)
 	require.NotEmpty(t, denied.Errors)
-	assert.Equal(t, "unauthorized", denied.Errors[0].Message)
+	assert.Equal(t, "authentication required", denied.Errors[0].Message)
 }
 
 // What self.identity reports for an anonymous caller must be what the server
@@ -1458,5 +1452,5 @@ func TestClosedInstanceDoesNotAdvertiseOverriddenPermissions(t *testing.T) {
 	// And the request itself is refused, which is what the report now agrees with.
 	denied := query(t, server, "", `{ torrentContent { search(input: {}) { totalCount } } }`)
 	require.NotEmpty(t, denied.Errors)
-	assert.Equal(t, "unauthorized", denied.Errors[0].Message)
+	assert.Equal(t, "authentication required", denied.Errors[0].Message)
 }

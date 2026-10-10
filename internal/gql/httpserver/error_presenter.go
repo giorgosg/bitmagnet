@@ -28,6 +28,7 @@ const (
 	ErrorCodeRoleNotFound                        = "ROLE_NOT_FOUND"
 	ErrorCodePermissionInvalid                   = "PERMISSION_INVALID"
 	ErrorCodeUnauthorized                        = "UNAUTHORIZED"
+	ErrorCodeAuthenticationRequired              = "AUTHENTICATION_REQUIRED"
 	ErrorCodeAuthenticationInfrastructureFailure = "AUTHENTICATION_INFRASTRUCTURE_FAILURE"
 	ErrorCodeUserSessionRequired                 = "USER_SESSION_REQUIRED"
 	ErrorCodeAPIKeyManagementForbidden           = "API_KEY_MANAGEMENT_FORBIDDEN"
@@ -137,9 +138,17 @@ func classifyError(err error) (errorPresentation, bool) {
 			return errorPresentation{}, false
 		}
 
+		code := ErrorCodeUnauthorized
+		message := gqlauth.ErrUnauthorized.Error()
+
+		if gqlauth.IsAnonymousRefusal(err) {
+			code = ErrorCodeAuthenticationRequired
+			message = "authentication required"
+		}
+
 		return errorPresentation{
-			code:    ErrorCodeUnauthorized,
-			message: gqlauth.ErrUnauthorized.Error(),
+			code:    code,
+			message: message,
 			extensions: map[string]any{
 				"namespace": objAct.Namespace,
 				"object":    objAct.Object,

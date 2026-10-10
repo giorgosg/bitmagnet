@@ -29,8 +29,8 @@ func New() fx.Option {
 				httpserver.New,
 				fx.ResultTags(`group:"http_server_options"`),
 			),
-			// Contributing the object action means the anon role holds it while
-			// anonymous access is enabled, so the endpoint stays open by default.
+			// Contribute the Torznab action so administrators can grant it to
+			// the anon role or scope an API key to it.
 			fx.Annotate(
 				httpserver.ObjectActionProvider,
 				fx.ResultTags(`group:"auth_object_actions"`),
