@@ -123,8 +123,8 @@ func (gq *genericQuery[_]) checkExists(ctx context.Context) (bool, error) {
 		return false, sqErr
 	}
 
-	sql := dao.ToSQL(sq.UnderlyingDB().Select("*"))
-	row := sq.UnderlyingDB().Raw("SELECT EXISTS(" + sql + ")")
+	row := sq.UnderlyingDB().Session(&gorm.Session{NewDB: true}).
+		Raw("SELECT EXISTS(?)", sq.UnderlyingDB().Select("*"))
 
 	var exists bool
 
@@ -220,12 +220,10 @@ func (gq *genericQuery[T]) doItems() {
 					return
 				}
 
-				sql := dao.ToSQL(sqCte.UnderlyingDB()) + " LIMIT " + strconv.Itoa(stoppingPoint)
-
 				cte := gq.factory(raceCtx, gq.daoQ).UnderlyingDB().Clauses(
-					exclause.NewWith("cte", sql, true),
+					exclause.NewWith("cte", sqCte.UnderlyingDB().Limit(stoppingPoint), true),
 					exclause.NewWith("cte_count", "SELECT COUNT(*) AS total_count FROM cte", true),
-				).Table("cte").Where("(SELECT MAX(total_count) FROM cte_count) < " + strconv.Itoa(stoppingPoint))
+				).Table("cte").Where("(SELECT MAX(total_count) FROM cte_count) < ?", stoppingPoint)
 				if postErr := gq.builder.applyPost(cte); postErr != nil {
 					done(nil, postErr)
 					return

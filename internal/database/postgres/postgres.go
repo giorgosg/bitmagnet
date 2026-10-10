@@ -59,13 +59,6 @@ func New(p Params) (Result, error) {
 			return nil, pingErr
 		}
 
-		if scsErr := requireStandardConformingStrings(ctx, pl); scsErr != nil {
-			cancel()
-			pl.Close()
-
-			return nil, scsErr
-		}
-
 		go func() {
 			<-stopped
 			// wait for services to be finished with the pool before closing
@@ -95,34 +88,6 @@ func New(p Params) (Result, error) {
 			},
 		},
 	}, nil
-}
-
-// requireStandardConformingStrings refuses a database where backslash is an
-// escape character in ordinary string literals.
-//
-// Search renders its own SQL to a string, inlining values with their quotes
-// doubled, and executes the result (see docs/architecture/data.md). Doubling is
-// only sound while standard_conforming_strings is on: with it off, a search
-// term containing `\'` closes the literal and the rest of the term runs as SQL.
-// PostgreSQL has defaulted it on since 9.1, so finding it off means someone set
-// it - per database, per role, in the DSN's options, or in a pooler - and the
-// one safe answer is to stop rather than serve an injectable search.
-func requireStandardConformingStrings(ctx context.Context, pool *pgxpool.Pool) error {
-	var value string
-	if err := pool.QueryRow(ctx, "SHOW standard_conforming_strings").Scan(&value); err != nil {
-		return fmt.Errorf("reading standard_conforming_strings: %w", err)
-	}
-
-	if value != "on" {
-		return fmt.Errorf(
-			"standard_conforming_strings is %q, and bitmagnet requires it on: "+
-				"search is open to SQL injection without it - "+
-				"check ALTER DATABASE/ALTER ROLE settings and the connection's options",
-			value,
-		)
-	}
-
-	return nil
 }
 
 func waitForPing(ctx context.Context, logger *zap.SugaredLogger, pool *pgxpool.Pool) error {

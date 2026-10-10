@@ -101,6 +101,7 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#86](https://github.com/giorgosg/bitmagnet/pull/86) | Refuse `standard_conforming_strings = off`; dev binary logs to stderr       | local — issue 0002 option 1, test-fixtures ticket 03                 | Pool test, payload test with the setting off, stdout test      |
 | [#87](https://github.com/giorgosg/bitmagnet/pull/87) | Start the anonymous role empty by default                                   | local — default anonymous access issue 1                             | New-role, upgrade, GraphQL and Torznab tests observed red      |
 | [#88](https://github.com/giorgosg/bitmagnet/pull/88) | Bound facet counts and group language and content-type values               | local — fork review finding 13                                       | Pool reached 32; 62 language counts; both observed red         |
+| [#89](https://github.com/giorgosg/bitmagnet/pull/89) | Keep search query values bound                                              | local — review finding 0002                                          | Nonconforming-string exact count failed; observed red          |
 
 ## In flight
 
@@ -116,17 +117,18 @@ transaction, both serialisation points in the auth path, and the anonymous-acces
 findings. `files_count`/`size` was settled without a backfill: `size` keeps the total
 length, padding included.
 
-Still open, as of 2026-10-09:
+Still open, as of 2026-10-10:
 
-- **The search SQL re-execution.** Search renders its query to a string and executes it
-  again, which is injectable when `standard_conforming_strings` is off. The pool now
-  refuses such a server; removing the dependency means passing parameters to
-  `budgeted_count`, which is also where the facet fan-out fix belongs.
 - **The same-origin CORS default**, decided and deferred to the release that removes the
   Angular UI, whose dev server is the one caller relying on `*`.
 - **`break` inside `select` in the crawler's peer and scrape loops**, which has no
   deterministic red test. It is to be fixed under the redesign of the next candidate below,
   which carries the same shape.
+
+The search SQL re-execution is resolved: count plans, exact counts, existence checks and
+the limited CTE item path keep values bound. The historical `budgeted_count` function
+remains for compatibility with older running instances; the pool no longer needs to
+refuse `standard_conforming_strings = off`.
 
 One finding was measured and rejected rather than fixed: the crawler's periodic queue
 depth `COUNT` costs 0.065 ms in steady state on the reference instance, and a

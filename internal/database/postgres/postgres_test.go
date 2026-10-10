@@ -37,12 +37,7 @@ func TestPoolConnectsWithStandardConformingStrings(t *testing.T) {
 	require.NoError(t, pool.Ping(t.Context()))
 }
 
-// Search renders its own SQL to a string, inlining values with quotes doubled,
-// and re-executes it (docs: architecture/data.md). That escaping is only sound
-// while backslash is an ordinary character in a string literal. With
-// standard_conforming_strings off, `\'` in a search term closes the literal and
-// what follows runs as SQL, so the pool must refuse such a database outright.
-func TestPoolRefusesStandardConformingStringsOff(t *testing.T) {
+func TestPoolConnectsWithStandardConformingStringsOff(t *testing.T) {
 	t.Parallel()
 
 	db := dbtest.New(t)
@@ -55,9 +50,11 @@ func TestPoolRefusesStandardConformingStringsOff(t *testing.T) {
 
 	result := newPool(t, db.DSN)
 
-	_, err = result.PgxPool.Get()
-	require.ErrorContains(t, err, "standard_conforming_strings")
+	pool, err := result.PgxPool.Get()
+	require.NoError(t, err)
+	require.NoError(t, pool.Ping(t.Context()))
 
-	_, err = result.SQLDB.Get()
-	require.ErrorContains(t, err, "standard_conforming_strings")
+	sqlDB, err := result.SQLDB.Get()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.PingContext(t.Context()))
 }
