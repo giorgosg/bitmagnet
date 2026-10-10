@@ -28,6 +28,20 @@ type torrentContentLanguageFacet struct {
 	query.FacetConfig
 }
 
+func (f torrentContentLanguageFacet) GroupedCounts(
+	ctx query.FacetContext, valueCount int,
+) (map[string]uint, bool, error) {
+	return groupFacetCounts(
+		ctx, f, valueCount,
+		"torrent_contents.languages",
+		"(?) AS facet_rows CROSS JOIN LATERAL "+
+			"(SELECT DISTINCT key FROM "+
+			"jsonb_array_elements_text(COALESCE(facet_rows.languages, '[]'::jsonb)) AS item(key)) "+
+			"AS facet_value(key)",
+		"facet_value.key",
+	)
+}
+
 func (torrentContentLanguageFacet) Values(query.FacetContext) (map[string]string, error) {
 	languageValues := model.LanguageValues()
 	values := make(map[string]string, len(languageValues))

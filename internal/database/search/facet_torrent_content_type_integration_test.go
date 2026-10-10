@@ -43,6 +43,18 @@ func TestTorrentContentTypeFacetFiltersByContentType(t *testing.T) {
 		require.NoError(t, err)
 	}
 
+	unknownHash := []byte("00000000000000000000")
+	_, err := db.Pool.Exec(ctx, `
+		INSERT INTO torrents (info_hash, name, size, private, created_at, updated_at)
+		VALUES ($1, 'Unknown', 1, false, now(), now())
+	`, unknownHash)
+	require.NoError(t, err)
+	_, err = db.Pool.Exec(ctx, `
+		INSERT INTO torrent_contents (info_hash, created_at, updated_at)
+		VALUES ($1, now(), now())
+	`, unknownHash)
+	require.NoError(t, err)
+
 	searchService, err := search.New(search.Params{
 		Query: lazy.New(func() (*dao.Query, error) { return db.Query, nil }),
 	}).Search.Get()
@@ -50,6 +62,7 @@ func TestTorrentContentTypeFacetFiltersByContentType(t *testing.T) {
 
 	result, err := searchService.TorrentContent(ctx,
 		query.WithFacet(search.TorrentContentTypeFacet(
+			query.FacetIsAggregated(),
 			query.FacetHasFilter(query.FacetFilter{"ebook": struct{}{}}),
 		)),
 	)
@@ -61,4 +74,8 @@ func TestTorrentContentTypeFacetFiltersByContentType(t *testing.T) {
 	}
 
 	require.Equal(t, []string{"abcdefghijabcdefghij"}, hashes)
+	require.Equal(t, uint(1), result.Aggregations[search.TorrentContentTypeFacetKey].Items["ebook"].Count)
+	require.Equal(t, uint(1), result.Aggregations[search.TorrentContentTypeFacetKey].Items["tv_show"].Count,
+		"OR-logic aggregation excludes its own filter")
+	require.Equal(t, uint(1), result.Aggregations[search.TorrentContentTypeFacetKey].Items["null"].Count)
 }
