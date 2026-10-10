@@ -42,7 +42,7 @@ sample series at count =
 -}
 plain : MetricsBucketDuration -> Int -> Buckets.Grid
 plain unit every =
-    { unit = unit, every = every, offset = 0 }
+    { unit = unit, every = every, offset = 0, bucketedBy = unit }
 
 
 {-| A slot as a person would write it down: when it starts, in minutes from 10:00, and what
@@ -189,7 +189,7 @@ suite =
                             { from = Just (minutes -2760), to = minutes 0 }
                             [ sample "a" (minutes -2220) 5, sample "a" (minutes -780) 7 ]
                             |> Expect.equal
-                                ( { unit = Day, every = 1, offset = 21 * 3600 * 1000 }
+                                ( { unit = Day, every = 1, offset = 21 * 3600 * 1000, bucketedBy = Day }
                                 , [ ( -3660, [] ), ( -2220, [ ( "a", 5 ) ] ), ( -780, [ ( "a", 7 ) ] ) ]
                                 )
                 , test "begins a day where bitmagnet began it, five hours behind UTC" <|
@@ -199,7 +199,7 @@ suite =
                             { from = Just (minutes -2760), to = minutes 0 }
                             [ sample "a" (minutes -1740) 4, sample "a" (minutes -300) 9 ]
                             |> Expect.equal
-                                ( { unit = Day, every = 1, offset = 5 * 3600 * 1000 }
+                                ( { unit = Day, every = 1, offset = 5 * 3600 * 1000, bucketedBy = Day }
                                 , [ ( -3180, [] ), ( -1740, [ ( "a", 4 ) ] ), ( -300, [ ( "a", 9 ) ] ) ]
                                 )
                 , test "begins an hour at the half hour in a zone that is half an hour out, and keeps merged hours to it" <|
@@ -210,7 +210,7 @@ suite =
                             { from = Just (minutes -30), to = minutes 30 }
                             [ sample "a" (minutes -30) 3, sample "a" (minutes 30) 4 ]
                             |> Expect.equal
-                                ( { unit = Hour, every = 2, offset = 30 * 60 * 1000 }
+                                ( { unit = Hour, every = 2, offset = 30 * 60 * 1000, bucketedBy = Hour }
                                 , [ ( -90, [ ( "a", 3 ) ] ), ( 30, [ ( "a", 4 ) ] ) ]
                                 )
                 , test "takes the offset most of the buckets have, so a day an hour out across a clock change does not move the rest" <|
@@ -220,6 +220,78 @@ suite =
                             [ sample "a" (minutes -780) 1, sample "a" (minutes -2220) 1, sample "a" (minutes -3600) 1 ]
                             |> .offset
                             |> Expect.equal (21 * 3600 * 1000)
+                , test "does not add the partial day before the first column into it: a week by the day, asked at 22:00 UTC in Athens" <|
+                    \_ ->
+                        -- The request opens at 00:00 UTC on 3 October, for the page cannot know the zone,
+                        -- so bitmagnet answers with the Athens day that began at 21:00 UTC on the 2nd, 21
+                        -- hours of it counted: 100 rows. The window's own first column is the next day,
+                        -- which began at 21:00 UTC on the 3rd and holds 1.
+                        drawn { unit = Day, every = Just 1 }
+                            { from = Just (minutes (720 - 7 * 1440)), to = minutes 720 }
+                            [ sample "a" (minutes (660 - 8 * 1440)) 100, sample "a" (minutes (660 - 7 * 1440)) 1 ]
+                            |> Tuple.second
+                            |> Expect.all
+                                [ List.take 2
+                                    >> Expect.equal
+                                        [ ( 660 - 8 * 1440, [ ( "a", 100 ) ] )
+                                        , ( 660 - 7 * 1440, [ ( "a", 1 ) ] )
+                                        ]
+                                , List.length >> Expect.equal 9
+                                ]
+                , test "does not add the partial hour before the first column into it: a day of hours, asked at 10:45 UTC in India" <|
+                    \_ ->
+                        -- Hours there begin at :30. The request opens on the hour, 10:00 UTC yesterday, so
+                        -- bitmagnet answers with the hour that began at 09:30, a half of it counted: 1.
+                        -- The window's own first column began at 10:30, and holds 50.
+                        drawn { unit = Minute, every = Nothing }
+                            { from = Just (minutes (45 - 1440)), to = minutes 45 }
+                            [ sample "a" (minutes -1470) 1, sample "a" (minutes -1410) 50, sample "a" (minutes -1350) 2 ]
+                            |> Tuple.second
+                            |> List.take 3
+                            |> Expect.equal
+                                [ ( -1470, [ ( "a", 1 ) ] )
+                                , ( -1410, [ ( "a", 50 ) ] )
+                                , ( -1350, [ ( "a", 2 ) ] )
+                                ]
+                , test "keeps each day in its own column across a clock change, where the days are an hour apart" <|
+                    \_ ->
+                        -- Athens in autumn: three days begin at 21:00 UTC (summer time), then five at 22:00,
+                        -- each a day's count of 10, 20 ... 80. The commonest offset is the winter one. Each
+                        -- summer day is an hour before it, and is the same day, not the one before.
+                        let
+                            midnight =
+                                -600
+
+                            summer day =
+                                sample "a" (minutes (midnight + day * 1440 + 21 * 60)) ((day + 1) * 10)
+
+                            winter day =
+                                sample "a" (minutes (midnight + day * 1440 + 22 * 60)) ((day + 1) * 10)
+                        in
+                        drawn { unit = Day, every = Just 1 }
+                            { from = Just (minutes (midnight + 22 * 60 + 30)), to = minutes (midnight + 7 * 1440 + 22 * 60 + 30) }
+                            (List.map summer [ 0, 1, 2 ] ++ List.map winter [ 3, 4, 5, 6, 7 ])
+                            |> Tuple.second
+                            |> List.map (Tuple.second >> List.map Tuple.second)
+                            |> Expect.equal (List.map (\day -> [ day * 10 ]) (List.range 1 8))
+                , test "keeps each merged day with its own pair across a clock change" <|
+                    \_ ->
+                        -- The same days, two to a bucket, counted from the epoch: 10 and 20, 30 and 40,
+                        -- 50 and 60, 70 and 80. (10 October 2026 is an even day since the epoch, so the
+                        -- pairs begin on the first of them.)
+                        let
+                            midnight =
+                                -600
+
+                            at day offset =
+                                sample "a" (minutes (midnight + day * 1440 + offset * 60)) ((day + 1) * 10)
+                        in
+                        drawn { unit = Day, every = Just 2 }
+                            { from = Just (minutes (midnight + 22 * 60 + 30)), to = minutes (midnight + 7 * 1440 + 22 * 60 + 30) }
+                            [ at 0 21, at 1 21, at 2 21, at 3 22, at 4 22, at 5 22, at 6 22, at 7 22 ]
+                            |> Tuple.second
+                            |> List.map (Tuple.second >> List.map Tuple.second)
+                            |> Expect.equal [ [ 30 ], [ 70 ], [ 110 ], [ 150 ] ]
                 , test "keeps every count: none is lost to a grid that began elsewhere" <|
                     \_ ->
                         let
@@ -240,7 +312,7 @@ suite =
                 \_ ->
                     ( Buckets.columnStart (plain Minute 15) (Time.millisToPosix (tenOClock + 7 * 60000 + 30000))
                     , Buckets.columnStart (plain Hour 6) (minutes 7)
-                    , Buckets.columnStart { unit = Hour, every = 2, offset = 30 * 60 * 1000 } (minutes 7)
+                    , Buckets.columnStart { unit = Hour, every = 2, offset = 30 * 60 * 1000, bucketedBy = Hour } (minutes 7)
                     )
                         |> Expect.equal ( minutes 0, minutes -240, minutes -90 )
             ]
@@ -323,12 +395,13 @@ suite =
                         { from = Just (minutes 0), to = minutes 2 }
                         []
                         |> Expect.equal [ ( 0, [] ), ( 1, [] ), ( 2, [] ) ]
-            , test "puts a sample from before the window's first bucket in the first bucket, and loses none" <|
+            , test "gives a bucket from before the window's first bucket a column of its own, and loses none" <|
                 \_ ->
                     slotsOf (plain Minute 5)
                         { from = Just (minutes 0), to = minutes 5 }
-                        [ sample "a" (minutes -2) 9, sample "a" (minutes -60) 1 ]
-                        |> Expect.equal [ ( 0, [ ( "a", 10 ) ] ), ( 5, [] ) ]
+                        [ sample "a" (minutes -5) 9, sample "a" (minutes -60) 1 ]
+                        |> List.filter (\( _, counts ) -> not (List.isEmpty counts))
+                        |> Expect.equal [ ( -60, [ ( "a", 1 ) ] ), ( -5, [ ( "a", 9 ) ] ) ]
             , test "keeps a sample from before the window that shares its first bucket" <|
                 \_ ->
                     -- The window opens at 10:03; the merged bucket it opens in began at 10:00.
@@ -355,6 +428,32 @@ suite =
                         { from = Nothing, to = minutes 10 }
                         []
                         |> Expect.equal []
+            , test "counts minutes of a window with no start in the hours they are merged into, whole hours and not a zone's offset" <|
+                \_ ->
+                    -- The request was planned by the minute, as a window with no start and nothing
+                    -- returned is, and the answer is merged into hours. The :07 the samples begin at is
+                    -- the minute they are in, not a time zone.
+                    let
+                        window =
+                            { from = Nothing, to = minutes 0 }
+
+                        counted =
+                            [ sample "a" (minutes (-5 * 1440 + 7)) 2
+                            , sample "a" (minutes (-3 * 1440 + 7)) 3
+                            , sample "a" (minutes (-1440 + 37)) 4
+                            ]
+
+                        resolved =
+                            Buckets.grid { unit = Minute, every = Nothing } window counted
+                    in
+                    ( resolved
+                    , slotsOf resolved window counted
+                        |> List.filter (\( _, counts ) -> not (List.isEmpty counts))
+                    )
+                        |> Expect.equal
+                            ( { unit = Hour, every = 1, offset = 0, bucketedBy = Minute }
+                            , [ ( -5 * 1440, [ ( "a", 2 ) ] ), ( -3 * 1440, [ ( "a", 3 ) ] ), ( -1440, [ ( "a", 4 ) ] ) ]
+                            )
             , test "is empty for a window that ends before it begins" <|
                 \_ ->
                     slotsOf (plain Minute 1)

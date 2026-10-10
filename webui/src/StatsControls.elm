@@ -28,7 +28,7 @@ and each page's own filters ride beside these in its own query string.
 import Buckets
 import Chip
 import Html exposing (Html, button, input, text)
-import Html.Attributes as Attributes exposing (attribute, class, placeholder, step, type_, value)
+import Html.Attributes exposing (attribute, class, placeholder, type_, value)
 import Html.Events as Events
 import Json.Decode as Decode
 import Magnes.Api.Enum.MetricsBucketDuration as BucketDuration exposing (MetricsBucketDuration(..))
@@ -385,15 +385,19 @@ rows config controls =
 would otherwise ask the server for each prefix. A number is brought to the nearest whole one a
 multiplier can be, so that what was meant is kept, and anything that is not a number hands the
 choice back to Magnes.
+
+It is a text field with a numeric keypad rather than a number field. A number field reads as
+empty for what is not a number, "e" or a lone "-", and empty is what the page already shows,
+so nothing was drawn again and what was typed stayed in it. Elm puts a field's value back on
+every draw, but only if it differs from what the DOM holds.
+
 -}
 multiplierField : { a | picked : Maybe Int, change : Controls -> msg } -> Controls -> Html msg
 multiplierField config controls =
     input
-        [ type_ "number"
+        [ type_ "text"
+        , attribute "inputmode" "numeric"
         , class "stats-every"
-        , Attributes.min "1"
-        , Attributes.max (String.fromInt largestMultiplier)
-        , step "1"
         , attribute "aria-label" "Buckets of how many"
         , value (controls.resolution.every |> Maybe.map String.fromInt |> Maybe.withDefault "")
         , placeholder (config.picked |> Maybe.map String.fromInt |> Maybe.withDefault "auto")

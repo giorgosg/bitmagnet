@@ -160,7 +160,7 @@ suite =
                                 { statistics | buckets = [ bucket "dht" -2 False 4, bucket "dht" -1 False 6 ] }
                     in
                     Expect.all
-                        [ .grid >> Expect.equal { unit = Minute, every = 15, offset = 0 }
+                        [ .grid >> Expect.equal { unit = Minute, every = 15, offset = 0, bucketedBy = Minute }
                         , .slots
                             >> List.filter (\slot -> not (Dict.isEmpty slot.counts))
                             >> List.map (\slot -> Dict.toList slot.counts)
@@ -172,7 +172,7 @@ suite =
                     TorrentStats.plot (withTimeframe Hours6 emptyParams)
                         { statistics | buckets = [ bucket "dht" -2 False 4 ] }
                         |> .grid
-                        |> Expect.equal { unit = Minute, every = 15, offset = 0 }
+                        |> Expect.equal { unit = Minute, every = 15, offset = 0, bucketedBy = Minute }
             , test "says what would have been drawn, where the chart was cut down to fit" <|
                 \_ ->
                     let
@@ -205,6 +205,22 @@ suite =
                         |> List.map (\slot -> minutesBefore slot.start)
                     )
                         |> Expect.equal ( 21 * 3600 * 1000, 23, [ 2220, 780 ] )
+            , test "draws the partial day bitmagnet answers with first as a column of its own, and not added into the next" <|
+                \_ ->
+                    -- Asked at 22:00 UTC, a week by the day, in Athens: the request opens at 00:00 UTC on
+                    -- the 3rd, and the answer begins with the day that began at 21:00 UTC on the 2nd.
+                    let
+                        plotted =
+                            TorrentStats.plot (withResolution { unit = Day, every = Just 1 } (withTimeframe Weeks1 emptyParams))
+                                { statistics
+                                    | asked = afterAsked (12 * 60 * 60000)
+                                    , buckets = [ bucket "dht" (660 - 8 * 1440) False 100, bucket "dht" (660 - 7 * 1440) False 1 ]
+                                }
+                    in
+                    plotted.slots
+                        |> List.take 2
+                        |> List.map (\slot -> Dict.toList slot.counts)
+                        |> Expect.equal [ [ ( 0, 100 ) ], [ ( 0, 1 ) ] ]
             , describe "with several sources"
                 [ test "gives each its own pair of lines, by its place in the order bitmagnet lists them, while there are three or fewer" <|
                     \_ ->
@@ -295,6 +311,26 @@ suite =
                                 |> Expect.equal []
                     ]
                 ]
+            ]
+        , describe "timerDue"
+            [ test "is a look an idle page that was asked to keep itself fresh makes when its timer fires" <|
+                \_ ->
+                    TorrentStats.timerDue (withControls emptyParams (\c -> { c | refresh = Every10Seconds })) shown
+                        |> Expect.equal True
+            , test "is not one a tick that was already on its way makes after refreshing was turned off" <|
+                \_ ->
+                    TorrentStats.timerDue emptyParams shown
+                        |> Expect.equal False
+            , test "waits for a look that is still on its way, and for the first one" <|
+                \_ ->
+                    let
+                        everyTen =
+                            withControls emptyParams (\c -> { c | refresh = Every10Seconds })
+                    in
+                    ( TorrentStats.timerDue everyTen (TorrentStats.refreshing shown)
+                    , TorrentStats.timerDue everyTen TorrentStats.empty
+                    )
+                        |> Expect.equal ( False, False )
             ]
         , describe "view"
             [ test "says it is loading, with the controls already there to change" <|

@@ -143,7 +143,17 @@ suite =
                         |> Expect.equal { timeframe = Days1, resolution = { unit = Hour, every = Just 3 }, refresh = Off }
             ]
         , describe "the multiplier's field"
-            [ test "keeps a number typed, and hands the choice back for none" <|
+            [ test "is a text field with a numeric keypad, so that what is typed into it is not hidden from the page" <|
+                \_ ->
+                    -- A number field reads as empty for letters and signs, which is what the page already
+                    -- shows, so nothing is drawn again and they stay in it. A text field keeps what was
+                    -- typed, which differs from the page's, and the page puts its own back.
+                    fieldOf defaults Nothing
+                        |> Query.has
+                            [ Selector.attribute (Html.Attributes.type_ "text")
+                            , Selector.attribute (Html.Attributes.attribute "inputmode" "numeric")
+                            ]
+            , test "keeps a number typed, and hands the choice back for none" <|
                 \_ ->
                     [ "15", "", "abc" ]
                         |> List.map typedMultiplier

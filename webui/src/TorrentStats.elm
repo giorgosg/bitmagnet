@@ -10,11 +10,11 @@ module TorrentStats exposing
     , empty
     , failed
     , fetch
-    , inFlight
     , loaded
     , plot
     , query
     , refreshing
+    , timerDue
     , view
     )
 
@@ -145,7 +145,7 @@ query now params =
 
         input =
             InputObject.buildTorrentMetricsQueryInput
-                { bucketDuration = planned.unit }
+                { bucketDuration = planned.bucketedBy }
                 (\optionals ->
                     { optionals
                         | sources =
@@ -471,6 +471,15 @@ inFlight state =
 
         _ ->
             state.refreshing
+
+
+{-| Whether the page's timer firing is to be a look: it was asked to keep itself fresh, and
+no look is on its way. A tick can already be on its way when refreshing is turned off, and
+fires once more, so the timer's own word that it was due is not enough.
+-}
+timerDue : Route.TorrentStatsParams -> State -> Bool
+timerDue params state =
+    Route.refreshInterval (Route.TorrentStats params) /= Nothing && not (inFlight state)
 
 
 shownOf : State -> Maybe Shown

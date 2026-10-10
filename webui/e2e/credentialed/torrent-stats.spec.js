@@ -277,7 +277,14 @@ test("every control is in the URL, and the link opens the same look", async ({ p
   await drawn(page);
   await expect(page.getByRole("heading", { name: "Torrents per hour" })).toBeVisible();
 
+  // Something that is not a number is "pick for me", which is what the page already says, so the
+  // address does not change and the field must not go on showing what was typed.
   const field = page.getByLabel("Buckets of how many");
+  await field.fill("e");
+  await field.press("Enter");
+  await expect(page).toHaveURL(/\/stats\/torrents\?timeframe=6h&resolution=hour$/);
+  await expect(field).toHaveValue("");
+
   await field.fill("2");
   await field.press("Enter");
   await expect(page).toHaveURL(/\/stats\/torrents\?timeframe=6h&resolution=hour&every=2$/);

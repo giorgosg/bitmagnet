@@ -2043,7 +2043,7 @@ lookAgain nudge model =
     else
         case model.route of
             Route.TorrentStats params ->
-                if nudge == IfIdle && TorrentStats.inFlight model.torrentStats then
+                if nudge == IfIdle && not (TorrentStats.timerDue params model.torrentStats) then
                     ( model, Cmd.none )
 
                 else

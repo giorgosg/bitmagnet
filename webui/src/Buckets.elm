@@ -11,8 +11,11 @@ refreshes does not shuffle its columns.
 
 bitmagnet cuts its days, and its hours in a zone that is not a whole number of hours from
 UTC, where its database's time zone says (`date_trunc` runs in the session's zone). So a
-grid has an `offset`, which it takes from the buckets it is given: none of them is thrown
-away for beginning somewhere other than UTC would.
+grid has an `offset`, which it takes from the buckets it is given, and each bucket is put in
+the column its start is nearest to, rather than the one it falls in: where the zone changes
+its clock the days either side are an hour apart, and the nearer column is the right one for
+both. A bucket is drawn as bitmagnet counted it, in a column of its own if it began before the
+window's first column, and never added into another.
 
 -}
 
@@ -31,14 +34,20 @@ type alias Resolution =
 
 
 {-| The length of one merged bucket, `every` of `unit`, and where the buckets begin: `offset`
-milliseconds into a unit, counted from the epoch. A `Grid` is in the largest whole unit its
-length makes, so a bucket of 60 minutes is an hour and one of 48 hours is two days, and that
-is the unit bitmagnet is asked for.
+milliseconds into `bucketedBy`, counted from the epoch. A `Grid` is in the largest whole unit
+its length makes, so a bucket of 60 minutes is an hour and one of 48 hours is two days.
+
+`bucketedBy` is the unit bitmagnet was asked to bucket by, which the samples begin on and the
+offset is read in. It is `unit` unless the window has no start: that request is made before
+anything is known of how much there is, by the unit chosen, and the answer is merged into
+the larger unit it makes.
+
 -}
 type alias Grid =
     { unit : MetricsBucketDuration
     , every : Int
     , offset : Int
+    , bucketedBy : MetricsBucketDuration
     }
 
 
@@ -88,11 +97,21 @@ widthMillis resolved =
     unitMillis resolved.unit * resolved.every
 
 
-{-| Which bucket of the grid a moment falls in, counted from the epoch.
+{-| Which column of the grid a moment falls in, counted from the epoch.
 -}
-indexOf : Grid -> Time.Posix -> Int
-indexOf resolved at =
+columnOf : Grid -> Time.Posix -> Int
+columnOf resolved at =
     (Time.posixToMillis at - resolved.offset) // widthMillis resolved
+
+
+{-| Which column a bucket that begins at `at` belongs to: the one that begins nearest to its
+start, counting in the unit it was bucketed by. A bucket's start is not always where the grid
+says it should be: across a clock change in bitmagnet's time zone the days are an hour apart.
+Taken by the column it falls in, the earlier ones would be put in the column before.
+-}
+columnOfBucket : Grid -> Time.Posix -> Int
+columnOfBucket resolved at =
+    (Time.posixToMillis at - resolved.offset + unitMillis resolved.bucketedBy // 2) // widthMillis resolved
 
 
 {-| The moment a bucket of the grid begins.
@@ -108,7 +127,7 @@ would count only the rest of it.
 -}
 columnStart : Grid -> Time.Posix -> Time.Posix
 columnStart resolved at =
-    startOf resolved (indexOf resolved at)
+    startOf resolved (columnOf resolved at)
 
 
 {-| How many of `unit`, which is no larger than the grid's own, a bucket is long: what a
@@ -187,9 +206,26 @@ unlimited =
 chosen : Bool -> Resolution -> Window -> List (Sample series) -> Grid
 chosen capped resolution window samples =
     let
-        span =
-            spanOf resolution.unit window samples
+        -- What the request was planned as, from the window alone, and what is drawn, which for
+        -- a window with no start is planned again with what came back.
+        asked =
+            shaped capped resolution (spanOf resolution.unit window [])
 
+        ( unit, every ) =
+            shaped capped resolution (spanOf resolution.unit window samples)
+    in
+    { unit = unit
+    , every = every
+    , offset = offsetOf (Tuple.first asked) samples
+    , bucketedBy = Tuple.first asked
+    }
+
+
+{-| The unit and the multiplier of a resolution for a window `span` units long.
+-}
+shaped : Bool -> Resolution -> Int -> ( MetricsBucketDuration, Int )
+shaped capped resolution span =
+    let
         wanted =
             case resolution.every of
                 Just typed ->
@@ -207,11 +243,8 @@ chosen capped resolution window samples =
 
             else
                 1
-
-        ( unit, every ) =
-            largestWhole resolution.unit (max wanted fewest)
     in
-    { unit = unit, every = every, offset = offsetOf unit samples }
+    largestWhole resolution.unit (max wanted fewest)
 
 
 {-| How many of `unit` the window is long. A window with no start begins at the earliest
@@ -221,11 +254,11 @@ spanOf : MetricsBucketDuration -> Window -> List (Sample series) -> Int
 spanOf unit window samples =
     let
         single =
-            { unit = unit, every = 1, offset = 0 }
+            { unit = unit, every = 1, offset = 0, bucketedBy = unit }
     in
     case window.from of
         Just from ->
-            max 0 (indexOf single window.to - indexOf single from)
+            max 0 (columnOf single window.to - columnOf single from)
 
         Nothing ->
             let
@@ -233,7 +266,7 @@ spanOf unit window samples =
                     window.to :: List.map .at samples
 
                 indices =
-                    List.map (indexOf single) moments
+                    List.map (columnOf single) moments
             in
             Maybe.map2 (-) (List.maximum indices) (List.minimum indices) |> Maybe.withDefault 0
 
@@ -253,8 +286,11 @@ largestWhole unit every =
 
 
 {-| Where into a unit most of the samples begin: the offset of the time zone they were
-bucketed in. The commonest one, so that a bucket an hour out across a clock change does not
-move the rest; the smallest of equals. None is zero, which is UTC.
+bucketed in. Read in the unit they were bucketed by, which a window with no start does not
+make the unit it is drawn in. The commonest one is taken, the smallest of equals, so that
+where the zone changes its clock the days of the longer stretch set the grid and those of the
+shorter are an hour from it (`columnOfBucket` puts them where they belong). None is zero, which
+is UTC.
 -}
 offsetOf : MetricsBucketDuration -> List (Sample series) -> Int
 offsetOf unit samples =
@@ -287,33 +323,33 @@ offsetOf unit samples =
         |> Maybe.withDefault 0
 
 
-{-| The first and last bucket a chart covers: from the start of the window (or the
-earliest sample), to the end of the window or the latest sample if that is later.
+{-| The first and last column a chart covers: from the column the window opens in, or the
+earliest sample's if that is before it, to the column the window ends in or the latest sample
+is in, if that is later. A sample is never left outside the columns.
 -}
 extent : Grid -> Window -> List (Sample series) -> ( Int, Int )
 extent resolved window samples =
     let
         sampled =
-            List.map (.at >> indexOf resolved) samples
+            List.map (.at >> columnOfBucket resolved) samples
 
-        last =
-            List.maximum (indexOf resolved window.to :: sampled) |> Maybe.withDefault 0
-
-        first =
+        moments =
             case window.from of
                 Just from ->
-                    indexOf resolved from
+                    [ columnOf resolved from ]
 
                 Nothing ->
-                    List.minimum (indexOf resolved window.to :: sampled) |> Maybe.withDefault 0
+                    [ columnOf resolved window.to ]
     in
-    ( first, last )
+    ( List.minimum (moments ++ sampled) |> Maybe.withDefault 0
+    , List.maximum (columnOf resolved window.to :: sampled) |> Maybe.withDefault 0
+    )
 
 
 {-| Every bucket of the window, in time order, with the samples that fall in it added up
 by series. A bucket nothing fell in is still there, with nothing counted, so that a gap in
-the data shows as a gap. A sample from before the first bucket is counted in it, and none is
-dropped.
+the data shows as a gap. A bucket from before the window's first column is a column of its
+own, drawn as bitmagnet counted it, and none is added into another.
 -}
 slots : Grid -> Window -> List (Sample comparable) -> List (Slot comparable)
 slots resolved window samples =
@@ -328,7 +364,7 @@ slots resolved window samples =
                     extent resolved window samples
 
                 totals =
-                    List.foldl (addTo resolved first) Dict.empty samples
+                    List.foldl (addTo resolved) Dict.empty samples
             in
             List.range first last
                 |> List.map
@@ -339,9 +375,9 @@ slots resolved window samples =
                     )
 
 
-addTo : Grid -> Int -> Sample comparable -> Dict Int (Dict comparable Int) -> Dict Int (Dict comparable Int)
-addTo resolved first sample totals =
-    Dict.update (max first (indexOf resolved sample.at))
+addTo : Grid -> Sample comparable -> Dict Int (Dict comparable Int) -> Dict Int (Dict comparable Int)
+addTo resolved sample totals =
+    Dict.update (columnOfBucket resolved sample.at)
         (\bucket ->
             bucket
                 |> Maybe.withDefault Dict.empty
