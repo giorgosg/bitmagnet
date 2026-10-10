@@ -421,7 +421,23 @@ suite =
                 \_ ->
                     List.repeat 12 { queue = "process_torrent_batch", pending = 1, retry = 2, failed = 3, processed = 4 }
                         |> stackedBars
-                        |> Query.has [ Selector.style "min-width" "2148px" ]
+                        |> Query.has [ Selector.style "min-width" "1596px", Selector.style "max-width" "1878px" ]
+            , test "lets a chart of few bars shrink to a phone's width, and draws it no wider than its bars need" <|
+                \_ ->
+                    -- Two bars of 21-letter names, under counts up to "2,195": 379 wide, and down
+                    -- to 322, inside a 375-pixel screen's column.
+                    stackedBars totals
+                        |> Expect.all
+                            [ Query.has [ Selector.style "min-width" "322px", Selector.style "max-width" "379px" ]
+                            , Query.has [ Selector.class "chart-bars" ]
+                            ]
+            , test "keeps a timeline from shrinking below where its labels can be read" <|
+                \_ ->
+                    timeline (hourly 48)
+                        |> Expect.all
+                            [ Query.has [ Selector.style "min-width" "704px" ]
+                            , Query.hasNot [ Selector.class "chart-bars" ]
+                            ]
             , test "names each bar by its category" <|
                 \_ ->
                     stackedBars totals

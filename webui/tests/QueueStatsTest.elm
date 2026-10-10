@@ -182,6 +182,35 @@ suite =
                                 , .others >> Expect.equal []
                                 , .totals >> List.map .queue >> Expect.equal [ "a", "b" ]
                                 ]
+                , test "gives ink places only to queues with something on the timeline, not to one with only a total" <|
+                    \_ ->
+                        -- `a` has jobs waiting to be retried that were queued before the day and ran
+                        -- in it: a total, and nothing on the timeline.
+                        plotOf (withTimeframe Days1 emptyParams)
+                            [ job "a" Status.Retry (-3 * 1440) (Just -60) 2
+                            , job "b" Status.Pending -60 Nothing 1
+                            ]
+                            |> Expect.all
+                                [ .lines
+                                    >> List.map (\line -> ( line.label, line.ink ))
+                                    >> Expect.equal [ ( "b: created", Charts.Muted ), ( "b: processed", Charts.Strong ), ( "b: failed", Charts.Accent ) ]
+                                , .totals >> List.map .queue >> Expect.equal [ "a", "b" ]
+                                ]
+                , test "does not add two queues together because a third has only a total" <|
+                    \_ ->
+                        plotOf (withTimeframe Days1 emptyParams)
+                            [ job "a" Status.Retry (-3 * 1440) (Just -60) 2
+                            , job "b" Status.Pending -60 Nothing 1
+                            , job "c" Status.Pending -60 Nothing 1
+                            ]
+                            |> Expect.all
+                                [ .lines
+                                    >> List.map (\line -> ( line.label, line.ink ))
+                                    >> List.filter (Tuple.first >> String.endsWith "created")
+                                    >> Expect.equal [ ( "b: created", Charts.Muted ), ( "c: created", Charts.Faint ) ]
+                                , .others >> Expect.equal []
+                                , .totals >> List.map .queue >> Expect.equal [ "a", "b", "c" ]
+                                ]
                 , test "has no chart when nothing chosen was counted, rather than lines along zero" <|
                     \_ ->
                         plotOf { emptyParams | events = [ Failed ] } [ job "process_torrent" Status.Pending -120 Nothing 1 ]
@@ -248,6 +277,82 @@ suite =
                         ]
                         |> .totals
                         |> Expect.equal [ { queue = "process_torrent", pending = 2, retry = 4, failed = 0, processed = 0 } ]
+            , describe "against a database not on UTC, as in New York, whose days begin at 05:00 UTC"
+                [ test "leaves out the day that began before the week, for every status, and begins the chart at the first whole one" <|
+                    \_ ->
+                        let
+                            plotted =
+                                plotOf aWeekOfDays
+                                    [ job "process_torrent" Status.Processed (newYorkStraddle - 1440) (Just newYorkStraddle) 2
+                                    , job "process_torrent" Status.Pending newYorkStraddle Nothing 3
+                                    , job "process_torrent" Status.Pending newYorkFirstWhole Nothing 5
+                                    , job "process_torrent" Status.Failed newYorkFirstWhole (Just (newYorkFirstWhole + 1440)) 1
+                                    ]
+                        in
+                        ( plotted.slots |> List.head |> Maybe.map (.start >> minutesFrom)
+                        , plotted.slots |> List.concatMap (.counts >> Dict.values) |> List.sum
+                        , ( plotted.totals, plotted.leftOut )
+                        )
+                            |> Expect.equal
+                                ( Just newYorkFirstWhole
+                                , 7
+                                , ( [ { queue = "process_torrent", pending = 5, retry = 0, failed = 1, processed = 0 } ], True )
+                                )
+                , test "begins the chart at the first whole day too where the week's first moment falls in the day left out, as in Athens" <|
+                    \_ ->
+                        -- In Athens a day begins at 21:00 UTC: the week, from 10:00 UTC on the 3rd,
+                        -- begins inside the day that began at 21:00 UTC on the 2nd, which straddles
+                        -- the start at 00:00 UTC and is left out.
+                        let
+                            athensStraddle =
+                                -(7 * 1440 + 780)
+
+                            athensFirstWhole =
+                                -(7 * 1440) + 660
+                        in
+                        plotOf aWeekOfDays
+                            [ job "process_torrent" Status.Pending athensStraddle Nothing 3
+                            , job "process_torrent" Status.Pending athensFirstWhole Nothing 5
+                            , job "process_torrent" Status.Pending (athensFirstWhole + 1440) Nothing 1
+                            ]
+                            |> .slots
+                            |> List.head
+                            |> Maybe.map (\slot -> ( minutesFrom slot.start, Dict.values slot.counts ))
+                            |> Expect.equal (Just ( athensFirstWhole, [ 5 ] ))
+                , test "is no different on UTC, where no day began before the week" <|
+                    \_ ->
+                        let
+                            plotted =
+                                plotOf aWeekOfDays
+                                    [ job "process_torrent" Status.Pending weekStart Nothing 3
+                                    , job "process_torrent" Status.Processed (weekStart - 1440) (Just weekStart) 2
+                                    ]
+                        in
+                        ( plotted.slots |> List.head |> Maybe.map (.start >> minutesFrom)
+                        , List.map .processed plotted.totals
+                        , plotted.leftOut
+                        )
+                            |> Expect.equal ( Just weekStart, [ 2 ], False )
+                , test "says something was left out only when the page would have drawn or counted it" <|
+                    \_ ->
+                        let
+                            -- Queued on the day that began before the week, and run on the next:
+                            -- its creation is left out, its run is counted.
+                            createdBefore =
+                                [ job "a" Status.Processed newYorkStraddle (Just newYorkFirstWhole) 1
+                                , job "b" Status.Pending newYorkFirstWhole Nothing 1
+                                ]
+
+                            leftOutFor chosen =
+                                (plotOf chosen createdBefore).leftOut
+                        in
+                        [ leftOutFor aWeekOfDays
+                        , leftOutFor { aWeekOfDays | events = [ Processed ] }
+                        , leftOutFor { aWeekOfDays | queues = [ "b" ] }
+                        , leftOutFor { aWeekOfDays | queues = [ "a" ], events = [ Created ] }
+                        ]
+                            |> Expect.equal [ True, False, False, True ]
+                ]
             , test "says what would have been drawn, where the chart was cut down to fit" <|
                 \_ ->
                     let
@@ -383,31 +488,33 @@ suite =
             , test "says that the events chosen narrow the timeline and not the totals, when some are chosen" <|
                 \_ ->
                     ( viewed { emptyParams | events = [ Failed ] } shown
-                        |> Query.has [ Selector.text "The events chosen narrow the timeline only" ]
+                        |> Query.has [ Selector.text "The events chosen narrow the timeline only: the totals are every job of the timeframe, by status." ]
                     , viewed emptyParams shown
                         |> Query.hasNot [ Selector.text "The events chosen narrow the timeline only" ]
                     )
                         |> (\( chosen, none ) -> Expect.all [ always chosen, always none ] ())
-            , test "says the first column is only part of one, when bitmagnet's day began before the timeframe" <|
+            , test "says the totals are of the chosen queues, when queues are chosen too" <|
+                \_ ->
+                    viewed { emptyParams | events = [ Failed ], queues = [ "process_torrent" ] } shown
+                        |> Query.has [ Selector.text "The events chosen narrow the timeline only: the totals are every job of the chosen queues in the timeframe, by status." ]
+            , test "says the day that began before the timeframe is left out, when it is" <|
                 \_ ->
                     let
-                        aWeekOfDays =
-                            withResolution { unit = Day, every = Nothing } (withTimeframe Weeks1 emptyParams)
-
-                        -- Asked at 10:00 UTC, a week of days opens at 00:00 UTC on the 3rd; in
-                        -- Athens that day began at 21:00 UTC on the 2nd.
-                        athens =
-                            [ job "process_torrent" Status.Pending (-600 - 7 * 1440 - 180) Nothing 1 ]
+                        newYork =
+                            [ job "process_torrent" Status.Pending newYorkStraddle Nothing 1, job "process_torrent" Status.Pending newYorkFirstWhole Nothing 1 ]
 
                         utc =
-                            [ job "process_torrent" Status.Pending (-600 - 7 * 1440) Nothing 1 ]
+                            [ job "process_torrent" Status.Pending weekStart Nothing 1 ]
+
+                        said =
+                            "bitmagnet's time zone began the first day before the timeframe did, so that day is left out of both charts, which begin with the first whole one."
                     in
-                    ( viewed aWeekOfDays (QueueStats.loaded aWeekOfDays (statisticsFor aWeekOfDays athens) StatsLook.empty)
-                        |> Query.has [ Selector.text "The first column began before the timeframe did" ]
+                    ( viewed aWeekOfDays (QueueStats.loaded aWeekOfDays (statisticsFor aWeekOfDays newYork) StatsLook.empty)
+                        |> Query.has [ Selector.text said ]
                     , viewed aWeekOfDays (QueueStats.loaded aWeekOfDays (statisticsFor aWeekOfDays utc) StatsLook.empty)
-                        |> Query.hasNot [ Selector.text "The first column began before the timeframe did" ]
+                        |> Query.hasNot [ Selector.text "began the first day before the timeframe" ]
                     )
-                        |> (\( partial, whole ) -> Expect.all [ always partial, always whole ] ())
+                        |> (\( leftOut, whole ) -> Expect.all [ always leftOut, always whole ] ())
             , test "says when it was asked, and how to read the counts" <|
                 \_ ->
                     viewed emptyParams shown
@@ -545,6 +652,31 @@ withResolution resolution params =
             params.controls
     in
     { params | controls = { controls | resolution = resolution } }
+
+
+{-| A week by the day. Asked at 10:00 UTC on the 10th, it opens at 00:00 UTC on the 3rd
+(`weekStart`). In New York in winter a day runs from 05:00 UTC, so bitmagnet's first day began
+at 05:00 UTC on the 2nd (`newYorkStraddle`), and the first whole one at 05:00 UTC on the 3rd
+(`newYorkFirstWhole`). In minutes from 10:00 on the 10th.
+-}
+aWeekOfDays : Route.QueueStatsParams
+aWeekOfDays =
+    withResolution { unit = Day, every = Nothing } (withTimeframe Weeks1 emptyParams)
+
+
+weekStart : Int
+weekStart =
+    -(7 * 1440 + 600)
+
+
+newYorkStraddle : Int
+newYorkStraddle =
+    -(8 * 1440 + 300)
+
+
+newYorkFirstWhole : Int
+newYorkFirstWhole =
+    -(7 * 1440 + 300)
 
 
 {-| A row of bitmagnet's answer: `count` jobs of `queue` in `status`, queued in the bucket

@@ -316,6 +316,17 @@ suite =
                     )
                         |> Expect.equal ( minutes 0, minutes -240, minutes -90 )
             ]
+        , describe "firstBucketFrom"
+            [ test "is where the first bucket bitmagnet counted that begins at or after a moment begins, in the grid's own offset" <|
+                \_ ->
+                    [ Buckets.firstBucketFrom (plain Day 1) (minutes 0)
+                    , Buckets.firstBucketFrom (plain Day 1) (minutes -600)
+                    , Buckets.firstBucketFrom { unit = Day, every = 1, offset = 5 * 60 * 60000, bucketedBy = Day } (minutes -600)
+                    , Buckets.firstBucketFrom { unit = Hour, every = 2, offset = 30 * 60000, bucketedBy = Hour } (minutes 7)
+                    , Buckets.firstBucketFrom (plain Minute 15) (minutes 7)
+                    ]
+                        |> Expect.equal [ minutes 840, minutes -600, minutes -300, minutes 30, minutes 7 ]
+            ]
         , describe "endsAfter"
             [ test "is whether a bucket bitmagnet counted reaches past a moment, so a page can tell one that began before its window from one wholly before it" <|
                 \_ ->

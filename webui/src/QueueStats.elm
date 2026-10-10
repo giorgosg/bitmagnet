@@ -43,6 +43,7 @@ import Graphql.OptionalArgument
 import Graphql.SelectionSet as SelectionSet exposing (SelectionSet)
 import Html exposing (Html, div, h1, p, text)
 import Html.Attributes exposing (class)
+import Magnes.Api.Enum.MetricsBucketDuration exposing (MetricsBucketDuration(..))
 import Magnes.Api.InputObject as InputObject
 import Magnes.Api.Object
 import Magnes.Api.Object.QueueMetricsBucket as MetricsBucket
@@ -117,26 +118,28 @@ bucketSelection =
 -- ANSWER
 
 
-{-| An answer as the page keeps it, worked out once when it comes: what happened in the
-timeframe, the jobs of the timeframe by queue and status, every queue the answer names (to
-choose from), and whether a bucket that began before the timeframe was kept.
+{-| An answer as the page keeps it, worked out once when it comes: what was asked, what
+happened in the timeframe, the jobs of the timeframe by queue and status, every queue the answer
+names (to choose from), and what was left out with a bucket that began before the timeframe.
 -}
 type alias Answer =
     { asked : Time.Posix
+    , request : StatsControls.Request
     , occurrences : List QueueMetrics.Occurrence
     , totals : List QueueMetrics.Total
     , queues : List String
-    , beganBefore : Bool
+    , leftOut : { occurrences : List QueueMetrics.Occurrence, totals : List QueueMetrics.Total }
     }
 
 
 answer : Statistics -> Answer
 answer statistics =
     { asked = statistics.asked
+    , request = statistics.request
     , occurrences = QueueMetrics.occurrences statistics.request statistics.buckets
     , totals = QueueMetrics.totals statistics.request statistics.buckets
     , queues = QueueMetrics.queues statistics.buckets
-    , beganBefore = QueueMetrics.beganBefore statistics.request statistics.buckets
+    , leftOut = QueueMetrics.leftOut statistics.request statistics.buckets
     }
 
 
@@ -158,7 +161,8 @@ type alias Line =
 the totals, one a queue. `grid` is what the resolution came to, so a page can say what a bucket
 is, and `wanted` what it would have come to had a chart been able to draw any number of
 columns. `events` are those the lines follow, and `others` names the queues that were added
-together into one set of lines.
+together into one set of lines. `leftOut` is whether a bucket that began before the timeframe
+was left out with something in it that the charts would have shown.
 -}
 type alias Plot =
     { grid : Buckets.Grid
@@ -168,6 +172,7 @@ type alias Plot =
     , others : List String
     , slots : List (Buckets.Slot ( Int, Int ))
     , totals : List QueueMetrics.Total
+    , leftOut : Bool
     }
 
 
@@ -246,35 +251,42 @@ type alias Group =
 
 {-| The charts of an answer, with the choices in force.
 
-The queues drawn are those with anything in the timeframe: by name, or, where some were chosen,
-those of them, in the order they were chosen in. A chosen queue with nothing in the timeframe
-takes no place, so it does not leave the others in held-back inks or add them together. Each
-queue with anything on the timeline gets a line for each event chosen (all three where none was),
-inked by its place. A queue's ink is its place's, not a matter of which others have anything on
-the timeline. With more queues than inks the first is drawn apart and the rest added together as
-"Other queues", so the chart still adds up to everything counted. A line for an event that did
-not happen to a queue that had others happen is drawn along zero; where nothing chosen happened
-at all there is no chart.
+The timeline's lines are for the queues with something on it: by name, or, where some were
+chosen, those of them, in the order they were chosen in. Each gets a line for each event chosen
+(all three where none was), inked by its place in that order, which the events chosen do not
+change, so a queue's ink does not move as events are chosen. A queue with nothing on the
+timeline, a chosen one with nothing in the timeframe or one with only jobs waiting to be retried
+that were queued before it, takes no place. With more queues than inks the first is drawn apart
+and the rest added together as "Other queues", so the chart still adds up to everything counted.
+A line for an event that did not happen to a queue that had others happen is drawn along zero;
+where nothing chosen happened at all there is no chart.
+
+The totals' bars are for the queues with jobs in the timeframe, in the same order: by name, or
+the chosen ones among them.
 
 The timeline's columns are cut from what is drawn, so for everything it begins at the earliest
-of that.
+of that. A timeframe begins at the first bucket that began in it: against a database not on UTC,
+the one before it straddled the start and is left out (`QueueMetrics`).
 
 -}
 plot : Route.QueueStatsParams -> Answer -> Plot
 plot params drawnFrom =
     let
-        inTimeframe =
-            List.map .queue drawnFrom.totals
-                ++ List.map .queue drawnFrom.occurrences
-                |> List.map (\queue -> ( queue, () ))
-                |> Dict.fromList
+        counted =
+            Dict.fromList (List.map (\occurrence -> ( occurrence.queue, () )) drawnFrom.occurrences)
 
-        order =
+        chosen queue =
+            List.isEmpty params.queues || List.member queue params.queues
+
+        inOrder present =
             if List.isEmpty params.queues then
-                Dict.keys inTimeframe
+                present
 
             else
-                List.filter (\queue -> Dict.member queue inTimeframe) params.queues
+                List.filter (\queue -> List.member queue present) params.queues
+
+        order =
+            inOrder (Dict.keys counted)
 
         groups =
             groupsOf order
@@ -293,10 +305,13 @@ plot params drawnFrom =
             else
                 List.filter (\event -> List.member event params.events) QueueMetrics.allEvents
 
+        drawn occurrence =
+            List.member occurrence.event events && chosen occurrence.queue
+
         samples =
             List.filterMap
                 (\occurrence ->
-                    if List.member occurrence.event events then
+                    if drawn occurrence then
                         groupOf occurrence.queue
                             |> Maybe.map
                                 (\index ->
@@ -311,17 +326,20 @@ plot params drawnFrom =
                 )
                 drawnFrom.occurrences
 
-        counted =
-            Dict.fromList (List.map (\occurrence -> ( occurrence.queue, () )) drawnFrom.occurrences)
-
-        hasCounts group =
-            List.any (\member -> Dict.member member counted) group.members
-
         window =
             StatsControls.window drawnFrom.asked params.controls
 
         resolved =
             Buckets.grid params.controls.resolution window samples
+
+        -- The timeframe as drawn: from the first bucket that began in it.
+        drawnWindow =
+            case drawnFrom.request.startTime of
+                Just start ->
+                    { window | from = Just (Buckets.firstBucketFrom resolved start) }
+
+                Nothing ->
+                    window
     in
     { grid = resolved
     , wanted = Buckets.unlimited params.controls.resolution window samples
@@ -329,7 +347,6 @@ plot params drawnFrom =
     , lines =
         groups
             |> List.indexedMap Tuple.pair
-            |> List.filter (Tuple.second >> hasCounts)
             |> List.concatMap
                 (\( index, group ) ->
                     List.map
@@ -344,7 +361,6 @@ plot params drawnFrom =
     , others =
         if List.length order > groupLimit then
             List.drop (groupLimit - 1) order
-                |> List.filter (\queue -> Dict.member queue counted)
 
         else
             []
@@ -353,11 +369,14 @@ plot params drawnFrom =
             []
 
         else
-            Buckets.slots resolved window samples
+            Buckets.slots resolved drawnWindow samples
     , totals =
         List.filterMap
             (\queue -> List.filter (\total -> total.queue == queue) drawnFrom.totals |> List.head)
-            order
+            (inOrder (List.map .queue drawnFrom.totals))
+    , leftOut =
+        List.any drawn drawnFrom.leftOut.occurrences
+            || List.any (.queue >> chosen) drawnFrom.leftOut.totals
     }
 
 
@@ -539,10 +558,40 @@ viewCharts zone params drawnFrom plotted =
         text ""
 
       else
-        p [ class "stats-note" ] [ text "The events chosen narrow the timeline only: the totals are every job of the timeframe, by status." ]
-    , if drawnFrom.beganBefore then
         p [ class "stats-note" ]
-            [ text "The first column began before the timeframe did, because bitmagnet's time zone begins its days (or hours) elsewhere: what it counts there is only part of what happened in it." ]
+            [ text
+                ("The events chosen narrow the timeline only: the totals are every job of "
+                    ++ (if List.isEmpty params.queues then
+                            "the timeframe"
+
+                        else
+                            "the chosen queues in the timeframe"
+                       )
+                    ++ ", by status."
+                )
+            ]
+    , if plotted.leftOut then
+        let
+            bucket =
+                case drawnFrom.request.bucketDuration of
+                    Day ->
+                        "day"
+
+                    Hour ->
+                        "hour"
+
+                    Minute ->
+                        "minute"
+        in
+        p [ class "stats-note" ]
+            [ text
+                ("bitmagnet's time zone began the first "
+                    ++ bucket
+                    ++ " before the timeframe did, so that "
+                    ++ bucket
+                    ++ " is left out of both charts, which begin with the first whole one."
+                )
+            ]
 
       else
         text ""

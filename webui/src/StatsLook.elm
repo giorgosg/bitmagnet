@@ -1,4 +1,4 @@
-module StatsLook exposing (Listing, Shown, State, empty, failed, fetch, loaded, refreshing, shownOf, timerDue, view)
+module StatsLook exposing (Listing, Shown, State, answerFor, empty, failed, fetch, loaded, refreshing, shownOf, timerDue, view)
 
 {-| The looks a statistics page takes at bitmagnet: the answer on screen, with the question it
 answered; another look on its way over it; and a look that did not come. The torrent timeline
@@ -127,6 +127,20 @@ failed toRoute params failure state =
 
         _ ->
             { state | listing = Failed failure, refreshing = False }
+
+
+{-| The look an answer is for, if it is still the page's: `page` is the look of the route now
+shown, if that is the page's route, and the answer must have been asked under the epoch now
+current. Every look, and every change of route, moves `Main`'s epoch on, so an answer asked under
+an older one came after the controls moved on or a newer look was asked for, and is dropped.
+-}
+answerFor : { askedUnder : Int, current : Int } -> Maybe params -> Maybe params
+answerFor epochs page =
+    if epochs.askedUnder == epochs.current then
+        page
+
+    else
+        Nothing
 
 
 {-| Asks `query` of bitmagnet, as a query that can take it a while (`Bitmagnet.slowQueryRequest`).

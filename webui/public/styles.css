@@ -1409,6 +1409,12 @@ main {
   min-width: 44rem;
 }
 
+/* A bar chart is drawn as wide as its bars need, and src/Charts.elm sets how far it may shrink,
+   so one of a few bars fits a phone and only one of many scrolls. */
+.chart-bars > * {
+  min-width: 0;
+}
+
 /* A timeline is read for its right-hand end, now. On a phone it is wider than the box and
    scrolls, so the box opens at that end: a box that scrolls right-to-left starts there, and
    the chart inside it is put back left-to-right. */

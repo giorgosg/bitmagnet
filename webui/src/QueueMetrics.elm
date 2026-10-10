@@ -1,4 +1,4 @@
-module QueueMetrics exposing (Bucket, Event(..), Occurrence, Total, allEvents, beganBefore, eventFromName, eventKey, eventName, occurrences, queues, totals)
+module QueueMetrics exposing (Bucket, Event(..), Occurrence, Total, allEvents, eventFromName, eventKey, eventName, leftOut, occurrences, queues, totals)
 
 {-| What bitmagnet's queue metrics say happened, worked out from its answer: the arithmetic
 only, with no view in it. This is where the queue's charts can be wrong without looking wrong,
@@ -29,10 +29,18 @@ whatever `queues` or `statuses` ask for. (bitmagnet `trunk` at `e76818643`; the 
 timeframe again itself (`queue-metrics.controller.ts`: a pending job by when it was created,
 any other by when it ran), and so does this module, both to the events and to the totals.
 
-A bucket that began before the timeframe but reaches into it is kept. bitmagnet cuts its days,
-and its hours in a zone that is not a whole number of hours from UTC, in its database's time
-zone, so against a database that is not on UTC the request opens part way through one of them,
-and what it counts in that bucket is only some of what happened in it (`beganBefore`).
+**A bucket counts only if it began in the timeframe**, as the Angular UI has it. bitmagnet cuts
+its days, and its hours in a zone that is not a whole number of hours from UTC, in its
+database's time zone, so against a database not on UTC the request (which opens on a UTC column)
+opens part way through one of them: in New York, a day runs from 05:00 UTC. What bitmagnet
+answers for that bucket is neither the whole of it nor the timeframe's part: its pending jobs are
+those queued since `startTime`, but every other job comes back, whenever it ran. So it is left
+out, of the events and the totals alike, and `leftOut` says what was in it, for the page to say
+so.
+
+The torrent timeline does the opposite on purpose, and keeps its first bucket as a column of its
+own (`Buckets.slots`): bitmagnet's torrent query does hold to `startTime`, so its first bucket is
+the timeframe's part of one, all of it after the start.
 
 -}
 
@@ -114,27 +122,45 @@ type alias Occurrence =
     }
 
 
-{-| Whether something in the bucket of `request`'s unit that began at `at` is the timeframe's:
-the bucket reaches past the start of it, or there is no start.
+{-| Whether a bucket that began at `at` is the timeframe's: it began at or after the start, or
+there is no start.
 -}
-inTimeframe : StatsControls.Request -> Time.Posix -> Bool
-inTimeframe request at =
+beginsIn : StatsControls.Request -> Time.Posix -> Bool
+beginsIn request at =
     case request.startTime of
         Just start ->
-            Buckets.endsAfter request.bucketDuration at start
+            Time.posixToMillis at >= Time.posixToMillis start
 
         Nothing ->
             True
 
 
+{-| Whether a bucket of `request`'s unit that began at `at` began before the timeframe and
+reached into it: the bucket against a database not on UTC that is left out.
+-}
+straddles : StatsControls.Request -> Time.Posix -> Bool
+straddles request at =
+    case request.startTime of
+        Just start ->
+            Time.posixToMillis at < Time.posixToMillis start && Buckets.endsAfter request.bucketDuration at start
+
+        Nothing ->
+            False
+
+
 {-| What happened in the timeframe, from an answer to `request`: added up by queue, event and
-bucket, in that order. An event in a bucket that was over before the timeframe began happened
-before it and is left out; that is every creation of a job queued before the timeframe that ran
-inside it, and, since bitmagnet's filter does not hold (see the module's comment), every run of a
-job that ran before it.
+bucket, in that order. An event in a bucket that began before the timeframe is left out; that is
+every creation of a job queued before the timeframe that ran inside it, every run of a job that
+ran before it (bitmagnet's filter does not hold; see the module's comment), and the bucket that
+straddles the start outside UTC.
 -}
 occurrences : StatsControls.Request -> List Bucket -> List Occurrence
-occurrences request buckets =
+occurrences request =
+    occurrencesWhere (beginsIn request)
+
+
+occurrencesWhere : (Time.Posix -> Bool) -> List Bucket -> List Occurrence
+occurrencesWhere counts buckets =
     let
         happened bucket =
             ( Created, Just bucket.createdAt )
@@ -156,7 +182,7 @@ occurrences request buckets =
                         at
                             |> Maybe.andThen
                                 (\moment ->
-                                    if inTimeframe request moment then
+                                    if counts moment then
                                         Just ( ( bucket.queue, eventKey event, Time.posixToMillis moment ), bucket.count )
 
                                     else
@@ -188,15 +214,24 @@ type alias Total =
 
 
 {-| The jobs of the timeframe, from an answer to `request`, by queue and status, the queues by
-name. A pending job is the timeframe's if it was queued in it; any other if it last ran in it,
-which is the Angular UI's test (`queue-metrics.controller.ts`), with the bucket that reaches into
-the timeframe kept, as `occurrences` keeps it. Without a start, it is everything the queue holds,
-a job that has no run among it.
+name. A pending job is the timeframe's if the bucket it was queued in began in it; any other if
+the bucket it last ran in did, which is the Angular UI's test (`queue-metrics.controller.ts`).
+Without a start, it is everything the queue holds, a job that has no run among it.
 -}
 totals : StatsControls.Request -> List Bucket -> List Total
-totals request buckets =
+totals request =
+    case request.startTime of
+        Nothing ->
+            totalsWhere (always True)
+
+        Just _ ->
+            totalsWhere (Maybe.map (beginsIn request) >> Maybe.withDefault False)
+
+
+totalsWhere : (Maybe Time.Posix -> Bool) -> List Bucket -> List Total
+totalsWhere counts buckets =
     buckets
-        |> List.filter (windowed request)
+        |> List.filter (windowedBy >> counts)
         |> List.foldl
             (\bucket ->
                 Dict.update bucket.queue
@@ -204,18 +239,6 @@ totals request buckets =
             )
             Dict.empty
         |> Dict.values
-
-
-{-| Whether a row is the timeframe's. Without a start every row is, one with no run among them.
--}
-windowed : StatsControls.Request -> Bucket -> Bool
-windowed request bucket =
-    case request.startTime of
-        Nothing ->
-            True
-
-        Just _ ->
-            windowedBy bucket |> Maybe.map (inTimeframe request) |> Maybe.withDefault False
 
 
 {-| The moment a row is the timeframe's by: when it was queued, if it is pending, and when it
@@ -266,20 +289,13 @@ queues buckets =
     Dict.keys (Dict.fromList (List.map (\bucket -> ( bucket.queue, () )) buckets))
 
 
-{-| Whether something kept from the answer to `request` is in a bucket that began before the
-timeframe did. That happens against a database not on UTC, where bitmagnet's days (or hours)
-begin elsewhere than the request; what it counts in that bucket is only some of what happened in
-it, so the first column is not to be read as a whole one.
+{-| What an answer to `request` had in a bucket that began before the timeframe and reached into
+it, which `occurrences` and `totals` leave out: the events and the jobs a page would have drawn
+and counted there, for it to say that the bucket is left out when it would have shown any of
+them. Nothing on UTC, where no bucket straddles the start, and nothing for everything.
 -}
-beganBefore : StatsControls.Request -> List Bucket -> Bool
-beganBefore request buckets =
-    case request.startTime of
-        Nothing ->
-            False
-
-        Just start ->
-            let
-                straddles at =
-                    Time.posixToMillis at < Time.posixToMillis start && inTimeframe request at
-            in
-            List.any (\bucket -> straddles bucket.createdAt || Maybe.map straddles bucket.ranAt == Just True) buckets
+leftOut : StatsControls.Request -> List Bucket -> { occurrences : List Occurrence, totals : List Total }
+leftOut request buckets =
+    { occurrences = occurrencesWhere (straddles request) buckets
+    , totals = totalsWhere (Maybe.map (straddles request) >> Maybe.withDefault False) buckets
+    }

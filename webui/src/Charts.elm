@@ -102,6 +102,8 @@ timeline config data =
         [ plot
             { description = config.description
             , width = 920
+            , minWidth = 704
+            , maxWidth = Nothing
             , classes = [ "chart-timeline" ]
             , top =
                 data
@@ -131,24 +133,32 @@ top of each stack, and the legend and table list them in the same order.
 -}
 stackedBars : StackedBars data -> List data -> Html msg
 stackedBars config data =
+    let
+        top =
+            data
+                |> List.map (\datum -> List.sum (List.map (\series -> series.value datum) config.segments))
+                |> List.maximum
+                |> Maybe.withDefault 0
+
+        -- Each bar is given room for its name, at about six and a half units a letter for a
+        -- 12-unit label, and a little either side of it.
+        barWidth =
+            data
+                |> List.map (config.category >> String.length >> (\length -> 13 * length // 2 + 16))
+                |> List.maximum
+                |> Maybe.withDefault 0
+
+        width =
+            leftMargin top + rightMargin + List.length data * barWidth
+    in
     chartFigure config.title data <|
         [ plot
             { description = config.description
-            , width =
-                let
-                    labelWidth =
-                        data
-                            |> List.map (config.category >> String.length >> (\length -> 7 * length + 24))
-                            |> List.maximum
-                            |> Maybe.withDefault 0
-                in
-                max 920 (96 + List.length data * labelWidth)
-            , classes = []
-            , top =
-                data
-                    |> List.map (\datum -> List.sum (List.map (\series -> series.value datum) config.segments))
-                    |> List.maximum
-                    |> Maybe.withDefault 0
+            , width = width
+            , minWidth = width * 85 // 100
+            , maxWidth = Just width
+            , classes = [ "chart-bars" ]
+            , top = top
             , range = []
             }
             [ C.binLabels config.category (CA.moveDown 20 :: labelStyle)
@@ -171,11 +181,13 @@ which otherwise fits the data.
 
 A grid is always given: without one elm-charts adds its own, in its light-theme grey.
 
-The drawing scales to its container rather than reflowing, so it is drawn at about the
-width a panel gives it, where a 12-unit label reads at about 12px. The stylesheet stops it
-shrinking much below that, on a narrow screen, by letting `chart-plot` scroll instead.
-That box clips whatever falls outside the drawing, so every label has to fit inside its
-margins: the left one is as wide as the largest count, `top`, written out.
+The drawing scales to its container rather than reflowing, so a 12-unit label reads at about
+12px where it is shown at about `width`. A timeline is drawn at about the width a panel gives it
+and kept from shrinking below `minWidth` on a narrow screen, where `chart-plot` scrolls instead.
+A bar chart is drawn as wide as its bars need, and shown no wider (`maxWidth`), so one of a few
+bars stays small on a wide screen and, shrunk a little, fits a phone's; one of many is wider than
+either and scrolls. That box clips whatever falls outside the drawing, so every label has to fit
+inside its margins: the left one is as wide as the largest count, `top`, written out.
 
 A timeline's box is also `chart-timeline`, which the stylesheet opens at its right-hand end,
 where the latest time is. What a timeline is for is how things are now, and on a phone the
@@ -185,37 +197,55 @@ view until the box is scrolled back, and the numbers are in the table either way
 
 -}
 plot :
-    { description : String, width : Int, top : Int, range : List (CA.Attribute CS.Axis), classes : List String }
+    { description : String
+    , width : Int
+    , minWidth : Int
+    , maxWidth : Maybe Int
+    , top : Int
+    , range : List (CA.Attribute CS.Axis)
+    , classes : List String
+    }
     -> List (C.Element data msg)
     -> Html msg
-plot { description, width, top, range, classes } elements =
+plot { description, width, minWidth, maxWidth, top, range, classes } elements =
     div [ class (String.join " " ("chart-plot" :: classes)) ]
         [ C.chart
             [ CA.width (toFloat width)
             , CA.htmlAttrs
-                [ style "min-width"
-                    (String.fromInt
-                        (if width > 920 then
-                            width
+                (style "min-width" (String.fromInt minWidth ++ "px")
+                    :: (case maxWidth of
+                            Just most ->
+                                [ style "max-width" (String.fromInt most ++ "px") ]
 
-                         else
-                            704
-                        )
-                        ++ "px"
-                    )
-                ]
+                            Nothing ->
+                                []
+                       )
+                )
             , CA.height 260
             , CA.margin
                 { top = 12
                 , bottom = 28
-                , left = 16 + 7 * toFloat (String.length (Format.count top))
-                , right = 24
+                , left = toFloat (leftMargin top)
+                , right = toFloat rightMargin
                 }
             , CA.range range
             , CA.attrs [ attribute "role" "img", attribute "aria-label" description ]
             ]
             (C.grid [ CA.color "var(--faint)" ] :: countAxis :: elements)
         ]
+
+
+{-| The left margin, as wide as the largest count, `top`, written out, which is the widest label
+up the side.
+-}
+leftMargin : Int -> Int
+leftMargin top =
+    16 + 7 * String.length (Format.count top)
+
+
+rightMargin : Int
+rightMargin =
+    24
 
 
 {-| A chart under its heading. With no data there is nothing to draw: elm-charts would

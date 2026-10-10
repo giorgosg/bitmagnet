@@ -32,6 +32,20 @@ suite =
                     )
                         |> Expect.equal ( False, False )
             ]
+        , describe "answerFor"
+            [ test "is the page's look for an answer asked under the epoch now current" <|
+                \_ ->
+                    StatsLook.answerFor { askedUnder = 3, current = 3 } (Just params)
+                        |> Expect.equal (Just params)
+            , test "is no look for an answer asked under an older epoch, since a newer look was asked for or the controls moved on" <|
+                \_ ->
+                    StatsLook.answerFor { askedUnder = 2, current = 3 } (Just params)
+                        |> Expect.equal Nothing
+            , test "is no look for an answer that comes after the page was left" <|
+                \_ ->
+                    StatsLook.answerFor { askedUnder = 3, current = 3 } pageLeft
+                        |> Expect.equal Nothing
+            ]
         , describe "a look that fails"
             [ test "keeps an answer to the same question, with the reason" <|
                 \_ ->
@@ -96,6 +110,13 @@ suite =
                             ]
             ]
         ]
+
+
+{-| What `Main` finds on a route that is not the page's any more: no look of it.
+-}
+pageLeft : Maybe Route.QueueStatsParams
+pageLeft =
+    Nothing
 
 
 params : Route.QueueStatsParams

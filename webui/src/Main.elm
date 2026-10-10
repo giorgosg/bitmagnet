@@ -1796,8 +1796,8 @@ update msg model =
             lookAgain Regardless model
 
         GotTorrentStats epoch result ->
-            case ( epoch == model.epoch, model.route ) of
-                ( True, Route.TorrentStats params ) ->
+            case StatsLook.answerFor { askedUnder = epoch, current = model.epoch } (torrentStatsOn model.route) of
+                Just params ->
                     case result of
                         Ok fetched ->
                             ( { model | torrentStats = TorrentStats.loaded params fetched model.torrentStats }, Cmd.none )
@@ -1812,12 +1812,12 @@ update msg model =
                                 )
 
                 -- Asked under a look that has been left, or a newer one was asked for.
-                _ ->
+                Nothing ->
                     ( model, Cmd.none )
 
         GotQueueStats epoch result ->
-            case ( epoch == model.epoch, model.route ) of
-                ( True, Route.QueueStats params ) ->
+            case StatsLook.answerFor { askedUnder = epoch, current = model.epoch } (queueStatsOn model.route) of
+                Just params ->
                     case result of
                         Ok fetched ->
                             ( { model | queueStats = QueueStats.loaded params fetched model.queueStats }, Cmd.none )
@@ -1832,7 +1832,7 @@ update msg model =
                                 )
 
                 -- Asked under a look that has been left, or a newer one was asked for.
-                _ ->
+                Nothing ->
                     ( model, Cmd.none )
 
         GotResults epoch result ->
@@ -1862,6 +1862,30 @@ update msg model =
                             (\message current ->
                                 ( { current | results = Failed message }, Cmd.none )
                             )
+
+
+{-| The torrent timeline's look, on its route.
+-}
+torrentStatsOn : Route -> Maybe Route.TorrentStatsParams
+torrentStatsOn route =
+    case route of
+        Route.TorrentStats params ->
+            Just params
+
+        _ ->
+            Nothing
+
+
+{-| The queue's statistics' look, on their route.
+-}
+queueStatsOn : Route -> Maybe Route.QueueStatsParams
+queueStatsOn route =
+    case route of
+        Route.QueueStats params ->
+            Just params
+
+        _ ->
+            Nothing
 
 
 {-| A statistics page's controls, or its queues, events or sources, chosen: `route` is the page

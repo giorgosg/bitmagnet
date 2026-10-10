@@ -42,22 +42,21 @@ function metricsRequests(page) {
   return asked;
 }
 
-const units = { minute: 60_000, hour: 3_600_000, day: 86_400_000 };
 const events = ["created", "processed", "failed"];
 const statuses = ["pending", "retry", "failed", "processed"];
 
-// What a query asked for: the unit bitmagnet buckets by, and where the timeframe began, if it
-// has a start.
+// What a query asked for: where the timeframe began, if it has a start.
 function askedIn(query) {
   const start = query.match(/startTime: "([^"]+)"/);
-  return { unit: units[query.match(/bucketDuration: (\w+)/)[1]], start: start ? Date.parse(start[1]) : null };
+  return { start: start ? Date.parse(start[1]) : null };
 }
 
-// Whether something in the bucket that began at `at` is the timeframe's: the bucket reaches past
-// the start of it, or there is no start.
+// Whether something in the bucket that began at `at` is the timeframe's: the bucket began in it,
+// or there is no start. A bucket that began before the start and reached into it, which a
+// database not on UTC makes, is left out, as the Angular UI leaves it out.
 function inTimeframe(query, at) {
-  const { unit, start } = askedIn(query);
-  return start === null || (at !== null && Date.parse(at) + unit > start);
+  const { start } = askedIn(query);
+  return start === null || (at !== null && Date.parse(at) >= start);
 }
 
 // The moment a job is the timeframe's by: when it was queued if it is pending, when it last ran
@@ -96,21 +95,20 @@ function total(items, predicate = () => true) {
   return items.filter(predicate).reduce((all, item) => all + item.count, 0);
 }
 
-// The queues with anything in the timeframe, by name: the ones the page draws.
-function queuesInTimeframe(buckets, query) {
-  return [
-    ...new Set([...ofTimeframe(buckets, query), ...occurrences(buckets, query)].map((item) => item.queue)),
-  ].sort();
+// The queues with something on the timeline, by name: the ones given a place among the inks. A
+// queue with only a total, such as jobs waiting to be retried that were queued before the
+// timeframe, has none.
+function queuesOnTimeline(buckets, query) {
+  return [...new Set(occurrences(buckets, query).map((occurrence) => occurrence.queue))].sort();
 }
 
 // What the timeline's table should hold for an answer: a line for each event chosen (all of
-// them where none was) of each queue that had anything happen, as the page draws them. The
-// queues are those with anything in the timeframe: by name, or the chosen ones among them. Two
-// are drawn apart; with more, the first is, and the rest are added together. With nothing chosen
-// counted, there is no chart and no table.
+// them where none was) of each queue with something on the timeline, as the page draws them: by
+// name, or the chosen ones among them. Two are drawn apart; with more, the first is, and the
+// rest are added together. With nothing chosen counted, there is no chart and no table.
 function expectedLines(buckets, query, chosen = {}) {
   const happened = occurrences(buckets, query);
-  const present = queuesInTimeframe(buckets, query);
+  const present = queuesOnTimeline(buckets, query);
   const order = chosen.queues?.length ? chosen.queues.filter((queue) => present.includes(queue)) : present;
   const groups =
     order.length <= 2

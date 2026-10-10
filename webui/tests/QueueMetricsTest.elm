@@ -61,18 +61,26 @@ suite =
                     QueueMetrics.occurrences lastDay [ job "process_torrent" Status.Processed (-3 * 1440) (Just -60) 6 ]
                         |> List.map written
                         |> Expect.equal [ ( "process_torrent", Processed, ( -60, 6 ) ) ]
-            , test "keep a bucket that began before the timeframe but reaches into it, as bitmagnet's days do in a zone that is not UTC" <|
+            , test "leave out a New York day that began before the week, for jobs that ran, whose runs before the week bitmagnet answers with" <|
                 \_ ->
-                    -- In Athens the day began at 21:00 UTC; the request opened at midnight UTC.
-                    QueueMetrics.occurrences { bucketDuration = Day, startTime = Just (minutes -600) }
-                        [ job "process_torrent" Status.Processed -780 (Just -780) 2
-                        , job "process_torrent" Status.Processed (-780 - 1440) (Just -780) 1
+                    QueueMetrics.occurrences newYorkWeek
+                        [ job "process_torrent" Status.Processed newYorkStraddle (Just newYorkStraddle) 2
+                        , job "process_torrent" Status.Failed (newYorkStraddle - 1440) (Just newYorkStraddle) 1
+                        , job "process_torrent" Status.Processed newYorkFirstWhole (Just newYorkFirstWhole) 4
                         ]
                         |> List.map written
                         |> Expect.equal
-                            [ ( "process_torrent", Created, ( -780, 2 ) )
-                            , ( "process_torrent", Processed, ( -780, 3 ) )
+                            [ ( "process_torrent", Created, ( newYorkFirstWhole, 4 ) )
+                            , ( "process_torrent", Processed, ( newYorkFirstWhole, 4 ) )
                             ]
+            , test "leave out a New York day that began before the week for jobs still pending too, so the first column is not half of one" <|
+                \_ ->
+                    QueueMetrics.occurrences newYorkWeek
+                        [ job "process_torrent" Status.Pending newYorkStraddle Nothing 3
+                        , job "process_torrent" Status.Pending newYorkFirstWhole Nothing 5
+                        ]
+                        |> List.map written
+                        |> Expect.equal [ ( "process_torrent", Created, ( newYorkFirstWhole, 5 ) ) ]
             , test "keep everything for a timeframe with no start" <|
                 \_ ->
                     QueueMetrics.occurrences { bucketDuration = Hour, startTime = Nothing }
@@ -127,13 +135,16 @@ suite =
                         , job "process_torrent" Status.Processed -60 Nothing 8
                         ]
                         |> Expect.equal [ { queue = "process_torrent", pending = 2, retry = 4, failed = 0, processed = 0 } ]
-            , test "keep a bucket that began before the timeframe but reaches into it, as the timeline does" <|
+            , test "leave out a New York day that began before the week, whatever the jobs' status, as the timeline does" <|
                 \_ ->
-                    QueueMetrics.totals { bucketDuration = Day, startTime = Just (minutes -600) }
-                        [ job "process_torrent" Status.Processed (-780 - 1440) (Just -780) 2
-                        , job "process_torrent" Status.Processed (-780 - 1440) (Just (-780 - 1440)) 5
+                    QueueMetrics.totals newYorkWeek
+                        [ job "process_torrent" Status.Processed (newYorkStraddle - 1440) (Just newYorkStraddle) 2
+                        , job "process_torrent" Status.Retry newYorkStraddle (Just newYorkStraddle) 7
+                        , job "process_torrent" Status.Pending newYorkStraddle Nothing 3
+                        , job "process_torrent" Status.Failed newYorkFirstWhole (Just newYorkFirstWhole) 1
+                        , job "process_torrent" Status.Pending newYorkFirstWhole Nothing 5
                         ]
-                        |> Expect.equal [ { queue = "process_torrent", pending = 0, retry = 0, failed = 0, processed = 2 } ]
+                        |> Expect.equal [ { queue = "process_torrent", pending = 5, retry = 0, failed = 1, processed = 0 } ]
             , test "count everything the queue holds for a timeframe with no start, a job with no run among it" <|
                 \_ ->
                     QueueMetrics.totals { bucketDuration = Hour, startTime = Nothing }
@@ -152,22 +163,31 @@ suite =
                         ]
                         |> Expect.equal [ "process_torrent", "process_torrent_batch" ]
             ]
-        , describe "beganBefore"
-            [ test "says whether the answer kept a bucket that began before the timeframe, which bitmagnet counts only part of" <|
+        , describe "leftOut"
+            [ test "is what fell in a bucket that began before the timeframe and reached into it, events and totals both" <|
                 \_ ->
-                    let
-                        athensDays =
-                            { bucketDuration = Day, startTime = Just (minutes -600) }
-                    in
-                    [ QueueMetrics.beganBefore athensDays [ job "process_torrent" Status.Pending -780 Nothing 1 ]
-                    , QueueMetrics.beganBefore athensDays [ job "process_torrent" Status.Processed (-780 - 1440) (Just -780) 1 ]
-
-                    -- Wholly before it, so left out, and not part of anything drawn.
-                    , QueueMetrics.beganBefore athensDays [ job "process_torrent" Status.Processed (-780 - 1440) (Just (-780 - 1440)) 1 ]
-                    , QueueMetrics.beganBefore lastDay [ job "process_torrent" Status.Processed (-3 * 1440) (Just -60) 1 ]
-                    , QueueMetrics.beganBefore { bucketDuration = Hour, startTime = Nothing } [ job "process_torrent" Status.Pending -60 Nothing 1 ]
+                    QueueMetrics.leftOut newYorkWeek
+                        [ job "process_torrent" Status.Processed (newYorkStraddle - 1440) (Just newYorkStraddle) 2
+                        , job "process_torrent_batch" Status.Pending newYorkStraddle Nothing 3
+                        , job "process_torrent" Status.Processed newYorkFirstWhole (Just newYorkFirstWhole) 4
+                        ]
+                        |> Expect.equal
+                            { occurrences =
+                                [ { queue = "process_torrent", event = Processed, at = minutes newYorkStraddle, count = 2 }
+                                , { queue = "process_torrent_batch", event = Created, at = minutes newYorkStraddle, count = 3 }
+                                ]
+                            , totals =
+                                [ { queue = "process_torrent", pending = 0, retry = 0, failed = 0, processed = 2 }
+                                , { queue = "process_torrent_batch", pending = 3, retry = 0, failed = 0, processed = 0 }
+                                ]
+                            }
+            , test "is not what was wholly before the timeframe, nor anything on UTC, nor anything of everything" <|
+                \_ ->
+                    [ QueueMetrics.leftOut newYorkWeek [ job "process_torrent" Status.Processed (newYorkStraddle - 1440) (Just (newYorkStraddle - 1440)) 1 ]
+                    , QueueMetrics.leftOut lastDay [ job "process_torrent" Status.Processed (-3 * 1440) (Just -60) 1, job "process_torrent" Status.Pending -1440 Nothing 1 ]
+                    , QueueMetrics.leftOut { bucketDuration = Hour, startTime = Nothing } [ job "process_torrent" Status.Pending -60 Nothing 1 ]
                     ]
-                        |> Expect.equal [ True, True, False, False, False ]
+                        |> Expect.equal (List.repeat 3 { occurrences = [], totals = [] })
             ]
         , describe "eventKey"
             [ test "orders the events as a job lives them, and tells each apart" <|
@@ -207,6 +227,26 @@ minutes n =
 lastDay : { bucketDuration : MetricsBucketDuration, startTime : Maybe Time.Posix }
 lastDay =
     { bucketDuration = Hour, startTime = Just (minutes -1440) }
+
+
+{-| A week by the day, asked at 10:00 UTC on the 10th, opens at 00:00 UTC on the 3rd. In New
+York in winter a day runs from 05:00 UTC to 05:00 UTC, so bitmagnet's first day began at 05:00
+UTC on the 2nd, before the week did (`newYorkStraddle`), and the first whole one at 05:00 UTC on
+the 3rd (`newYorkFirstWhole`). In minutes from 10:00 on the 10th.
+-}
+newYorkWeek : { bucketDuration : MetricsBucketDuration, startTime : Maybe Time.Posix }
+newYorkWeek =
+    { bucketDuration = Day, startTime = Just (minutes -(7 * 1440 + 600)) }
+
+
+newYorkStraddle : Int
+newYorkStraddle =
+    -(8 * 1440 + 300)
+
+
+newYorkFirstWhole : Int
+newYorkFirstWhole =
+    -(7 * 1440 + 300)
 
 
 {-| A row of bitmagnet's answer: `count` jobs of `queue` in `status`, queued in the bucket
