@@ -101,6 +101,7 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#86](https://github.com/giorgosg/bitmagnet/pull/86) | Refuse `standard_conforming_strings = off`; dev binary logs to stderr       | local — issue 0002 option 1, test-fixtures ticket 03                 | Pool test, payload test with the setting off, stdout test      |
 | [#87](https://github.com/giorgosg/bitmagnet/pull/87) | Start the anonymous role empty by default                                   | local — default anonymous access issue 1                             | New-role, upgrade, GraphQL and Torznab tests observed red      |
 | [#88](https://github.com/giorgosg/bitmagnet/pull/88) | Bound facet counts and group language and content-type values               | local — fork review finding 13                                       | Pool reached 32; 62 language counts; both observed red         |
+| [#89](https://github.com/giorgosg/bitmagnet/pull/89) | Keep search query values bound                                              | local — review finding 0002                                          | Nonconforming-string exact count failed; observed red          |
 
 ## In flight
 
