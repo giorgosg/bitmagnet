@@ -102,6 +102,23 @@ to count, and the last week holds nothing else. It also expects more than one so
 counted, which the seed does not promise (it picks its rows with a `limit` and no `order by`); the
 template loaded here has three.
 
+`queue-stats.spec.js` (ticket 05 in `.scratch/dashboard`) reaches the queue's statistics from
+the status page and compares both charts' tables with what bitmagnet answered: the timeline's
+lines worked out from the answer the way the ticket reads it (created where a job was queued,
+processed or failed where it last ran), and the totals by queue and status. Both are put to the
+timeframe as the page puts them, because bitmagnet's answer is not: its filter lets every job
+that is not pending through (see `src/QueueMetrics.elm`), and one test checks that the last
+hour's answer holds jobs that ran before it and that the page leaves them out. It follows each
+control through the URL and a reload, and counts requests to check that choosing a queue, an
+event or how often to look again asks nothing, since those are picked out of the answer the page
+has. Under a faked clock it checks that auto-refresh is off by default, runs at its interval, goes
+on while queues and events are chosen, stops while the tab is hidden and does not pile on a look
+still on its way; it holds one answer back until the controls have moved on, and another until
+"Refresh now" has given up on it, to check that neither is drawn over a newer one; and it checks
+that Anonymous may open the page and an Identity without `queue::query` is refused it and not
+offered it. It relies on the seed leaving jobs in every status, in both queues, inside
+the last day.
+
 ### What it needs present
 
 If the database is not up, the harness says so and stops before building anything —
@@ -170,7 +187,11 @@ rest would take away what they sign in as.
 - Keep the credential-free suite credential-free. If a test needs a password, it belongs in
   `e2e/credentialed/`, which has one.
 - Shared helpers live in `e2e/support/`, not beside a spec: the credential-store recorder is
-  used by both suites, because the refusal paths need no credential and the success paths do.
+  used by both suites, because the refusal paths need no credential and the success paths do,
+  and `stats.js` holds what the two statistics specs share, holding an answer back among it.
+- Wait for what happens, not for a while. A look's answer is waited for by its response, or,
+  under a faked clock, by `answeredLooks`, which counts the answers from inside the page;
+  `quietMoment` is only for showing that something did not happen.
 
 ## What the fixture serves the operational pages
 

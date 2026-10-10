@@ -316,6 +316,31 @@ suite =
                     )
                         |> Expect.equal ( minutes 0, minutes -240, minutes -90 )
             ]
+        , describe "firstBucketFrom"
+            [ test "is where the first bucket bitmagnet counted that begins at or after a moment begins, in the grid's own offset" <|
+                \_ ->
+                    [ Buckets.firstBucketFrom (plain Day 1) (minutes 0)
+                    , Buckets.firstBucketFrom (plain Day 1) (minutes -600)
+                    , Buckets.firstBucketFrom { unit = Day, every = 1, offset = 5 * 60 * 60000, bucketedBy = Day } (minutes -600)
+                    , Buckets.firstBucketFrom { unit = Hour, every = 2, offset = 30 * 60000, bucketedBy = Hour } (minutes 7)
+                    , Buckets.firstBucketFrom (plain Minute 15) (minutes 7)
+                    ]
+                        |> Expect.equal [ minutes 840, minutes -600, minutes -300, minutes 30, minutes 7 ]
+            ]
+        , describe "endsAfter"
+            [ test "is whether a bucket bitmagnet counted reaches past a moment, so a page can tell one that began before its window from one wholly before it" <|
+                \_ ->
+                    [ -- The hour from 09:00 reaches past 09:59 and not past 10:00, where the next begins.
+                      Buckets.endsAfter Hour (minutes -60) (minutes -1)
+                    , Buckets.endsAfter Hour (minutes -60) (minutes 0)
+
+                    -- A day in Athens began at 21:00 UTC and reaches past midnight UTC.
+                    , Buckets.endsAfter Day (minutes -(13 * 60)) (minutes -600)
+                    , Buckets.endsAfter Minute (minutes 0) (minutes 0)
+                    , Buckets.endsAfter Minute (minutes -2) (minutes 0)
+                    ]
+                        |> Expect.equal [ True, False, True, True, False ]
+            ]
         , describe "widthIn"
             [ test "says how many of a smaller unit a bucket is, for a field that names the unit chosen" <|
                 \_ ->

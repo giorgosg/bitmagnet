@@ -1,4 +1,4 @@
-module Chip exposing (facet, view)
+module Chip exposing (facet, toggle, view)
 
 {-| The toggle a filter value is drawn as, and the labelled row of them a facet is: the
 search's filters and the queue's jobs both use them, so a chosen value looks and is read
@@ -38,6 +38,19 @@ view { label, count, selected, onToggle } =
                         []
                )
         )
+
+
+{-| What choosing `value` makes of the values chosen: it is added at the end, or taken away
+if it was already there. Several chips of a facet can be chosen at once, and none chosen is all
+of them.
+-}
+toggle : a -> List a -> List a
+toggle value values =
+    if List.member value values then
+        List.filter ((/=) value) values
+
+    else
+        values ++ [ value ]
 
 
 {-| Nothing at all when there is nothing to choose, rather than a label with no chips.

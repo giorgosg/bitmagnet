@@ -1,4 +1,4 @@
-module Bitmagnet exposing (File, FileList, Page, Row, SearchArgs, byInfoHash, fileLimit, files, mutationRequest, queryRequest, search)
+module Bitmagnet exposing (File, FileList, Page, Row, SearchArgs, byInfoHash, fileLimit, files, mutationRequest, queryRequest, search, slowQueryRequest)
 
 {-| Every call Magnes makes to bitmagnet. Queries and mutations cross one request
 boundary, which always lets the browser attach bitmagnet's HttpOnly cookie. Call sites
@@ -34,6 +34,17 @@ queryRequest : String -> SelectionSet decodesTo RootQuery -> Graphql.Http.Reques
 queryRequest apiUrl selection =
     Graphql.Http.queryRequest apiUrl selection
         |> Graphql.Http.withCredentials
+
+
+{-| A query that can take bitmagnet a while, such as a statistics page's metrics, given up on
+after two minutes, so that one that is never answered does not hold a page that looks again by
+itself back for good. On a real instance the torrent timeline's default look took about five
+seconds, and nine days of minutes more than thirty, so this is a good deal longer than either.
+-}
+slowQueryRequest : String -> SelectionSet decodesTo RootQuery -> Graphql.Http.Request decodesTo
+slowQueryRequest apiUrl selection =
+    queryRequest apiUrl selection
+        |> Graphql.Http.withTimeout (120 * 1000)
 
 
 mutationRequest : String -> SelectionSet decodesTo RootMutation -> Graphql.Http.Request decodesTo

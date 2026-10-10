@@ -27,6 +27,7 @@ import {
   expect,
   test,
 } from "../support/credentialed.js";
+import { afterFrames, answeredLooks, chip, drawn, holdLooks, quietMoment, setHidden } from "../support/stats.js";
 
 // Resolves with bitmagnet's next answer to the timeline's query, as the page was given it,
 // and the query that asked for it. The predicate says which question is waited for, so an
@@ -51,11 +52,15 @@ function nextMetrics(page, predicate = () => true) {
     });
 }
 
+function isTorrentMetrics(request) {
+  return new URL(request.url()).pathname === "/graphql" && (request.postData() ?? "").includes("metrics");
+}
+
 // Every look the page asks for, as it is asked.
 function metricsRequests(page) {
   const asked = [];
   page.on("request", (request) => {
-    if (new URL(request.url()).pathname === "/graphql" && (request.postData() ?? "").includes("metrics")) {
+    if (isTorrentMetrics(request)) {
       asked.push(request);
     }
   });
@@ -119,41 +124,6 @@ function expectedLines(buckets, sources) {
   return lines;
 }
 
-function chip(page, label) {
-  return page.getByRole("button", { name: label, exact: true });
-}
-
-// The look is drawn, and none is on its way.
-async function drawn(page) {
-  await expect(page.getByRole("figure")).toBeVisible();
-  await expect(page.locator('.stats[aria-busy="false"]')).toBeVisible();
-}
-
-// Overrides what the page reads as its visibility, then tells it, the way the browser does
-// when a tab is switched away from and back.
-async function setHidden(page, hidden) {
-  await page.evaluate((value) => {
-    Object.defineProperty(document, "hidden", { configurable: true, get: () => value });
-    Object.defineProperty(document, "visibilityState", {
-      configurable: true,
-      get: () => (value ? "hidden" : "visible"),
-    });
-    document.dispatchEvent(new Event("visibilitychange"));
-  }, hidden);
-}
-
-// A request the page should not have made would have been sent by now, and one it did make
-// has been answered: the page is given a real moment, not a faked one.
-async function settle(page) {
-  await page.waitForTimeout(500);
-}
-
-// Two frames on, whatever the page was going to do with an answer it has been handed, it has
-// done: Elm draws on the animation frame after it updates.
-async function afterFrames(page) {
-  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
-}
-
 // An answer from a source nobody else would answer with, so it can be told from the real one.
 const staleAnswer = {
   data: {
@@ -166,31 +136,10 @@ const staleAnswer = {
   },
 };
 
-// Holds back the first `count` looks the page asks for, and answers each with the stale
-// answer once it is let go. Resolves `release()` to let them all go, and `delivered` when the
-// last has arrived at the page.
-async function holdLooks(page, count) {
-  let release;
-  const held = new Promise((resolve) => {
-    release = resolve;
-  });
-  let remaining = count;
-  await page.route("**/graphql", async (route) => {
-    const query = route.request().postDataJSON().query;
-    if (remaining > 0 && query.includes("metrics")) {
-      remaining -= 1;
-      await held;
-      await route.fulfill({ json: staleAnswer });
-    } else {
-      await route.continue();
-    }
-  });
-  return {
-    release,
-    // The page has been handed the stale answer. Not the same as having done anything with it.
-    delivered: () =>
-      page.waitForResponse(async (response) => (await response.text().catch(() => "")).includes("Stale source")),
-  };
+// Holds back the page's next look, answered when let go with a source nobody else would answer
+// with.
+function holdLook(page) {
+  return holdLooks(page, { count: 1, isLook: isTorrentMetrics, stale: staleAnswer, marker: "Stale source" });
 }
 
 test("an administrator finds the timeline from the status page, and it draws what bitmagnet counted", async ({
@@ -352,9 +301,9 @@ test("every control is in the URL, and the link opens the same look", async ({ p
 });
 
 test.describe("auto-refresh", () => {
-  // Elm's Time.every is a setInterval, so the page's clock decides when a look is due. Only
-  // the requests are counted: the faked clock also holds back requestAnimationFrame, so what
-  // is drawn is not the thing to look at.
+  // Elm's Time.every is a setInterval, so the page's clock decides when a look is due. Only the
+  // requests are counted, and the answers from inside the page: the faked clock also holds back
+  // requestAnimationFrame, so what is drawn is not the thing to look at.
   test.beforeEach(async ({ page, credentials }) => {
     await signInAt(page, credentials, "/stats/torrents", "Torrent statistics");
     await page.clock.install();
@@ -364,26 +313,26 @@ test.describe("auto-refresh", () => {
     page,
   }) => {
     const asked = metricsRequests(page);
+    const answered = await answeredLooks(page, "metrics");
 
     // Off by default: time passing asks for nothing.
     await page.goto("/stats/torrents");
-    await expect.poll(() => asked.length).toBe(1);
-    await settle(page);
+    await expect.poll(answered).toBe(1);
     await page.clock.runFor(10 * 60_000);
-    await settle(page);
+    await quietMoment(page);
     expect(asked.length).toBe(1);
 
     await page.goto("/stats/torrents?refresh=10s");
-    await expect.poll(() => asked.length).toBe(2);
-    await settle(page);
+    await expect.poll(answered).toBe(1);
+    expect(asked.length).toBe(2);
 
     await page.clock.runFor(10_000);
-    await expect.poll(() => asked.length).toBe(3);
-    await settle(page);
+    await expect.poll(answered).toBe(2);
+    expect(asked.length).toBe(3);
 
     await setHidden(page, true);
     await page.clock.runFor(60_000);
-    await settle(page);
+    await quietMoment(page);
     expect(asked.length).toBe(3);
 
     // Coming back asks at once rather than at the next tick: what is on screen is as old as
@@ -396,41 +345,40 @@ test.describe("auto-refresh", () => {
     page,
   }) => {
     const asked = metricsRequests(page);
+    const answered = await answeredLooks(page, "metrics");
     await page.goto("/stats/torrents");
-    await expect.poll(() => asked.length).toBe(1);
-    await settle(page);
+    await expect.poll(answered).toBe(1);
 
     await chip(page, "10 seconds").click();
     await expect(page).toHaveURL(/\/stats\/torrents\?refresh=10s$/);
-    await settle(page);
+    await quietMoment(page);
     expect(asked.length).toBe(1);
 
     await page.clock.runFor(10_000);
-    await expect.poll(() => asked.length).toBe(2);
-    await settle(page);
+    await expect.poll(answered).toBe(2);
+    expect(asked.length).toBe(2);
 
     await chip(page, "off").click();
     await expect(page).toHaveURL(/\/stats\/torrents$/);
     await page.clock.runFor(60_000);
-    await settle(page);
+    await quietMoment(page);
     expect(asked.length).toBe(2);
   });
 
   test("does not pile a look on one that is still on its way", async ({ page }) => {
     const asked = metricsRequests(page);
+    const answered = await answeredLooks(page, "metrics");
     await page.goto("/stats/torrents?refresh=10s");
-    await expect.poll(() => asked.length).toBe(1);
-    await settle(page);
+    await expect.poll(answered).toBe(1);
 
     // The next look is never answered, as far as the page can tell.
-    const looks = await holdLooks(page, 1);
+    const looks = await holdLook(page);
     await page.clock.runFor(10_000);
     await expect.poll(() => asked.length).toBe(2);
-    await settle(page);
 
     // The timer fires twice more over it, and asks for nothing.
     await page.clock.runFor(20_000);
-    await settle(page);
+    await quietMoment(page);
     expect(asked.length).toBe(2);
     looks.release();
   });
@@ -444,7 +392,7 @@ test("an answer that comes back after the controls moved on does not replace the
 
   // The first look at the last hour is held back, and answered long after the page has moved
   // on, with a source nobody else would answer with.
-  const looks = await holdLooks(page, 1);
+  const looks = await holdLook(page);
   await page.goto("/stats/torrents");
   await expect(page.getByRole("heading", { name: "Torrent statistics" })).toBeVisible();
 
@@ -472,7 +420,7 @@ test("asking for a look at once gives up on one that is not answered, and its an
   await drawn(page);
 
   // The next look is held back, as if the instance were not answering.
-  const looks = await holdLooks(page, 1);
+  const looks = await holdLook(page);
   await page.getByRole("button", { name: "Refresh now" }).click();
   await expect(page.locator('.stats[aria-busy="true"]')).toBeVisible();
 

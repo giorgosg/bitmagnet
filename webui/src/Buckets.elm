@@ -1,4 +1,4 @@
-module Buckets exposing (Grid, Resolution, Sample, Slot, Window, columnStart, grid, label, slots, unlimited, widthIn)
+module Buckets exposing (Grid, Resolution, Sample, Slot, Window, columnStart, endsAfter, firstBucketFrom, grid, label, slots, unlimited, widthIn)
 
 {-| How a statistics page cuts time up: the arithmetic only, with no view in it, so that
 the torrent timeline and the queue's can share it.
@@ -128,6 +128,38 @@ would count only the rest of it.
 columnStart : Grid -> Time.Posix -> Time.Posix
 columnStart resolved at =
     startOf resolved (columnOf resolved at)
+
+
+{-| Whether the bucket bitmagnet counted by `unit` that began at `start` reaches past `moment`:
+has any of its time at or after it. One that began before a window that opens at `moment` and
+does reach past it straddles the window's start, which happens against a database not on UTC.
+The queue's statistics leave such a bucket out and say so; the torrent timeline draws it as a
+column of its own (`slots`), since bitmagnet's two queries treat it differently (`QueueMetrics`
+says how).
+
+A day is taken as 24 hours, as it is everywhere here, so a day an hour short or long across a
+clock change in bitmagnet's time zone is taken to end an hour late or early.
+
+-}
+endsAfter : MetricsBucketDuration -> Time.Posix -> Time.Posix -> Bool
+endsAfter unit start moment =
+    Time.posixToMillis start + unitMillis unit > Time.posixToMillis moment
+
+
+{-| Where the first bucket bitmagnet counted, by the grid's `bucketedBy` and in its offset, that
+begins at or after `moment` begins: where a chart that leaves out a bucket straddling `moment`
+starts.
+-}
+firstBucketFrom : Grid -> Time.Posix -> Time.Posix
+firstBucketFrom resolved moment =
+    let
+        unit =
+            unitMillis resolved.bucketedBy
+
+        intoOffset =
+            Time.posixToMillis moment - resolved.offset
+    in
+    Time.millisToPosix (((intoOffset + unit - 1) // unit) * unit + resolved.offset)
 
 
 {-| How many of `unit`, which is no larger than the grid's own, a bucket is long: what a

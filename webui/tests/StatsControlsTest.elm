@@ -97,7 +97,11 @@ suite =
                         |> Expect.equal AllTime
             ]
         , describe "for a page that starts somewhere else"
-            [ test "leaves out what is that page's default, and writes what the torrent page's default is not" <|
+            [ test "the queue's statistics start at everything, by the hour, not looking again" <|
+                \_ ->
+                    StatsControls.queueDefault
+                        |> Expect.equal { timeframe = AllTime, resolution = { unit = Hour, every = Nothing }, refresh = Off }
+            , test "leaves out what is that page's default, and writes what the torrent page's default is not" <|
                 \_ ->
                     ( hrefFrom queueStart queueStart
                     , hrefFrom queueStart { queueStart | timeframe = Hours1, resolution = { unit = Minute, every = Nothing } }
@@ -194,6 +198,39 @@ suite =
                     StatsControls.window now { defaults | timeframe = AllTime }
                         |> Expect.equal { from = Nothing, to = now }
             ]
+        , describe "request"
+            [ test "asks for the unit the resolution comes to, from where the timeframe's first column begins" <|
+                \_ ->
+                    -- At 10:07:30, six hours of minutes are drawn by the quarter hour, and six
+                    -- hours back is 04:07:30, in the quarter that began at 04:00.
+                    StatsControls.request (Time.millisToPosix (nowMillis + 450000)) { defaults | timeframe = Hours6 }
+                        |> Expect.equal { bucketDuration = Minute, startTime = Just (Time.millisToPosix (nowMillis - 6 * 3600000)) }
+            , test "asks for hours where the minutes would be merged into hours anyway" <|
+                \_ ->
+                    StatsControls.request now { defaults | timeframe = Weeks1 }
+                        |> Expect.equal { bucketDuration = Hour, startTime = Just (Time.millisToPosix (nowMillis - 7 * 24 * 3600000)) }
+            , test "has no start for everything, and asks for the unit chosen" <|
+                \_ ->
+                    ( StatsControls.request now queueStart
+                    , StatsControls.request now { queueStart | resolution = { unit = Minute, every = Just 90 } }
+                    )
+                        |> Expect.equal
+                            ( { bucketDuration = Hour, startTime = Nothing }
+                            , { bucketDuration = Minute, startTime = Nothing }
+                            )
+            ]
+        , describe "capNote"
+            [ test "says so when the chart was cut down to fit, and says nothing when it was not" <|
+                \_ ->
+                    ( Html.div [] [ StatsControls.capNote { grid = grid Minute 6, wanted = grid Minute 1 } ]
+                        |> Query.fromHtml
+                        |> Query.has [ Selector.text "Drawn per 6 minutes, not per minute: that many buckets are more than the chart can draw." ]
+                    , Html.div [] [ StatsControls.capNote { grid = grid Hour 1, wanted = grid Hour 1 } ]
+                        |> Query.fromHtml
+                        |> Query.hasNot [ Selector.class "stats-note" ]
+                    )
+                        |> (\( cut, whole ) -> Expect.all [ always cut, always whole ] ())
+            ]
         , describe "auto-refresh"
             [ test "waits the interval it names, and not at all when off" <|
                 \_ ->
@@ -208,14 +245,14 @@ defaults =
     StatsControls.default
 
 
-{-| Where the queue's statistics would start: everything, by the hour.
--}
 queueStart : Controls
 queueStart =
-    { timeframe = AllTime
-    , resolution = { unit = Hour, every = Nothing }
-    , refresh = Off
-    }
+    StatsControls.queueDefault
+
+
+grid : MetricsBucketDuration -> Int -> { unit : MetricsBucketDuration, every : Int, offset : Int, bucketedBy : MetricsBucketDuration }
+grid unit every =
+    { unit = unit, every = every, offset = 0, bucketedBy = unit }
 
 
 nowMillis : Int
