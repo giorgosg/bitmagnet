@@ -25,6 +25,7 @@ type crawler struct {
 	kTable                       ktable.Table
 	client                       client.Client
 	metainfoRequester            metainforequester.Requester
+	metadataRequestSlots         chan struct{} // bounds peer connections across all in-flight hashes
 	banningChecker               banning.Checker
 	bootstrapNodes               []string
 	reseedBootstrapNodesInterval time.Duration

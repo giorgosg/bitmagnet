@@ -2,17 +2,71 @@ package metainforequester
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"io"
+	"net"
+	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/peer_protocol"
+	"github.com/bitmagnet-io/bitmagnet/internal/protocol"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRequestCancellationInterruptsStalledHandshake(t *testing.T) {
+	t.Parallel()
+
+	listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	require.NoError(t, err)
+
+	defer listener.Close()
+
+	accepted := make(chan *net.TCPConn, 1)
+
+	go func() {
+		conn, acceptErr := listener.AcceptTCP()
+		if acceptErr == nil {
+			accepted <- conn
+		}
+	}()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	requestDone := make(chan error, 1)
+
+	go func() {
+		_, requestErr := (requester{timeout: 3 * time.Second, dialer: &net.Dialer{}}).Request(
+			ctx, protocol.ID{}, netip.MustParseAddrPort(listener.Addr().String()),
+		)
+		requestDone <- requestErr
+	}()
+
+	var conn *net.TCPConn
+	select {
+	case conn = <-accepted:
+		defer conn.Close()
+	case <-time.After(time.Second):
+		t.Fatal("request did not connect")
+	}
+
+	// The peer accepts the connection but never answers the BitTorrent handshake.
+	// Cancellation must interrupt the pending read before the request timeout.
+	cancel()
+
+	select {
+	case requestErr := <-requestDone:
+		require.Error(t, requestErr)
+	case <-time.After(time.Second):
+		t.Fatal("cancelled metadata request remained blocked on the peer")
+	}
+}
 
 // umDataMessage builds an ut_metadata "data" message (msg_type 1) carrying the given
 // piece index and payload, framed the way readMessage expects.
