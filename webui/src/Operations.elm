@@ -18,6 +18,7 @@ import Route exposing (Route)
 candidates : List { route : Route, label : String }
 candidates =
     [ { route = Route.TorrentStats Route.emptyTorrentStats, label = "Torrent statistics" }
+    , { route = Route.QueueStats Route.emptyQueueStats, label = "Queue statistics" }
     , { route = Route.QueueJobs Route.emptyJobs, label = "Queue jobs" }
     ]
 

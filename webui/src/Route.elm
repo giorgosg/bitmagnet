@@ -1,4 +1,4 @@
-module Route exposing (Access(..), BasePath, JobsParams, LoginParams, RegisterParams, Route(..), SearchParams, TorrentStatsParams, basePath, emptyJobs, emptySearch, emptyTorrentStats, fromUrl, guard, refreshInterval, returnDestination, toHref, withoutRefresh)
+module Route exposing (Access(..), BasePath, JobsParams, LoginParams, QueueStatsParams, RegisterParams, Route(..), SearchParams, TorrentStatsParams, basePath, emptyJobs, emptyQueueStats, emptySearch, emptyTorrentStats, fromUrl, guard, question, refreshInterval, returnDestination, toHref)
 
 {-| Routes are real paths, not fragments — see the README.
 
@@ -10,7 +10,9 @@ variant breaks it at compile time rather than producing a dead link.
 import Facet exposing (Filters)
 import Identity
 import JobOrder exposing (JobOrder)
+import Magnes.Api.Enum.MetricsBucketDuration exposing (MetricsBucketDuration(..))
 import Magnes.Api.Enum.QueueJobStatus as QueueJobStatus exposing (QueueJobStatus)
+import QueueMetrics
 import Sort exposing (Sort)
 import StatsControls exposing (Controls)
 import Url exposing (Url)
@@ -32,6 +34,7 @@ type Route
     | Status
     | QueueJobs JobsParams
     | TorrentStats TorrentStatsParams
+    | QueueStats QueueStatsParams
     | NotFound
 
 
@@ -118,6 +121,36 @@ emptyTorrentStats =
     { controls = StatsControls.default, sources = [] }
 
 
+{-| Everything the URL says about the queue's statistics: how far back, how coarsely, how
+often to look again, and which queues and events to draw, so a view of the queue is a link
+(ADR 0002). No queue is all of them, and no event is all of them.
+
+The queues and events are picked out of the answer, not asked for: bitmagnet is asked about
+every queue (`question` says what is asked).
+
+-}
+type alias QueueStatsParams =
+    { controls : Controls
+    , queues : List String
+    , events : List QueueMetrics.Event
+    }
+
+
+{-| The queue's statistics open where the Angular UI's do: on everything the queue holds, by
+the hour, and, unlike there, not looking again until asked to.
+-}
+emptyQueueStats : QueueStatsParams
+emptyQueueStats =
+    { controls =
+        { timeframe = StatsControls.AllTime
+        , resolution = { unit = Hour, every = Nothing }
+        , refresh = StatsControls.Off
+        }
+    , queues = []
+    , events = []
+    }
+
+
 parser : Parser (Route -> a) a
 parser =
     oneOf
@@ -155,6 +188,16 @@ parser =
                 <?> Query.int "every"
                 <?> Query.string "refresh"
                 <?> Query.custom "source" identity
+            )
+        , Parser.map queueStatsWith
+            (s "stats"
+                </> s "queue"
+                <?> Query.string "timeframe"
+                <?> Query.string "resolution"
+                <?> Query.int "every"
+                <?> Query.string "refresh"
+                <?> Query.custom "queue" identity
+                <?> Query.custom "event" identity
             )
         ]
 
@@ -217,6 +260,26 @@ torrentStatsWith timeframe resolution every refresh sources =
                 , refresh = refresh
                 }
         , sources = List.filterMap nonBlank sources
+        }
+
+
+{-| As the torrent timeline's does, drops what it does not recognise. Every timeframe is
+offered here, everything among them, since the query is bounded by what the queue holds.
+-}
+queueStatsWith : Maybe String -> Maybe String -> Maybe Int -> Maybe String -> List String -> List String -> Route
+queueStatsWith timeframe resolution every refresh queues events =
+    QueueStats
+        { controls =
+            StatsControls.fromParams
+                { defaults = emptyQueueStats.controls
+                , timeframes = StatsControls.allTimeframes
+                , timeframe = timeframe
+                , resolution = resolution
+                , every = every
+                , refresh = refresh
+                }
+        , queues = List.filterMap nonBlank queues
+        , events = List.filterMap QueueMetrics.eventFromName events
         }
 
 
@@ -305,16 +368,21 @@ refreshInterval route =
         TorrentStats params ->
             StatsControls.refreshMillis params.controls.refresh
 
+        QueueStats params ->
+            StatsControls.refreshMillis params.controls.refresh
+
         NotFound ->
             Nothing
 
 
-{-| The same route, not asked again by itself. Two routes that are the same one in this
-sense ask the same question: how often to look again is not what to look at. Every route is
-listed, with no catch-all, for the reason `refreshInterval` is.
+{-| The route reduced to what its page asks bitmagnet. Two routes that come to the same one
+ask the same question, and the page need not ask it again to show either: how often to look
+again is not what to look at, and the queue's statistics pick their queues and events out of an
+answer about all of them. Every route is listed, with no catch-all, for the reason
+`refreshInterval` is.
 -}
-withoutRefresh : Route -> Route
-withoutRefresh route =
+question : Route -> Route
+question route =
     case route of
         Search _ ->
             route
@@ -351,6 +419,9 @@ withoutRefresh route =
 
         TorrentStats params ->
             TorrentStats { params | controls = StatsControls.withoutRefresh params.controls }
+
+        QueueStats params ->
+            QueueStats { params | controls = StatsControls.withoutRefresh params.controls, queues = [], events = [] }
 
         NotFound ->
             route
@@ -426,6 +497,13 @@ toHref (BasePath prefix) route =
                     Builder.absolute [ "stats", "torrents" ]
                         (StatsControls.toParams StatsControls.default params.controls
                             ++ List.map (Builder.string "source") params.sources
+                        )
+
+                QueueStats params ->
+                    Builder.absolute [ "stats", "queue" ]
+                        (StatsControls.toParams emptyQueueStats.controls params.controls
+                            ++ List.map (Builder.string "queue") params.queues
+                            ++ List.map (Builder.string "event" << QueueMetrics.eventName) params.events
                         )
 
                 NotFound ->
@@ -541,6 +619,9 @@ anonymousAccess mount identity route =
         TorrentStats _ ->
             requireTorrent identity
 
+        QueueStats _ ->
+            requireQueue identity
+
         UserOverview ->
             loginRedirect mount route
 
@@ -591,6 +672,9 @@ userAccess identity route =
 
         TorrentStats _ ->
             requireTorrent identity
+
+        QueueStats _ ->
+            requireQueue identity
 
         _ ->
             Allowed

@@ -5,6 +5,7 @@ import Identity
 import Magnes.Api.Enum.MetricsBucketDuration exposing (MetricsBucketDuration(..))
 import Magnes.Api.Enum.QueueJobStatus exposing (QueueJobStatus(..))
 import Magnes.Api.Enum.QueueJobsOrderByField exposing (QueueJobsOrderByField(..))
+import QueueMetrics
 import Route
 import StatsControls exposing (AutoRefresh(..), Timeframe(..))
 import Test exposing (Test, describe, test)
@@ -133,26 +134,84 @@ suite =
                     )
                         |> Expect.equal ( Route.Allowed, Route.Allowed )
             ]
+        , describe "queue statistics"
+            [ test "the defaults, everything by the hour, are a bare path" <|
+                \_ ->
+                    Route.toHref mount (Route.QueueStats Route.emptyQueueStats)
+                        |> Expect.equal "/magnes/stats/queue"
+            , test "carries its controls, queues and events in the query string" <|
+                \_ ->
+                    Route.toHref mount (Route.QueueStats chosenQueueStats)
+                        |> Expect.equal "/magnes/stats/queue?timeframe=1d&resolution=minute&every=5&refresh=10s&queue=process_torrent_batch&event=failed&event=created"
+            , test "reads the query string back into the same choices" <|
+                \_ ->
+                    "https://example.test/magnes/stats/queue?event=failed&queue=process_torrent_batch&every=5&event=created&refresh=10s&resolution=minute&timeframe=1d"
+                        |> Url.fromString
+                        |> Maybe.map (Route.fromUrl mount)
+                        |> Expect.equal (Just (Route.QueueStats chosenQueueStats))
+            , test "writes a timeframe other than everything, and the torrent page's defaults, which are not its own" <|
+                \_ ->
+                    Route.toHref mount (Route.QueueStats { emptyQueueStats | controls = StatsControls.default })
+                        |> Expect.equal "/magnes/stats/queue?timeframe=1h&resolution=minute"
+            , test "drops what it does not recognise rather than failing the page" <|
+                \_ ->
+                    "https://example.test/magnes/stats/queue?timeframe=fortnight&resolution=week&every=0&refresh=2s&queue=&queue=%20&event=retry&event=updated"
+                        |> Url.fromString
+                        |> Maybe.map (Route.fromUrl mount)
+                        |> Expect.equal (Just (Route.QueueStats Route.emptyQueueStats))
+            , test "is refused, not redirected, to an Identity without queue::query" <|
+                \_ ->
+                    ( Route.guard mount (Identity.Anonymous [ Identity.graphql "health" "query", Identity.graphql "torrent" "query" ]) (Route.QueueStats Route.emptyQueueStats)
+                    , Route.guard mount userIdentity (Route.QueueStats chosenQueueStats)
+                    )
+                        |> Expect.equal
+                            ( Route.Refused "Your Identity does not permit reading bitmagnet's queue."
+                            , Route.Refused "Your Identity does not permit reading bitmagnet's queue."
+                            )
+            , test "is open to an Anonymous Identity or a User holding queue::query" <|
+                \_ ->
+                    ( Route.guard mount (Identity.Anonymous [ Identity.graphql "queue" "query" ]) (Route.QueueStats Route.emptyQueueStats)
+                    , Route.guard mount (Identity.UserAuthenticated user [ Identity.graphql "queue" "query" ]) (Route.QueueStats chosenQueueStats)
+                    )
+                        |> Expect.equal ( Route.Allowed, Route.Allowed )
+            ]
         , describe "looking again by itself"
             [ test "a page that asks for it says how often, and every other page says it never does" <|
                 \_ ->
                     List.map Route.refreshInterval
-                        (Route.TorrentStats chosenStats :: Route.TorrentStats Route.emptyTorrentStats :: List.filter (not << isTorrentStats) routes)
-                        |> Expect.equal (Just 30000 :: Nothing :: List.map (always Nothing) (List.filter (not << isTorrentStats) routes))
-            , test "two looks that differ only in how often to look again are the same look" <|
+                        (Route.TorrentStats chosenStats
+                            :: Route.TorrentStats Route.emptyTorrentStats
+                            :: Route.QueueStats chosenQueueStats
+                            :: Route.QueueStats Route.emptyQueueStats
+                            :: List.filter (not << isStats) routes
+                        )
+                        |> Expect.equal (Just 30000 :: Nothing :: Just 10000 :: Nothing :: List.map (always Nothing) (List.filter (not << isStats) routes))
+            ]
+        , describe "question"
+            [ test "two looks at the torrents that differ only in how often to look again ask the same" <|
                 \_ ->
                     let
                         slower =
                             { chosenStats | controls = withRefresh Every5Minutes chosenStats.controls }
                     in
-                    ( Route.withoutRefresh (Route.TorrentStats chosenStats) == Route.withoutRefresh (Route.TorrentStats slower)
-                    , Route.withoutRefresh (Route.TorrentStats chosenStats) == Route.withoutRefresh (Route.TorrentStats { chosenStats | sources = [] })
+                    ( Route.question (Route.TorrentStats chosenStats) == Route.question (Route.TorrentStats slower)
+                    , Route.question (Route.TorrentStats chosenStats) == Route.question (Route.TorrentStats { chosenStats | sources = [] })
+                    )
+                        |> Expect.equal ( True, False )
+            , test "two looks at the queue ask the same whatever they look again at, and whichever queues and events they pick out of the answer" <|
+                \_ ->
+                    let
+                        asked =
+                            Route.question (Route.QueueStats chosenQueueStats)
+                    in
+                    ( asked == Route.question (Route.QueueStats { chosenQueueStats | controls = withRefresh Off chosenQueueStats.controls, queues = [], events = [] })
+                    , asked == Route.question (Route.QueueStats { chosenQueueStats | controls = { timeframe = Hours1, resolution = chosenQueueStats.controls.resolution, refresh = Every10Seconds } })
                     )
                         |> Expect.equal ( True, False )
             , test "leaves a page that does not look again by itself as it is" <|
                 \_ ->
-                    List.map Route.withoutRefresh (List.filter (not << isTorrentStats) routes)
-                        |> Expect.equal (List.filter (not << isTorrentStats) routes)
+                    List.map Route.question (List.filter (not << isStats) routes)
+                        |> Expect.equal (List.filter (not << isStats) routes)
             ]
         , test "Unknown waits and bootstrap failure remains a refusal" <|
             \_ ->
@@ -238,6 +297,9 @@ routes =
     , Route.TorrentStats Route.emptyTorrentStats
     , Route.TorrentStats chosenStats
     , Route.TorrentStats { emptyStats | controls = { timeframe = Hours1, resolution = { unit = Minute, every = Just 1 }, refresh = Off } }
+    , Route.QueueStats Route.emptyQueueStats
+    , Route.QueueStats chosenQueueStats
+    , Route.QueueStats { emptyQueueStats | controls = StatsControls.default, events = [ QueueMetrics.Processed ] }
     ]
 
 
@@ -254,6 +316,23 @@ chosenStats =
         , refresh = Every30Seconds
         }
     , sources = [ "dht", "rarbg" ]
+    }
+
+
+emptyQueueStats : Route.QueueStatsParams
+emptyQueueStats =
+    Route.emptyQueueStats
+
+
+chosenQueueStats : Route.QueueStatsParams
+chosenQueueStats =
+    { controls =
+        { timeframe = Days1
+        , resolution = { unit = Minute, every = Just 5 }
+        , refresh = Every10Seconds
+        }
+    , queues = [ "process_torrent_batch" ]
+    , events = [ QueueMetrics.Failed, QueueMetrics.Created ]
     }
 
 
@@ -304,10 +383,13 @@ user =
     }
 
 
-isTorrentStats : Route.Route -> Bool
-isTorrentStats route =
+isStats : Route.Route -> Bool
+isStats route =
     case route of
         Route.TorrentStats _ ->
+            True
+
+        Route.QueueStats _ ->
             True
 
         _ ->

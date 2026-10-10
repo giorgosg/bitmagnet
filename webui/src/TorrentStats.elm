@@ -93,16 +93,6 @@ type alias Statistics =
 -- REQUESTS
 
 
-{-| How long a look is waited for before it is given up on, so that a request that is never
-answered does not hold the page's refresh back for good. On a real instance the default look
-took about five seconds, and nine days of minutes more than thirty, so this is a good deal
-longer than either.
--}
-requestTimeout : Float
-requestTimeout =
-    120 * 1000
-
-
 {-| The clock is read as the request is made, so the start of the timeframe and the end of
 the chart are the same moment, and the answer carries it.
 -}
@@ -113,21 +103,14 @@ fetch apiUrl params toMsg =
             (\now ->
                 query now params
                     |> Bitmagnet.queryRequest apiUrl
-                    |> Graphql.Http.withTimeout requestTimeout
+                    |> Graphql.Http.withTimeout StatsControls.requestTimeout
                     |> Graphql.Http.toTask
             )
         |> Task.attempt toMsg
 
 
-{-| bitmagnet buckets by the unit the grid comes to, which is the largest whole one the
-resolution makes (`Buckets.grid`): a week of minutes merged into hours is asked for as hours.
-`startTime` is a bound on a row's `updated_at`, inclusive, and is where the timeframe's first
-column begins, not the moment the timeframe reaches back to: counted from the middle of a
-column, bitmagnet would give the first one only its share of the column.
-
-That is as far as Magnes can know where bitmagnet's columns begin. It cuts its days, and its
-hours in a zone that is not a whole number of hours from UTC, in its database's time zone, so
-against a database that is not on UTC the first of those can still be short.
+{-| bitmagnet is asked what `StatsControls.request` says: the unit to bucket by, and where the
+first column begins. `startTime` is a bound on a row's `updated_at`, inclusive.
 
 No `endTime` is sent: it would cut off rows newer than a browser clock that runs behind the
 server's. No `sources` is all of them, and an empty list would be a filter that matches
@@ -137,15 +120,12 @@ nothing, so it is left out.
 query : Time.Posix -> Route.TorrentStatsParams -> SelectionSet Statistics RootQuery
 query now params =
     let
-        window =
-            StatsControls.window now params.controls
-
-        planned =
-            Buckets.grid params.controls.resolution window []
+        asking =
+            StatsControls.request now params.controls
 
         input =
             InputObject.buildTorrentMetricsQueryInput
-                { bucketDuration = planned.bucketedBy }
+                { bucketDuration = asking.bucketDuration }
                 (\optionals ->
                     { optionals
                         | sources =
@@ -154,13 +134,7 @@ query now params =
 
                             else
                                 Present params.sources
-                        , startTime =
-                            case window.from of
-                                Just from ->
-                                    Present (Buckets.columnStart planned from)
-
-                                Nothing ->
-                                    Absent
+                        , startTime = Graphql.OptionalArgument.fromMaybe asking.startTime
                     }
                 )
     in
@@ -526,7 +500,7 @@ to look at.
 -}
 sameLook : Route.TorrentStatsParams -> Route.TorrentStatsParams -> Bool
 sameLook one other =
-    Route.withoutRefresh (Route.TorrentStats one) == Route.withoutRefresh (Route.TorrentStats other)
+    Route.question (Route.TorrentStats one) == Route.question (Route.TorrentStats other)
 
 
 

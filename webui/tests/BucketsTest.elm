@@ -316,6 +316,20 @@ suite =
                     )
                         |> Expect.equal ( minutes 0, minutes -240, minutes -90 )
             ]
+        , describe "endsAfter"
+            [ test "is whether a bucket bitmagnet counted reaches past a moment, so a page can tell one that began before its window from one wholly before it" <|
+                \_ ->
+                    [ -- The hour from 09:00 reaches past 09:59 and not past 10:00, where the next begins.
+                      Buckets.endsAfter Hour (minutes -60) (minutes -1)
+                    , Buckets.endsAfter Hour (minutes -60) (minutes 0)
+
+                    -- A day in Athens began at 21:00 UTC and reaches past midnight UTC.
+                    , Buckets.endsAfter Day (minutes -(13 * 60)) (minutes -600)
+                    , Buckets.endsAfter Minute (minutes 0) (minutes 0)
+                    , Buckets.endsAfter Minute (minutes -2) (minutes 0)
+                    ]
+                        |> Expect.equal [ True, False, True, True, False ]
+            ]
         , describe "widthIn"
             [ test "says how many of a smaller unit a bucket is, for a field that names the unit chosen" <|
                 \_ ->

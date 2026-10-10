@@ -14,14 +14,23 @@ import Time
 suite : Test
 suite =
     describe "Operations"
-        [ test "lists the queue's jobs for an Identity holding queue::query" <|
+        [ test "lists the queue's statistics and its jobs for an Identity holding queue::query" <|
             \_ ->
                 Operations.view mount (Identity.Anonymous [ Identity.graphql "health" "query", Identity.graphql "queue" "query" ])
                     |> Query.fromHtml
-                    |> Query.find [ Selector.tag "a" ]
-                    |> Query.has
-                        [ Selector.text "Queue jobs"
-                        , Selector.attribute (Html.Attributes.href "/magnes/queue/jobs")
+                    |> Query.findAll [ Selector.tag "a" ]
+                    |> Expect.all
+                        [ Query.count (Expect.equal 2)
+                        , Query.index 0
+                            >> Query.has
+                                [ Selector.text "Queue statistics"
+                                , Selector.attribute (Html.Attributes.href "/magnes/stats/queue")
+                                ]
+                        , Query.index 1
+                            >> Query.has
+                                [ Selector.text "Queue jobs"
+                                , Selector.attribute (Html.Attributes.href "/magnes/queue/jobs")
+                                ]
                         ]
         , test "lists the torrent statistics for an Identity holding torrent::query" <|
             \_ ->
@@ -32,15 +41,16 @@ suite =
                         [ Selector.text "Torrent statistics"
                         , Selector.attribute (Html.Attributes.href "/magnes/stats/torrents")
                         ]
-        , test "lists each page only to an Identity that may open it, torrent statistics first" <|
+        , test "lists each page only to an Identity that may open it, the statistics first" <|
             \_ ->
                 Operations.view mount (Identity.Anonymous [ Identity.graphql "queue" "query", Identity.graphql "torrent" "query" ])
                     |> Query.fromHtml
                     |> Query.findAll [ Selector.tag "a" ]
                     |> Expect.all
-                        [ Query.count (Expect.equal 2)
+                        [ Query.count (Expect.equal 3)
                         , Query.index 0 >> Query.has [ Selector.text "Torrent statistics" ]
-                        , Query.index 1 >> Query.has [ Selector.text "Queue jobs" ]
+                        , Query.index 1 >> Query.has [ Selector.text "Queue statistics" ]
+                        , Query.index 2 >> Query.has [ Selector.text "Queue jobs" ]
                         ]
         , test "lists nothing, heading included, for an Identity holding none of them" <|
             \_ ->

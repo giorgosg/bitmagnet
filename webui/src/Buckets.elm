@@ -1,4 +1,4 @@
-module Buckets exposing (Grid, Resolution, Sample, Slot, Window, columnStart, grid, label, slots, unlimited, widthIn)
+module Buckets exposing (Grid, Resolution, Sample, Slot, Window, columnStart, endsAfter, grid, label, slots, unlimited, widthIn)
 
 {-| How a statistics page cuts time up: the arithmetic only, with no view in it, so that
 the torrent timeline and the queue's can share it.
@@ -128,6 +128,19 @@ would count only the rest of it.
 columnStart : Grid -> Time.Posix -> Time.Posix
 columnStart resolved at =
     startOf resolved (columnOf resolved at)
+
+
+{-| Whether the bucket bitmagnet counted by `unit` that began at `start` reaches past `moment`:
+has any of its time at or after it. A bucket that does not was over before a window that opens
+at `moment` began, so whatever it counted happened before it, and is not the window's.
+
+A day is taken as 24 hours, as it is everywhere here, so a day an hour short or long across a
+clock change in bitmagnet's time zone is taken to end an hour late or early.
+
+-}
+endsAfter : MetricsBucketDuration -> Time.Posix -> Time.Posix -> Bool
+endsAfter unit start moment =
+    Time.posixToMillis start + unitMillis unit > Time.posixToMillis moment
 
 
 {-| How many of `unit`, which is no larger than the grid's own, a bucket is long: what a

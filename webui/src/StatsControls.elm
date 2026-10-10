@@ -9,6 +9,8 @@ module StatsControls exposing
     , default
     , fromParams
     , refreshMillis
+    , request
+    , requestTimeout
     , rows
     , toParams
     , window
@@ -148,6 +150,42 @@ window now controls =
             |> Maybe.map (\length -> Time.millisToPosix (Time.posixToMillis now - length))
     , to = now
     }
+
+
+{-| What to ask bitmagnet for, as of `now`. It buckets by the unit the resolution comes to,
+which is the largest whole one it makes (`Buckets.grid`): a week of minutes merged into hours is
+asked for as hours. `startTime` is where the timeframe's first column begins, not the moment the
+timeframe reaches back to: counted from the middle of a column, bitmagnet would give the first
+one only its share of it. Everything has no start, and is asked for in the unit chosen, since
+nothing is known yet of how much there is.
+
+That is as far as Magnes can know where bitmagnet's columns begin. It cuts its days, and its
+hours in a zone that is not a whole number of hours from UTC, in its database's time zone, so
+against a database that is not on UTC the first of those can still be short.
+
+-}
+request : Time.Posix -> Controls -> { bucketDuration : MetricsBucketDuration, startTime : Maybe Time.Posix }
+request now controls =
+    let
+        span =
+            window now controls
+
+        planned =
+            Buckets.grid controls.resolution span []
+    in
+    { bucketDuration = planned.bucketedBy
+    , startTime = Maybe.map (Buckets.columnStart planned) span.from
+    }
+
+
+{-| How long a look is waited for before it is given up on, so that a request that is never
+answered does not hold a page's refresh back for good. On a real instance the torrent page's
+default look took about five seconds, and nine days of minutes more than thirty, so this is a
+good deal longer than either.
+-}
+requestTimeout : Float
+requestTimeout =
+    120 * 1000
 
 
 timeframeMillis : Timeframe -> Maybe Int

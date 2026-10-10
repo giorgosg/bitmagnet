@@ -194,6 +194,27 @@ suite =
                     StatsControls.window now { defaults | timeframe = AllTime }
                         |> Expect.equal { from = Nothing, to = now }
             ]
+        , describe "request"
+            [ test "asks for the unit the resolution comes to, from where the timeframe's first column begins" <|
+                \_ ->
+                    -- At 10:07:30, six hours of minutes are drawn by the quarter hour, and six
+                    -- hours back is 04:07:30, in the quarter that began at 04:00.
+                    StatsControls.request (Time.millisToPosix (nowMillis + 450000)) { defaults | timeframe = Hours6 }
+                        |> Expect.equal { bucketDuration = Minute, startTime = Just (Time.millisToPosix (nowMillis - 6 * 3600000)) }
+            , test "asks for hours where the minutes would be merged into hours anyway" <|
+                \_ ->
+                    StatsControls.request now { defaults | timeframe = Weeks1 }
+                        |> Expect.equal { bucketDuration = Hour, startTime = Just (Time.millisToPosix (nowMillis - 7 * 24 * 3600000)) }
+            , test "has no start for everything, and asks for the unit chosen" <|
+                \_ ->
+                    ( StatsControls.request now queueStart
+                    , StatsControls.request now { queueStart | resolution = { unit = Minute, every = Just 90 } }
+                    )
+                        |> Expect.equal
+                            ( { bucketDuration = Hour, startTime = Nothing }
+                            , { bucketDuration = Minute, startTime = Nothing }
+                            )
+            ]
         , describe "auto-refresh"
             [ test "waits the interval it names, and not at all when off" <|
                 \_ ->
