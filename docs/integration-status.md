@@ -105,7 +105,10 @@ review in [porting.md](porting.md) and a test seen **red**.
 
 ## In flight
 
-Nothing currently in flight.
+[PR #90](https://github.com/giorgosg/bitmagnet/pull/90) redesigns the metadata request
+race from lodestone `751a09607` / integration candidate `f32ebd2f0`. It races up to five
+peers per hash under a crawler-wide limit, cancels losing TCP requests, and fixes
+cancellation in the peer and scrape discovery loops.
 
 ## The static review findings
 
@@ -121,9 +124,10 @@ Still open, as of 2026-10-10:
 
 - **The same-origin CORS default**, decided and deferred to the release that removes the
   Angular UI, whose dev server is the one caller relying on `*`.
-- **`break` inside `select` in the crawler's peer and scrape loops**, which has no
-  deterministic red test. It is to be fixed under the redesign of the next candidate below,
-  which carries the same shape.
+
+The crawler peer and scrape loops' cancellation finding is addressed in the metadata
+request redesign above. A deterministic test observed both loops walking all remaining
+nodes after cancellation before the fix.
 
 The search SQL re-execution is resolved: count plans, exact counts, existence checks and
 the limited CTE item path keep values bound. The historical `budgeted_count` function
@@ -138,11 +142,7 @@ would matter.
 
 ## Next candidate
 
-lodestone `751a09607` / integration candidate `f32ebd2f0` — race metadata requests across
-a bounded number of peers. Keep the idea, but redesign the implementation: the candidate
-delays result consumption while filling semaphore slots, and its cancellation branch does
-not exit the enclosing loop. Cover prompt first-success return, the global concurrency
-bound, cancellation, all-failure behavior, and banned metadata.
+No candidate selected while the metadata request redesign is in flight.
 
 ## Rejected, deferred, or already resolved
 

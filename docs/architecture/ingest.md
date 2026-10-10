@@ -68,6 +68,12 @@ connection: BitTorrent handshake, extension handshake, request every 16 KiB piec
 them back, bencode-parse the result. `maxMetadataSize` is 10 MiB and bounds both the
 declared metadata size and any single message.
 
+For each hash, the crawler requests metadata from up to five peers at once and returns
+the first permitted result. A shared request limit of `10 * ScalingFactor` bounds all
+peer connections across hashes. Failed peers are tried until one succeeds or all fail;
+a banned result blocks the hash. The winning result or crawler shutdown cancels the
+other requests, including a TCP connection stalled after its handshake begins.
+
 Everything this package reads is attacker-controlled. It is the only place in the tree
 where a remote party's bytes become array indices, and it runs on a crawler goroutine with
 **no `recover()` anywhere in the path** — `BufferedConcurrentChannel.Run` does not install
