@@ -127,7 +127,7 @@ func flags() []cli.Flag {
 		},
 		&cli.BoolFlag{
 			Name:  "anonymous-access",
-			Usage: "grant the anon role every registered object action",
+			Usage: "grant the anon role the catalogue read actions for the fixture",
 			Value: defaults.AnonymousAccess,
 		},
 		&cli.BoolFlag{
@@ -212,11 +212,12 @@ func (c *command) serve(cliCtx *cli.Context) error {
 	seedDashboardData := cliCtx.Bool("seed-dashboard-data")
 
 	stack, err := fixtureserver.Build(cliCtx.Context, fixtureserver.Options{
-		Config:            cfg,
-		Provider:          provider{query: db.Query},
-		Logger:            c.logger,
-		JWTSecret:         cfg.JWTSecret,
-		SeedDashboardData: seedDashboardData,
+		Config:                    cfg,
+		GrantAnonymousReadSurface: cfg.AnonymousAccess,
+		Provider:                  provider{query: db.Query},
+		Logger:                    c.logger,
+		JWTSecret:                 cfg.JWTSecret,
+		SeedDashboardData:         seedDashboardData,
 	})
 	if err != nil {
 		return err

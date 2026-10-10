@@ -55,6 +55,9 @@ type Options struct {
 	// so a caller varies anonymous access, invitations, the throttle and the JWT
 	// lifetime by handing over a different one.
 	Config authconfig.Config
+	// GrantAnonymousReadSurface opens the fixture's catalogue for browser
+	// tests. Production never does this during startup.
+	GrantAnonymousReadSurface bool
 	// Provider is the database the stack reads and writes.
 	Provider database.DaoTransactionProvider
 	// Logger receives the GraphQL server's output.
@@ -145,19 +148,21 @@ func Build(ctx context.Context, opts Options) (*Stack, error) {
 
 	apiKeyService := api_key.NewService(api_key.NewRepository(opts.Provider), objectActionProvider)
 
-	// What an anonymous caller may do now lives in role_permissions, written once
-	// per installation by the translation that authfx runs as a startup worker.
-	// This stack is assembled by hand, so it runs the same translation: without it
-	// the anon role holds nothing and the fixture would model an instance no real
-	// deployment is in.
+	// Match the production startup reset. The fixture may then grant the
+	// catalogue read actions explicitly for browser tests.
 	if err := authfx.TranslateAnonRole(
 		ctx,
 		opts.Provider,
 		opts.Config,
-		objectActionProvider,
 		logger,
 	); err != nil {
 		return nil, fmt.Errorf("fixtureserver: translating the anon role: %w", err)
+	}
+
+	if opts.GrantAnonymousReadSurface {
+		if err := authfx.GrantAnonReadSurface(ctx, opts.Provider, objectActionProvider); err != nil {
+			return nil, fmt.Errorf("fixtureserver: granting the anon read surface: %w", err)
+		}
 	}
 
 	rbacService := rbac.NewService(

@@ -22,8 +22,8 @@ import (
 //     decision is kept. A key is always required once anonymous access is off;
 //     being on the LAN is not a credential for machine access.
 //   - It gates on a global on/off flag because it has no permission model. This
-//     lineage has one, so authorization goes through rbac instead, which makes
-//     the anonymous default fall out naturally and gives per-key scoping.
+//     lineage has one, so authorization goes through rbac instead and gives
+//     per-key scoping.
 const (
 	authNamespace = "torznab"
 	authObject    = "torznab"
@@ -31,8 +31,8 @@ const (
 )
 
 // ObjectAction is the permission a caller needs to use the Torznab endpoint.
-// It is contributed to the auth object action group, so while anonymous access
-// is enabled the anon role holds it and the endpoint stays open.
+// It is contributed to the auth object action group. The anon role starts
+// without it; an administrator may grant it explicitly.
 var ObjectAction = rbac.NewObjectAction(authNamespace, authObject, authAction)
 
 func ObjectActionProvider() rbac.ObjectActionProvider {
@@ -46,6 +46,11 @@ func ObjectActionProvider() rbac.ObjectActionProvider {
 var errUnauthorized = torznab.Error{
 	Code:        100,
 	Description: "Incorrect user credentials",
+}
+
+var errAuthenticationRequired = torznab.Error{
+	Code:        100,
+	Description: "Authentication required",
 }
 
 // authorize resolves the identity for a Torznab request and checks it may query.
@@ -109,5 +114,10 @@ func torznabAPIKey(ctx *gin.Context) string {
 }
 
 func (h handler) writeUnauthorized(ctx *gin.Context) {
+	if torznabAPIKey(ctx) == "" {
+		h.writeXMLStatus(ctx, http.StatusUnauthorized, errAuthenticationRequired)
+		return
+	}
+
 	h.writeXMLStatus(ctx, http.StatusUnauthorized, errUnauthorized)
 }

@@ -45,10 +45,8 @@ func actions(objectActions []rbac.ObjectAction) map[string]bool {
 	return seen
 }
 
-// While anonymous access is on, an installation that never configured auth keeps
-// its *read* surface reachable without a credential. It used to keep every
-// registered object action, writes included; see
-// TestAnonymousReadSurfaceHasNoWrites for why that changed.
+// The development fixture can explicitly grant a read surface for browser
+// tests. Production starts with an empty anon role.
 func TestAnonymousReadSurfaceIsTheCatalogue(t *testing.T) {
 	t.Parallel()
 
@@ -57,12 +55,12 @@ func TestAnonymousReadSurfaceIsTheCatalogue(t *testing.T) {
 
 	granted := actions(authconfig.AnonymousReadSurface(registered()))
 
-	assert.True(t, granted["torrentContent:query"], "the catalogue stays anonymous-readable")
+	assert.True(t, granted["torrentContent:query"], "the fixture can open the catalogue")
 	assert.True(t, granted["torrent:query"])
 	assert.True(t, granted["queue:query"])
 }
 
-// The baseline granted every registered object action except those on auth,
+// The earlier baseline granted every registered object action except those on auth,
 // which meant torrent:delete, torrent:mutate, queue:mutate and import:mutate.
 // allowed_origins still defaults to "*" and Content-Type: application/json is an
 // allowed header, so any page the operator visited could delete torrents from a
@@ -85,7 +83,7 @@ func TestAnonymousReadSurfaceHasNoWrites(t *testing.T) {
 		"import:mutate",
 	} {
 		assert.False(t, granted[objectAction],
-			"the anonymous baseline must not grant %s", objectAction)
+			"the fixture read surface must not grant %s", objectAction)
 	}
 }
 
@@ -100,13 +98,11 @@ func TestAnonymousReadSurfaceExcludesUnknownActions(t *testing.T) {
 	}
 
 	assert.Empty(t, authconfig.AnonymousReadSurface(provider),
-		"an unrecognised action must not be granted by default")
+		"an unrecognised action must not be granted by the fixture")
 }
 
-// Auth administration is the exception, and it is the important one: role grants
-// persist in the database while this grant is only in memory, so a wildcard
-// written onto the anon role while the instance was open would survive turning
-// anonymous access off — a permanent bypass with nothing to show for it.
+// The fixture's explicit read grant excludes auth administration: giving an
+// anonymous caller putRole would allow it to give itself every action.
 func TestAnonymousReadSurfaceExcludesAuthAdministration(t *testing.T) {
 	t.Parallel()
 
@@ -116,19 +112,13 @@ func TestAnonymousReadSurfaceExcludesAuthAdministration(t *testing.T) {
 	}
 }
 
-// `auth.anonymous_access: false` is no longer this rule's business. The surface
-// is what an installation seeds the anon role with; withholding it is a
-// deny-override applied when the casbin policy is compiled, so the closed case
-// lives in internal/auth/rbac - see
-// TestService_anonymous_access_off_denies_stored_anon_permissions.
-//
-// What is still this package's business is that the flag exists and still
-// defaults to on, because the seed reads it once per installation.
+// The flag remains a deny-override, with a true default that grants nothing
+// until an administrator puts permissions on the anon role.
 func TestAnonymousAccessStillDefaultsOn(t *testing.T) {
 	t.Parallel()
 
 	assert.True(t, authconfig.NewDefaultConfig().AnonymousAccess,
-		"a fresh installation stays readable without a credential, as upstream's contract expects")
+		"the flag defaults to allowing the anon role, though that role starts empty")
 }
 
 // The default config is what an installation that has configured nothing runs

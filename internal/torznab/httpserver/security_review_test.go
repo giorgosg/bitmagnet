@@ -77,7 +77,7 @@ func TestTorznabRejectsBrowserBearerTokenWithoutAPIKey(t *testing.T) {
 	engine.ServeHTTP(response, req)
 
 	assert.Equal(t, http.StatusUnauthorized, response.Code)
-	assert.Equal(t, unauthorizedXML(t), response.Body.String())
+	assert.Equal(t, authenticationRequiredXML(t), response.Body.String())
 }
 
 func TestTorznabIgnoresBrowserCookie(t *testing.T) {
@@ -104,6 +104,6 @@ func TestTorznabIgnoresBrowserCookie(t *testing.T) {
 	engine.ServeHTTP(response, req)
 
 	assert.Equal(t, http.StatusUnauthorized, response.Code)
-	assert.Equal(t, unauthorizedXML(t), response.Body.String())
+	assert.Equal(t, authenticationRequiredXML(t), response.Body.String())
 	assert.Empty(t, response.Header().Values("Set-Cookie"), "Torznab must not process browser cookies")
 }

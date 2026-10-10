@@ -17,25 +17,25 @@ to fx because `next` assembles it through a plugin registry this lineage does no
 
 ## Packages
 
-| Package                     | Role                                                                 |
-| --------------------------- | -------------------------------------------------------------------- |
-| `auth/authconfig`           | The config struct, its validation bounds, and `AnonymousPermissions` |
-| `auth/authfx`               | fx wiring, and the bootstrap worker that mints the first invitation  |
-| `auth/browser_session`      | Issues and expires the secure browser credential cookie              |
-| `auth/identity`             | Resolving a credential to an `Identity` — the authenticator chain    |
-| `auth/rbac`                 | Permissions, roles, object actions; casbin behind a repository       |
-| `auth/user`                 | Accounts, registration, login, password rules, the login throttle    |
-| `auth/api_key`              | Machine credentials: base62 encoding, SHA-256 hashes, CRUD           |
-| `auth/jwt`                  | Signing and parsing session tokens                                   |
-| `auth/http_auth`            | The gin middleware, and the `Guard` non-GraphQL handlers use         |
-| `gql/auth`, `gql/directive` | The `@auth` directive and the GraphQL permission baseline            |
-| `auth/util.go`              | `GenerateRandomString` — JWT secret and invitation codes             |
+| Package                     | Role                                                                   |
+| --------------------------- | ---------------------------------------------------------------------- |
+| `auth/authconfig`           | The config struct, its validation bounds, and the fixture read surface |
+| `auth/authfx`               | fx wiring, the bootstrap worker, and the anonymous-role reset          |
+| `auth/browser_session`      | Issues and expires the secure browser credential cookie                |
+| `auth/identity`             | Resolving a credential to an `Identity` — the authenticator chain      |
+| `auth/rbac`                 | Permissions, roles, object actions; casbin behind a repository         |
+| `auth/user`                 | Accounts, registration, login, password rules, the login throttle      |
+| `auth/api_key`              | Machine credentials: base62 encoding, SHA-256 hashes, CRUD             |
+| `auth/jwt`                  | Signing and parsing session tokens                                     |
+| `auth/http_auth`            | The gin middleware, and the `Guard` non-GraphQL handlers use           |
+| `gql/auth`, `gql/directive` | The `@auth` directive and the GraphQL permission baseline              |
+| `auth/util.go`              | `GenerateRandomString` — JWT secret and invitation codes               |
 
-## Anonymous access is a floor, not a ceiling
+## Anonymous access starts with no grants
 
-`auth.anonymous_access` defaults to **true**, granting the `anon` role every registered
-object action **except auth administration**. While it is on, every existing client keeps
-working with no credentials. Setting it to `false` is what turns authentication on.
+`auth.anonymous_access` defaults to **true**, but the `anon` role starts empty. The flag
+allows its stored grants to take effect; it grants nothing by itself. An administrator can
+grant chosen read actions through `putRole`, or set the flag to `false` as a deny-override.
 
 **The exclusion of auth administration is not tidiness; removing it reopens a trapdoor.**
 Granting it to `anon` let an unauthenticated caller hand the `anon` role a wildcard
@@ -44,9 +44,8 @@ in memory, so the wildcard **survived setting `anonymous_access` to `false`** �
 documented as "this is how you turn authentication on" left the instance wide open with
 nothing visible to show for it.
 
-Nothing is lost by the exclusion: the auth surface is new, so no previously open
-installation had it, and the first administrator registers through `self.register`, which
-the baseline grants.
+The first administrator registers through `self.register`, which is outside the role's
+stored permissions. `version` and `health` also remain available before login.
 
 **Role names are validated on the way in, so that wildcard cannot be stored at all.** The
 matcher is `globMatch(r.sub, p.sub)`, and the _stored policy_ is the pattern rather than
@@ -143,8 +142,10 @@ assignment can hide Identity discovery, login, registration, or browser logout.
 The gqlgen HTTP server owns one error presenter for this boundary. It classifies wrapped
 authentication, registration, and authorization sentinels with `errors.Is`, emits stable
 `extensions.code` values, and preserves gqlgen's path and source locations. The
-authorization refusal keeps its Object action on the typed error until the presenter adds
-`namespace`, `object`, and `action`; the old `GraphQLExtensions()` method was not a gqlgen
+authorization refusal keeps its Object action and whether the Identity is anonymous on
+the typed error. The presenter returns `AUTHENTICATION_REQUIRED` for an anonymous refusal
+and `UNAUTHORIZED` for an authenticated one, adding `namespace`, `object`, and `action` to
+both; the old `GraphQLExtensions()` method was not a gqlgen
 hook and its result was silently discarded. Unknown resolver errors and authentication
 infrastructure causes are replaced with fixed public messages, while parsing and validation
 errors remain useful protocol errors.
@@ -195,33 +196,24 @@ reads them before anyone can log in; filtering the provider set as well would ta
 screen away from a closed instance, which is the state that most needs one. There is an
 integration test pinning that, so the scope fails loudly if it moves.
 
-### Seeding, and what the setting used to be
+### Empty default and the old read surface
 
-A fresh installation still has to be readable out of the box, so the anon role is seeded
-with the registered object actions whose verb is a **read**, minus the objects `auth`,
-`pprof` and `metrics`. `authconfig.AnonymousReadSurface` is that rule, in one place.
+`authfx.TranslateAnonRole` clears the anon role on the first start with this default and
+records `auth.anon_role_empty_default` in `key_values`. This applies to an existing
+installation too. The old automatic read grants and later administrator grants share the
+same rows, so the upgrade cannot tell them apart. The first start clears all of them; later
+starts preserve the administrator's new edits. A transaction advisory lock serializes
+concurrent replicas around the marker check and delete. The HTTP worker has a decorator
+that runs this reset before it opens a listener, including when an operator starts only
+`http_server`; the separate auth startup worker can run in either order and then sees the
+marker.
 
-Both halves are allow-lists on purpose. The verbs are allow-listed so an object action
-registered later with a verb nobody anticipated is **denied** rather than granted — a read
-wrongly withheld answers `unauthorized` and gets reported, while a write wrongly granted is
-silent until something is gone. The excluded objects are `auth` (an anonymous caller that
-can administer auth can grant anon a wildcard, and a stored grant is not something the
-setting can take back), plus `pprof` and `metrics`, whose verbs _are_ `query` but which are
-the operator's instruments rather than the catalogue.
-
-Those exclusions are string literals because `authconfig` cannot import `http_auth` —
-`http_auth` reaches `browser_session`, which imports `authconfig` back. A test in
-`authconfig_test`, which can import both, pins the literals against the real object actions
-so a rename fails loudly instead of quietly lapsing.
-
-The seed is a startup hook (`authfx.TranslateAnonRole`) and not a migration, because the
-registered object actions come from the GraphQL schema's `@auth` directives and from
-`http_auth` at runtime, so no SQL can enumerate them. It runs **once per installation**,
-guarded by the `auth.anon_role_translated` key in `key_values`, inserting rather than
-replacing so an administrator's existing grants survive. Idempotency is on the marker alone
-and never on "does anon hold any rows", because zero rows is a legitimate state somebody
-chose. On an upgrade this translates whatever `anonymous_access` meant for that installation
-into stored rows, so neither an open nor a closed instance changes behaviour.
+`authconfig.AnonymousReadSurface` now serves only the development fixture's explicit
+`--anonymous-access` option. It selects registered read actions except `auth`, `pprof`,
+and `metrics`, so the browser harness can exercise an open catalogue. Its allow-list
+continues to exclude new action verbs by default. The object-name exclusions are string
+literals because `authconfig` cannot import `http_auth` without a cycle; a test pins
+them against the registered actions.
 
 There used to be an `authconfig.AnonymousPermissions` provider that granted the read surface
 from the setting alone, held in memory. That left **two** sources of anonymous permission,

@@ -16,18 +16,16 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// anonRoleTranslationKey marks that this installation's `auth.anonymous_access`
-// has been written into the anon role's stored permissions. It lives in
-// key_values, which has existed since migration 00009 and which no other
-// application code reads or writes.
-const anonRoleTranslationKey = "auth.anon_role_translated"
+const (
+	anonRoleEmptyDefaultKey       = "auth.anon_role_empty_default"
+	anonRoleUpgradeLockKey  int64 = 0x616e6f6e5f726f6c
+)
 
 type anonRoleParams struct {
 	fx.In
-	Dao           database.DaoTransactionProvider
-	Config        authconfig.Config
-	ObjectActions rbac.ObjectActionProvider
-	Logger        *zap.SugaredLogger
+	Dao    database.DaoTransactionProvider
+	Config authconfig.Config
+	Logger *zap.SugaredLogger
 }
 
 type anonRoleResult struct {
@@ -41,6 +39,31 @@ func newAnonRoleWorker(p anonRoleParams) anonRoleResult {
 	}
 }
 
+// The worker registry starts enabled workers in map order, and operators can
+// select only http_server. Run the reset inside that worker's startup too, so
+// no listener can expose the previous anon grants before the reset commits.
+func newAnonRoleHTTPDecorator(p anonRoleParams) worker.Decorator {
+	return worker.Decorator{
+		Key: "http_server",
+		Decorate: func(hook fx.Hook) fx.Hook {
+			return fx.Hook{
+				OnStart: func(ctx context.Context) error {
+					if err := translateAnonRole(ctx, p); err != nil {
+						return err
+					}
+
+					if hook.OnStart != nil {
+						return hook.OnStart(ctx)
+					}
+
+					return nil
+				},
+				OnStop: hook.OnStop,
+			}
+		},
+	}
+}
+
 func anonRoleHook(p anonRoleParams) fx.Hook {
 	return fx.Hook{
 		OnStart: func(ctx context.Context) error {
@@ -49,40 +72,32 @@ func anonRoleHook(p anonRoleParams) fx.Hook {
 	}
 }
 
-// translateAnonRole writes the current meaning of `auth.anonymous_access` into
-// the anon role's stored permissions, exactly once per installation.
-//
-// It exists so that the flag can stop being a source of grants without changing
-// anybody's behaviour. An installation that was open keeps its anonymous reads
-// because they are now rows; one that was closed stays closed because nothing is
-// written. Neither is flipped silently.
-//
-// Everything happens in one transaction, so a failure part-way through leaves no
-// marker and the next start tries again rather than leaving a half-seeded role.
+// translateAnonRole clears the anon role once per installation. The prior
+// automatic read grants and administrator grants share rows, so an upgrade
+// cannot identify and remove only the former. Subsequent role edits persist.
 func translateAnonRole(ctx context.Context, p anonRoleParams) error {
-	return TranslateAnonRole(ctx, p.Dao, p.Config, p.ObjectActions, p.Logger)
+	return TranslateAnonRole(ctx, p.Dao, p.Config, p.Logger)
 }
 
-// TranslateAnonRole is translateAnonRole without the fx parameter struct, for a
-// stack assembled by hand. internal/dev/fixtureserver builds the auth services
-// directly rather than through this module, and the seed is part of what an
-// installation looks like once `auth.anonymous_access` stops granting anything -
-// so a fixture that skipped it would test an instance no real deployment is in.
+// TranslateAnonRole runs the same one-time reset for a stack assembled by hand.
 func TranslateAnonRole(
 	ctx context.Context,
 	provider database.DaoTransactionProvider,
 	cfg authconfig.Config,
-	objectActions rbac.ObjectActionProvider,
 	log *zap.SugaredLogger,
 ) error {
 	logger := log.Named("auth")
 
 	return provider.DaoTransaction(func(tx *dao.Query) error {
-		// Idempotency is on the marker alone, never on "does anon hold any rows".
-		// Zero rows is a legitimate state an administrator may have chosen, and
-		// re-seeding it would hand back access they deliberately revoked.
+		// Replicas must serialize the marker check and deletion. Otherwise a
+		// second startup can erase grants made after the first has committed.
+		if err := tx.KeyValue.WithContext(ctx).UnderlyingDB().
+			Exec("SELECT pg_advisory_xact_lock(?)", anonRoleUpgradeLockKey).Error; err != nil {
+			return err
+		}
+
 		marker, err := tx.WithContext(ctx).KeyValue.
-			Where(tx.KeyValue.Key.Eq(anonRoleTranslationKey)).
+			Where(tx.KeyValue.Key.Eq(anonRoleEmptyDefaultKey)).
 			Count()
 		if err != nil {
 			return err
@@ -92,52 +107,54 @@ func TranslateAnonRole(
 			return nil
 		}
 
-		written := 0
-
-		if cfg.AnonymousAccess {
-			surface := authconfig.AnonymousReadSurface(objectActions)
-
-			if len(surface) > 0 {
-				// The anon role's row is inserted by migration 00022 and DeleteRole
-				// refuses core roles, so the foreign key below always has a parent.
-				permissions := slice.Map(
-					surface,
-					func(objectAction rbac.ObjectAction) *model.RolePermission {
-						return &model.RolePermission{
-							RoleName:  string(rbac.RoleAnon),
-							Namespace: objectAction.Namespace,
-							Object:    objectAction.Object,
-							Action:    objectAction.Action,
-						}
-					},
-				)
-
-				// Insert, not replace: an administrator who granted anon something
-				// before upgrading keeps it, and a row the seed also wants is not an
-				// error.
-				if err = tx.WithContext(ctx).RolePermission.
-					Clauses(clause.OnConflict{DoNothing: true}).
-					Create(permissions...); err != nil {
-					return err
-				}
-
-				written = len(permissions)
-			}
+		removed, err := tx.WithContext(ctx).RolePermission.
+			Where(tx.RolePermission.RoleName.Eq(string(rbac.RoleAnon))).Delete()
+		if err != nil {
+			return err
 		}
 
 		if err = tx.WithContext(ctx).KeyValue.Create(&model.KeyValue{
-			Key: anonRoleTranslationKey,
-			// The flag's value at translation time, which is the one piece of
-			// forensics worth keeping: it says which way an installation went.
+			Key:   anonRoleEmptyDefaultKey,
 			Value: strconv.FormatBool(cfg.AnonymousAccess),
 		}); err != nil {
 			return err
 		}
 
-		logger.Infow("translated auth.anonymous_access into the anon role",
+		message := "anonymous role is empty; grant read actions to allow anonymous browsing"
+		logger.Infow(
+			message,
 			"anonymous_access", cfg.AnonymousAccess,
-			"permissions_written", written)
+			"permissions_removed", removed,
+		)
 
 		return nil
+	})
+}
+
+// GrantAnonReadSurface is used by the development fixture when its
+// --anonymous-access option is set. Production starts with no anon grants.
+func GrantAnonReadSurface(
+	ctx context.Context,
+	provider database.DaoTransactionProvider,
+	objectActions rbac.ObjectActionProvider,
+) error {
+	surface := authconfig.AnonymousReadSurface(objectActions)
+	if len(surface) == 0 {
+		return nil
+	}
+
+	permissions := slice.Map(surface, func(objectAction rbac.ObjectAction) *model.RolePermission {
+		return &model.RolePermission{
+			RoleName:  string(rbac.RoleAnon),
+			Namespace: objectAction.Namespace,
+			Object:    objectAction.Object,
+			Action:    objectAction.Action,
+		}
+	})
+
+	return provider.DaoTransaction(func(tx *dao.Query) error {
+		return tx.WithContext(ctx).RolePermission.
+			Clauses(clause.OnConflict{DoNothing: true}).
+			Create(permissions...)
 	})
 }

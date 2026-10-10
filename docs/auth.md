@@ -7,15 +7,15 @@ is, see [architecture/auth.md](architecture/auth.md).
 Upstream `main` has **no authentication at all** — GraphQL, Torznab and the web UI are all
 open, and CORS allows `*`, so any web page in any browser can query a reachable instance
 directly. That is why bitmagnet is normally run on a trusted network only. This lineage
-adds authentication, **off by default**: nothing changes for an existing deployment until
-you turn it on.
+adds authentication; a fresh installation requires credentials for catalogue searches and
+Torznab until an administrator grants the `anon` role access.
 
-## Turning it on
+## First login and anonymous access
 
-`auth.anonymous_access` defaults to `true`, and a new installation seeds the `anon` role
-with the registered **read** object actions — the catalogue an open instance exists to
-serve. Searching, browsing and Torznab keep working with no credentials. Set it to `false`
-to require authentication for everything.
+`auth.anonymous_access` defaults to `true`, but a new installation gives the `anon` role
+**no permissions**. Searching, browsing and Torznab require credentials until an
+administrator grants that role the desired object actions through `putRole`. Set the flag
+to `false` to deny anonymous access regardless of those grants.
 
 The setting is a **deny-override over a role**, not a permission set of its own:
 
@@ -34,29 +34,33 @@ Two consequences worth stating plainly:
   genuinely configured; it is simply not honoured.
 - **Granting the `anon` role the `auth` object hands the instance away.** An anonymous
   caller that can call `putRole` can give the anon role a wildcard, and because the grant
-  is stored there is no taking it back short of editing the database. Nothing in the server
-  stops an administrator doing this, deliberately: the place to refuse it is the screen
-  where the decision is made.
+  is stored it survives restarts. Set `auth.anonymous_access: false` as an emergency deny
+  switch, then remove the grant before turning it back on. Nothing in the server stops an
+  administrator making the grant; the role editor should explain the consequence.
 
-What the seeded read surface does **not** include, so that an open instance is readable
-rather than writable:
+If you choose to grant anonymous catalogue access, keep these actions out of that grant:
 
-| Withheld from anonymous                                             | Why                                                                                                                                                                                                                                                            |
-| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `torrent:delete`, `torrent:mutate`, `queue:mutate`, `import:mutate` | `allowed_origins` defaults to `*` and `Content-Type: application/json` is an allowed header, so any page the operator visited could issue these cross-origin. For a delete the side effect is the damage, so an unreadable response bought nothing.            |
-| `auth:query`, `auth:mutate`                                         | An anonymous caller that can administer auth can grant the anon role a wildcard, and a stored grant is not something the setting can take back. This is the seed's choice, not a prohibition: an administrator may still grant it, with the consequence above. |
-| `pprof:query`                                                       | `/debug/pprof` dumps process memory structure and every stack, and `/debug/pprof/profile` runs a CPU profile for a caller-chosen `?seconds=`, as often as asked.                                                                                               |
-| `metrics:query`                                                     | The scrape discloses index size, queue depth and crawl rate.                                                                                                                                                                                                   |
+| Withheld from anonymous                                             | Why                                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `torrent:delete`, `torrent:mutate`, `queue:mutate`, `import:mutate` | `allowed_origins` defaults to `*` and `Content-Type: application/json` is an allowed header, so any page the operator visited could issue these cross-origin. For a delete the side effect is the damage, so an unreadable response bought nothing. |
+| `auth:query`, `auth:mutate`                                         | An anonymous caller that can administer auth can grant the anon role a wildcard. An administrator may still grant it, with the consequence above.                                                                                                   |
+| `pprof:query`                                                       | `/debug/pprof` dumps process memory structure and every stack, and `/debug/pprof/profile` runs a CPU profile for a caller-chosen `?seconds=`, as often as asked.                                                                                    |
+| `metrics:query`                                                     | The scrape discloses index size, queue depth and crawl rate.                                                                                                                                                                                        |
 
-Anything whose action verb the seed does not recognise as a read is withheld too: a new
-object action is denied to anonymous callers until someone decides otherwise.
+New object actions are denied to anonymous callers until an administrator grants them.
 
-The seed runs **once per installation**, recorded by the `auth.anon_role_translated` key in
-`key_values`, and it logs what it did. After that the setting is never read for seeding
-again, so an administrator who revokes anonymous access through the role does not have it
-handed back on the next restart. Upgrading an existing installation translates whatever
-`auth.anonymous_access` meant for it into stored rows, so neither an open nor a closed
-instance changes behaviour across the upgrade.
+An anonymous GraphQL refusal carries `AUTHENTICATION_REQUIRED`, so a UI can show a
+login prompt; an authenticated Identity lacking an action gets `UNAUTHORIZED`. Torznab
+returns XML error 100 with “Authentication required” when no key was supplied, or
+“Incorrect user credentials” when a supplied key was rejected.
+
+On the first start with the empty-role default, bitmagnet clears the `anon` role's stored
+grants and records `auth.anon_role_empty_default` in `key_values`. This applies to upgrades
+as well as new installations: anonymous searches and Torznab access stop until an
+administrator grants them again. The earlier automatic seed and an administrator's grants
+are identical rows, so the upgrade cannot preserve one while removing the other. Later
+restarts leave any new grants alone. The startup log reports the empty role and how to open
+the desired read actions.
 
 Two object actions are outside all of this. `version:query` and `health:query` are granted
 to anonymous callers regardless of the setting, because the web UI shell reads them before
@@ -235,13 +239,14 @@ message or its wrapping. Application errors retain their GraphQL `path` and `loc
 | `PASSWORD_INCORRECT`                    | The current password given to `self.updatePassword` is wrong   |
 | `ROLE_NOT_FOUND`                        | The named Role does not exist                                  |
 | `PERMISSION_INVALID`                    | A requested API-key Object action is not a registered one      |
+| `AUTHENTICATION_REQUIRED`               | An anonymous caller needs a credential for this Object action  |
 | `UNAUTHORIZED`                          | The Identity lacks the refused GraphQL Object action           |
 | `AUTHENTICATION_INFRASTRUCTURE_FAILURE` | A credential could not be resolved because a dependency failed |
 | `USER_SESSION_REQUIRED`                 | The field requires an interactive User session                 |
 | `API_KEY_MANAGEMENT_FORBIDDEN`          | An API-key Identity attempted to manage API keys               |
 | `INTERNAL_SERVER_ERROR`                 | An unclassified server-side failure occurred                   |
 
-`UNAUTHORIZED` also includes `namespace`, `object`, and `action` in its extensions. The
+`AUTHENTICATION_REQUIRED` and `UNAUTHORIZED` include `namespace`, `object`, and `action` in their extensions. The
 two session-specific codes are field-level account constraints, not Role-Permission
 refusals, so they do not invent an Object action. `ROLE_NOT_FOUND` and
 `PERMISSION_INVALID` are input validation: both name something the caller supplied that
@@ -420,11 +425,12 @@ baseline: orchestrators poll it, and it reports liveness only.
   than you would accept an unnoticed leak living.
 
 - **CORS origins still default to `*`.** Carried over from before this lineage had
-  authentication. While anonymous access is on, any web page can query a reachable
-  instance as the anonymous identity — including an instance bound to a LAN address that
-  the page could not otherwise reach. Narrowing it is safe only if you know where your web
-  UI is served from: the bundled UI shares the API's origin and needs no CORS at all, but
-  serving it separately is supported, and an empty origin list breaks that deployment.
+  authentication. If an administrator grants the anon role catalogue reads, any web page
+  can query a reachable instance as the anonymous identity — including an instance bound
+  to a LAN address that the page could not otherwise reach. Narrowing it requires knowing
+  where your web UI is served from: the bundled UI shares the API's origin and needs no
+  CORS at all, but serving it separately is supported. An empty origin list currently
+  means allow all in the CORS library; it does not restrict browsers.
   Set `http_server.cors.allowed_origins` explicitly if you serve the UI from another
   origin.
 

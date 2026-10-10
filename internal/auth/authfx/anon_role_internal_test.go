@@ -1,6 +1,8 @@
 package authfx
 
 import (
+	"context"
+	"sync"
 	"testing"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/authconfig"
@@ -9,8 +11,10 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dbtest"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
+	"github.com/bitmagnet-io/bitmagnet/internal/worker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/fx"
 	"go.uber.org/zap"
 )
 
@@ -52,10 +56,9 @@ func newTranslationParams(t *testing.T, anonymousAccess bool) (anonRoleParams, *
 	cfg.AnonymousAccess = anonymousAccess
 
 	return anonRoleParams{
-		Dao:           provider,
-		Config:        cfg,
-		ObjectActions: testObjectActions,
-		Logger:        zap.NewNop().Sugar(),
+		Dao:    provider,
+		Config: cfg,
+		Logger: zap.NewNop().Sugar(),
 	}, db.Query
 }
 
@@ -82,25 +85,22 @@ func markerIsSet(t *testing.T, query *dao.Query) bool {
 	t.Helper()
 
 	count, err := query.KeyValue.WithContext(t.Context()).
-		Where(query.KeyValue.Key.Eq(anonRoleTranslationKey)).
+		Where(query.KeyValue.Key.Eq(anonRoleEmptyDefaultKey)).
 		Count()
 	require.NoError(t, err)
 
 	return count > 0
 }
 
-func TestTranslationWritesTheReadSurfaceWhenAccessIsOpen(t *testing.T) {
+func TestNewInstallationStartsWithAnEmptyAnonRole(t *testing.T) {
 	t.Parallel()
 
 	p, query := newTranslationParams(t, true)
 
 	require.NoError(t, translateAnonRole(t.Context(), p))
 
-	granted := anonPermissions(t, query)
-
-	assert.Contains(t, granted, "torrent:query")
-	assert.Contains(t, granted, "queue:query")
-	assert.Len(t, granted, 2, "only the two non-excluded read actions should be granted")
+	assert.Empty(t, anonPermissions(t, query),
+		"a fresh installation must require credentials for search and Torznab")
 	assert.True(t, markerIsSet(t, query), "the marker must be set")
 }
 
@@ -116,15 +116,15 @@ func TestTranslationWritesNothingWhenAccessIsClosed(t *testing.T) {
 		"the marker must be set even when nothing was granted, so a later start does not re-seed")
 }
 
-// The written set is the whole point of the exclusions: a mutate or delete
-// reaching the anon role is the defect #81 fixed, and auth is the one that makes
-// the instance unrecoverable.
-func TestTranslationGrantsNoWritesAndNoExcludedObjects(t *testing.T) {
+// The fixture option grants only the prior read surface; production does not
+// call this helper.
+func TestFixtureReadSurfaceGrantsNoWritesAndNoExcludedObjects(t *testing.T) {
 	t.Parallel()
 
 	p, query := newTranslationParams(t, true)
 
 	require.NoError(t, translateAnonRole(t.Context(), p))
+	require.NoError(t, GrantAnonReadSurface(t.Context(), p.Dao, testObjectActions))
 
 	for objectAction := range anonPermissions(t, query) {
 		assert.NotContains(t, objectAction, ":mutate")
@@ -162,17 +162,24 @@ func TestTranslationDoesNothingWhenTheMarkerIsAlreadySet(t *testing.T) {
 	p, query := newTranslationParams(t, true)
 
 	require.NoError(t, query.KeyValue.WithContext(t.Context()).
-		Create(&model.KeyValue{Key: anonRoleTranslationKey, Value: "false"}))
+		Create(&model.KeyValue{Key: anonRoleEmptyDefaultKey, Value: "false"}))
+	require.NoError(t, query.RolePermission.WithContext(t.Context()).Create(
+		&model.RolePermission{
+			RoleName:  string(rbac.RoleAnon),
+			Namespace: "gql",
+			Object:    "torrent",
+			Action:    "query",
+		}))
 
 	require.NoError(t, translateAnonRole(t.Context(), p))
 
-	assert.Empty(t, anonPermissions(t, query),
-		"nothing should be written when the marker is already present")
+	assert.Contains(t, anonPermissions(t, query), "torrent:query",
+		"grants made after the upgrade must survive a restart")
 }
 
-// An administrator who granted anon something before upgrading keeps it. The
-// translation adds the read surface beside it rather than replacing the set.
-func TestTranslationPreservesPreExistingGrants(t *testing.T) {
+// Prior seed grants and administrator grants have identical rows. The
+// one-time upgrade clears both, then leaves later edits alone.
+func TestTranslationClearsPreExistingGrants(t *testing.T) {
 	t.Parallel()
 
 	p, query := newTranslationParams(t, true)
@@ -189,9 +196,7 @@ func TestTranslationPreservesPreExistingGrants(t *testing.T) {
 
 	granted := anonPermissions(t, query)
 
-	assert.Contains(t, granted, "torrent:mutate", "a pre-existing grant must survive")
-	assert.Contains(t, granted, "torrent:query")
-	assert.Contains(t, granted, "queue:query")
+	assert.Empty(t, granted)
 }
 
 // The seed overlapping an existing row must not fail the insert: ON CONFLICT DO
@@ -201,6 +206,7 @@ func TestTranslationToleratesAnOverlappingGrant(t *testing.T) {
 
 	p, query := newTranslationParams(t, true)
 
+	require.NoError(t, translateAnonRole(t.Context(), p))
 	require.NoError(t, query.RolePermission.WithContext(t.Context()).
 		Create(&model.RolePermission{
 			RoleName:  string(rbac.RoleAnon),
@@ -209,8 +215,117 @@ func TestTranslationToleratesAnOverlappingGrant(t *testing.T) {
 			Action:    "query",
 		}))
 
-	require.NoError(t, translateAnonRole(t.Context(), p),
-		"a row the seed also wants must not fail the translation")
+	require.NoError(t, GrantAnonReadSurface(t.Context(), p.Dao, testObjectActions))
 
 	assert.Contains(t, anonPermissions(t, query), "torrent:query")
+}
+
+func TestUpgradeClearsExistingAnonymousGrantsOnce(t *testing.T) {
+	t.Parallel()
+
+	p, query := newTranslationParams(t, true)
+
+	require.NoError(t, query.KeyValue.WithContext(t.Context()).Create(
+		&model.KeyValue{Key: "auth.anon_role_translated", Value: "true"}))
+	require.NoError(t, query.RolePermission.WithContext(t.Context()).Create(
+		&model.RolePermission{
+			RoleName:  string(rbac.RoleAnon),
+			Namespace: "gql",
+			Object:    "torrent",
+			Action:    "query",
+		}))
+
+	require.NoError(t, translateAnonRole(t.Context(), p))
+
+	assert.Empty(t, anonPermissions(t, query), "the upgrade must close existing installations")
+
+	require.NoError(t, query.RolePermission.WithContext(t.Context()).Create(
+		&model.RolePermission{
+			RoleName:  string(rbac.RoleAnon),
+			Namespace: "gql",
+			Object:    "torrent",
+			Action:    "query",
+		}))
+	require.NoError(t, translateAnonRole(t.Context(), p))
+
+	assert.Contains(t, anonPermissions(t, query), "torrent:query",
+		"a restart must preserve grants made after the upgrade")
+}
+
+func TestConcurrentUpgradeClearsAnonymousGrantsOnce(t *testing.T) {
+	t.Parallel()
+
+	p, query := newTranslationParams(t, true)
+
+	require.NoError(t, query.RolePermission.WithContext(t.Context()).Create(
+		&model.RolePermission{
+			RoleName:  string(rbac.RoleAnon),
+			Namespace: "gql",
+			Object:    "torrent",
+			Action:    "query",
+		}))
+
+	start := make(chan struct{})
+	errors := make(chan error, 2)
+
+	var workers sync.WaitGroup
+
+	for range 2 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+
+			<-start
+
+			errors <- translateAnonRole(t.Context(), p)
+		}()
+	}
+
+	close(start)
+	workers.Wait()
+	close(errors)
+
+	for err := range errors {
+		require.NoError(t, err)
+	}
+
+	assert.Empty(t, anonPermissions(t, query))
+	assert.True(t, markerIsSet(t, query))
+}
+
+func TestHTTPOnlyWorkerResetsAnonRoleBeforeListening(t *testing.T) {
+	t.Parallel()
+
+	p, query := newTranslationParams(t, true)
+	require.NoError(t, query.RolePermission.WithContext(t.Context()).Create(
+		&model.RolePermission{
+			RoleName:  string(rbac.RoleAnon),
+			Namespace: "gql",
+			Object:    "torrent",
+			Action:    "query",
+		}))
+
+	listened := false
+	httpWorker := worker.NewWorker("http_server", fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			count, err := query.RolePermission.WithContext(ctx).
+				Where(query.RolePermission.RoleName.Eq(string(rbac.RoleAnon))).Count()
+			require.NoError(t, err)
+			assert.Zero(t, count, "the HTTP listener must not open with old grants")
+
+			listened = true
+
+			return nil
+		},
+	})
+	result, err := worker.NewRegistry(worker.RegistryParams{
+		Workers:    []worker.Worker{httpWorker},
+		Decorators: []worker.Decorator{newAnonRoleHTTPDecorator(p)},
+		Logger:     zap.NewNop().Sugar(),
+	})
+	require.NoError(t, err)
+	require.NoError(t, result.Registry.Enable("http_server"))
+	require.NoError(t, result.Registry.Start(t.Context()))
+	assert.True(t, listened)
+	assert.True(t, markerIsSet(t, query))
 }

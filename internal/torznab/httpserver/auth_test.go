@@ -84,6 +84,15 @@ func unauthorizedXML(t *testing.T) string {
 	return string(body)
 }
 
+func authenticationRequiredXML(t *testing.T) string {
+	t.Helper()
+
+	body, err := (torznab.Error{Code: 100, Description: "Authentication required"}).XML()
+	require.NoError(t, err)
+
+	return string(body)
+}
+
 func requestCaps(t *testing.T, h *testHarness, path, header, remoteAddr string) {
 	t.Helper()
 
@@ -127,16 +136,15 @@ func TestTorznabAuthAcceptsQueryAndHeaderKeys(t *testing.T) {
 func TestTorznabAuthRejectsMissingAndWrongKeys(t *testing.T) {
 	t.Parallel()
 
-	expected := unauthorizedXML(t)
-
 	for _, testCase := range []struct {
-		name   string
-		path   string
-		header string
+		name    string
+		path    string
+		header  string
+		message string
 	}{
-		{name: "missing", path: "/torznab/?t=caps"},
-		{name: "wrong query parameter", path: "/torznab/?t=caps&apikey=wrong"},
-		{name: "wrong header", path: "/torznab/?t=caps", header: "wrong"},
+		{name: "missing", path: "/torznab/?t=caps", message: "Authentication required"},
+		{name: "wrong query parameter", path: "/torznab/?t=caps&apikey=wrong", message: "Incorrect user credentials"},
+		{name: "wrong header", path: "/torznab/?t=caps", header: "wrong", message: "Incorrect user credentials"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
@@ -151,7 +159,10 @@ func TestTorznabAuthRejectsMissingAndWrongKeys(t *testing.T) {
 				"application/xml; charset=utf-8",
 				h.responseRecorder.Header().Get("Content-Type"),
 			)
-			assert.Equal(t, expected, h.responseRecorder.Body.String())
+
+			body, err := (torznab.Error{Code: 100, Description: testCase.message}).XML()
+			require.NoError(t, err)
+			assert.Equal(t, string(body), h.responseRecorder.Body.String())
 		})
 	}
 }

@@ -106,8 +106,8 @@ const authObject = "auth"
 // authconfig_test, which can import both, pins these strings against the real
 // object actions so a rename fails loudly instead of quietly lapsing.
 var anonymousExcludedObjects = map[string]struct{}{
-	// Auth administration, excluded for its own reason — see the note on
-	// AnonymousPermissions.
+	// Auth administration, excluded because an anonymous caller with putRole
+	// could grant the anon role every action.
 	authObject: {},
 	// Profiling. /debug/pprof/heap and /goroutine?debug=2 dump process memory
 	// structure and every stack, which on an instance that has configured auth
@@ -122,8 +122,8 @@ var anonymousExcludedObjects = map[string]struct{}{
 	"metrics": {},
 }
 
-// anonymousActions is the set of action verbs the open baseline grants: reads,
-// and nothing else.
+// anonymousActions is the set of action verbs the development fixture grants
+// when explicitly asked to open its catalogue: reads, and nothing else.
 //
 // It is an allow-list on the action rather than a denylist of the destructive
 // ones, so that an object action registered later with a verb nobody anticipated
@@ -146,18 +146,9 @@ var anonymousActions = map[string]struct{}{
 // switched off, with nothing in the configuration or the logs disagreeing. That
 // was docs/issues/0012.
 //
-// AnonymousReadSurface is the set of registered object actions an open
-// installation grants anonymous callers: the read verbs, minus the objects an
-// anonymous caller never reaches. See AnonymousPermissions for why each
-// exclusion is there.
-//
-// It is deliberately separate from AnonymousPermissions, because the two have
-// different lifetimes. The permission provider above is the in-memory grant that
-// `auth.anonymous_access` used to carry, and it goes away once the flag becomes a
-// deny-override. This function is the rule itself, and it stays: it is what seeds
-// the anon role on a fresh installation, and what translates the flag's old
-// meaning into stored rows on an existing one. Sharing it is what keeps the
-// baseline and the seed from drifting apart while both exist.
+// AnonymousReadSurface is the set of registered read actions the development
+// fixture grants when --anonymous-access is set. Production grants no actions
+// to a fresh anon role; administrators choose them through role administration.
 func AnonymousReadSurface(provider rbac.ObjectActionProvider) []rbac.ObjectAction {
 	objectActions := provider()
 	surface := make([]rbac.ObjectAction, 0, len(objectActions))

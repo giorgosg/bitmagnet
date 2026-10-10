@@ -213,7 +213,7 @@ func TestGraphQLAuthorizationErrorIncludesObjectAction(t *testing.T) {
 	gqlErr := requireGraphQLErrorCode(
 		t,
 		query(t, server, "", `{ auth { listUsers { totalCount } } }`),
-		"UNAUTHORIZED",
+		"AUTHENTICATION_REQUIRED",
 	)
 	assert.Equal(t, "graphql", gqlErr.Extensions["namespace"])
 	assert.Equal(t, "auth", gqlErr.Extensions["object"])

@@ -141,6 +141,9 @@ own throwaway administrator instead of a password living somewhere. `--invitatio
 `--login-request-burst` vary the workflows; setting the last two to `1` makes the second
 login attempt throttle, which is otherwise not reachable inside a test's patience.
 
+`--anonymous-access=true` grants the fixture's `anon` role the catalogue read surface;
+production starts with no anonymous grants. Pass `false` to exercise the closed path.
+
 `--seed-dashboard-data` **defaults to on**, and gives the status, statistics and queue
 pages data in the recent window each of them opens on. Two halves, because the seed
 template is a months-old snapshot:

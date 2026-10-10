@@ -51,6 +51,7 @@ func New() fx.Option {
 
 			newBootstrapWorker,
 			newAnonRoleWorker,
+			fx.Annotate(newAnonRoleHTTPDecorator, fx.ResultTags(`group:"worker_decorators"`)),
 
 			// Object actions and permissions are collected from value groups so
 			// that other modules can contribute their own without this module

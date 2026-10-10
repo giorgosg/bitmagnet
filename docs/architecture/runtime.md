@@ -62,6 +62,10 @@ bitmagnet worker list
 selection was empty, and `After:` calls `Registry.Stop`, which walks the started workers
 calling their `OnStop`.
 
+The registry starts workers in map order. Authentication decorates `http_server` so the
+one-time anonymous-role reset runs before its listener opens, even if that is the only
+worker selected; the standalone auth reset worker may start before or after it.
+
 The consequence worth carrying: **a worker's `OnStart` is where its real construction
 happens**, because that is the first point at which `lazy.Lazy` dependencies are resolved
 and errors can be returned. A factory that does work eagerly breaks the CLI commands.
