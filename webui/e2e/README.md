@@ -220,6 +220,13 @@ bitmagnet `trunk` at `30e8d486b`, at the default worker count, 28 of 28 each tim
 contexts, which share no cookie and stand for two devices, and signing out in one ends the
 session in the other.
 
+`identity-retry.spec.js` (ticket 22) fails the `self.identity` query after real sign-in,
+once as a network failure and once with `AUTHENTICATION_INFRASTRUCTURE_FAILURE`. Each
+page explains that sign-in succeeded, keeps the cause, and offers "Try again". A second
+failure keeps that explanation; another retry loads the User in the same document. A
+later Identity failure after switching back to the tab has the ordinary wording, and
+startup and sign-out failures keep their existing wording and controls.
+
 A test that changes a password, disables, deletes or demotes a User, or needs an ordinary
 one, still registers a User of its own with `registerUser`. Changing the worker's
 administrator's password would leave that worker's later tests signing in with the old one,
