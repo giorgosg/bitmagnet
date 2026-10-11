@@ -5,7 +5,8 @@ header's health indicator leads to the status page, so this is how they are reac
 Anonymous as well as by a User (ticket 03).
 
 Each is put through `Route.guard`, as the Identity menu's destinations are, so a page the
-guard would refuse is never offered.
+guard would refuse is never offered. The queue's administration is in both lists: Anonymous may
+be granted it, and has no Identity menu to find it in.
 
 -}
 
@@ -20,6 +21,7 @@ candidates =
     [ { route = Route.TorrentStats Route.emptyTorrentStats, label = "Torrent statistics" }
     , { route = Route.QueueStats Route.emptyQueueStats, label = "Queue statistics" }
     , { route = Route.QueueJobs Route.emptyJobs, label = "Queue jobs" }
+    , { route = Route.AdminQueue, label = "Queue administration" }
     ]
 
 

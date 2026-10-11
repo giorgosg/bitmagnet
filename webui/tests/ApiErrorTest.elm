@@ -143,6 +143,26 @@ suite =
 
                         _ ->
                             Expect.fail "expected an authorization refusal"
+            , test "a refusal to Anonymous is its own outcome, carrying the refused Object action" <|
+                \_ ->
+                    -- bitmagnet 4efaae142 split these out of UNAUTHORIZED: an Anonymous Identity,
+                    -- refused, is told to authenticate.
+                    from
+                        [ withPath [ "queue" ]
+                            (codedAt "AUTHENTICATION_REQUIRED"
+                                [ ( "namespace", Encode.string "graphql" )
+                                , ( "object", Encode.string "queue" )
+                                , ( "action", Encode.string "mutate" )
+                                ]
+                            )
+                        ]
+                        |> Expect.equal
+                            (ApiError.AuthenticationRequired
+                                { field = Just "queue"
+                                , objectAction =
+                                    Just { namespace = "graphql", object = "queue", action = "mutate" }
+                                }
+                            )
             , test "the authentication service being down is not an internal fault" <|
                 \_ ->
                     from [ coded "AUTHENTICATION_INFRASTRUCTURE_FAILURE" [] ]
@@ -195,6 +215,12 @@ suite =
                 \_ ->
                     ApiError.isUnauthorized ApiError.UserAuthenticationRequired
                         |> Expect.equal True
+            , test "a refusal to Anonymous means the Identity may be stale" <|
+                \_ ->
+                    -- A credential revoked elsewhere leaves the browser Anonymous: bitmagnet falls
+                    -- through to the anonymous authenticator for a revoked token.
+                    ApiError.isUnauthorized (ApiError.AuthenticationRequired unrefused)
+                        |> Expect.equal True
             , test "an invalid password says nothing about the current Identity" <|
                 \_ ->
                     ApiError.isUnauthorized ApiError.InvalidCredentials
@@ -219,6 +245,7 @@ suite =
                     , ApiError.PasswordInsufficientEntropy
                     , ApiError.Unauthorized unrefused
                     , ApiError.UserAuthenticationRequired
+                    , ApiError.AuthenticationRequired unrefused
                     , ApiError.ApiKeyManagementForbidden
                     , ApiError.ServiceUnavailable
                     , ApiError.ServerFault
@@ -241,6 +268,17 @@ suite =
                         |> String.toLower
                         |> String.contains "password"
                         |> Expect.equal False
+            , test "a refusal to Anonymous without an Object action still says to sign in" <|
+                \_ ->
+                    ApiError.toMessage (ApiError.AuthenticationRequired unrefused)
+                        |> Expect.equal "Sign in first: Anonymous is not allowed to do that."
+            , test "a refusal to Anonymous says to sign in, and what was refused" <|
+                \_ ->
+                    ApiError.toMessage
+                        (ApiError.AuthenticationRequired
+                            { unrefused | objectAction = Just { namespace = "graphql", object = "queue", action = "mutate" } }
+                        )
+                        |> Expect.equal "Sign in first: Anonymous is not allowed to mutate queue."
             , test "an unrecognized error keeps the server's own words" <|
                 \_ ->
                     ApiError.toMessage (ApiError.ServerRejected "user: register failed: nope")

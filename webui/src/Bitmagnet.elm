@@ -1,4 +1,4 @@
-module Bitmagnet exposing (File, FileList, Page, Row, SearchArgs, byInfoHash, fileLimit, files, mutationRequest, queryRequest, search, slowQueryRequest)
+module Bitmagnet exposing (File, FileList, Page, Row, SearchArgs, byInfoHash, fileLimit, files, mutationRequest, optionalList, queryRequest, search, slowMutationRequest, slowQueryRequest, toContentType)
 
 {-| Every call Magnes makes to bitmagnet. Queries and mutations cross one request
 boundary, which always lets the browser attach bitmagnet's HttpOnly cookie. Call sites
@@ -51,6 +51,16 @@ mutationRequest : String -> SelectionSet decodesTo RootMutation -> Graphql.Http.
 mutationRequest apiUrl selection =
     Graphql.Http.mutationRequest apiUrl selection
         |> Graphql.Http.withCredentials
+
+
+{-| A mutation that can take bitmagnet a while, such as a purge of a large queue, given up on
+after five minutes, so that a page waiting on one that is never answered is not held for good.
+A mutation given up on may still have been done: whoever waits on one must say so.
+-}
+slowMutationRequest : String -> SelectionSet decodesTo RootMutation -> Graphql.Http.Request decodesTo
+slowMutationRequest apiUrl selection =
+    mutationRequest apiUrl selection
+        |> Graphql.Http.withTimeout (5 * 60 * 1000)
 
 
 {-| One result line.
@@ -190,6 +200,9 @@ facets args =
         )
 
 
+{-| Unclassified is null, the content type bitmagnet reads as a content record with no type,
+in a search's filter and in a reprocessing batch's alike.
+-}
 toContentType : Facet.ContentFilter -> Maybe ContentType
 toContentType filter =
     case filter of
@@ -200,7 +213,8 @@ toContentType filter =
             Nothing
 
 
-{-| An empty filter list is not the same as no filter: sending `[]` would match nothing.
+{-| An empty filter list is not the same as no filter: sending `[]` would match nothing, where
+bitmagnet reads an absent one as every value.
 -}
 optionalList : List a -> Opt.OptionalArgument (List a)
 optionalList values =

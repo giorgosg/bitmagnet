@@ -821,6 +821,17 @@ main {
   color: var(--bg);
 }
 
+/* A danger button that cannot be pressed — an act that cannot be asked about yet, or one
+   waiting while another is on its way — looks like any other disabled button. It outranks
+   `.page button.danger` (0,3,1 against 0,2,1), and ties `.page button.danger:hover`, which it
+   comes after: without it a disabled danger button kept the accent, and its hover filled it. */
+.page button.danger:disabled {
+  border-color: var(--faint);
+  background: transparent;
+  color: var(--faint);
+  cursor: default;
+}
+
 /* The code just minted. It is the only thing on the screen that cannot be recovered by
    looking again, so it is drawn as an answer rather than as another row. */
 .created {
@@ -1758,3 +1769,168 @@ main {
   font-size: 0.8125rem;
 }
 
+
+/* Queue administration (src/QueueAdmin.elm) -------------------------------- */
+
+/* Two panels of choices, each ending in an act. The chips, the options and the question are
+   layout and prose rather than fields to type into, so they get a measure of their own in
+   place of `.panel > *`'s 22rem; the two size fields keep the field width. Qualified with
+   `.panel` for the reason the Role editor's rule is. */
+.panel.queue-admin-panel > * {
+  max-width: 40rem;
+}
+
+.panel.queue-admin-panel h2 {
+  margin-bottom: 0;
+}
+
+.queue-admin-intro {
+  margin: 0 0 0.25rem;
+  color: var(--dim);
+  font-size: 0.875rem;
+}
+
+.queue-admin .facets {
+  padding-top: 0.25rem;
+}
+
+.queue-admin-match {
+  margin: 0.5rem 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.queue-admin-match.notice {
+  padding: 0;
+}
+
+/* A count that failed, and the way to ask for it again, on one line where they fit. */
+.queue-admin-count-failed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.375rem 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.queue-admin-count-failed .notice {
+  margin: 0;
+}
+
+.queue-admin-review,
+.queue-admin-outcome a {
+  color: var(--accent);
+  font-size: 0.875rem;
+}
+
+/* The act's button sits under the prose rather than beside it. */
+.panel.queue-admin-panel > button {
+  width: auto;
+  margin-top: 0.75rem;
+}
+
+/* The question stands where the act's button was. It is the page's most consequential
+   sentence, so it reads as a warning, as the Role editor's ask does. */
+.queue-admin-confirm {
+  margin-top: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent-soft);
+}
+
+.queue-admin-confirm .queue-admin-question {
+  margin: 0 0 0.375rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.queue-admin-facts {
+  margin: 0 0 0.625rem;
+  padding-left: 1.125rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
+}
+
+.queue-admin-answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* What bitmagnet answered. Good news is drawn as an answer, as a minted Invitation is. */
+.queue-admin-outcome {
+  margin: 0.75rem 0 0;
+  padding: 0.625rem 0.75rem;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  font-size: 0.875rem;
+}
+
+.queue-admin-choice {
+  margin: 0.5rem 0 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.queue-admin-choice legend {
+  padding: 0;
+  margin-bottom: 0.25rem;
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+.queue-admin-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  margin-top: 0.5rem;
+}
+
+/* `.panel label` dims a label and pushes it down for a field under it. A box or a radio
+   carries its label on its own line, in the page's colour, as a permission does. */
+.panel .queue-admin-option {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-top: 0;
+  color: var(--fg);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+/* `.panel input` pads and borders a text field; a box or a radio wants neither. */
+.panel .queue-admin-option input {
+  flex: none;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+.panel .queue-admin-option span {
+  min-width: 0;
+}
+
+.panel .queue-admin-field > input {
+  max-width: 10rem;
+}
+
+.queue-admin-hint {
+  margin: 0;
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+/* A box's hint lines up with its label, not with the box. */
+.queue-admin-option + .queue-admin-hint {
+  padding-left: 1.5rem;
+}
+
+.queue-admin-types {
+  margin: 0.25rem 0 0 1.5rem;
+}

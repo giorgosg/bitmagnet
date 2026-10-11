@@ -39,6 +39,22 @@ administrator =
         [ Identity.graphql "auth" "query", Identity.graphql "auth" "mutate" ]
 
 
+queueReader : Identity.Identity
+queueReader =
+    Identity.UserAuthenticated (user "linus") [ Identity.graphql "queue" "query" ]
+
+
+queueAdministrator : Identity.Identity
+queueAdministrator =
+    Identity.UserAuthenticated (user "barbara")
+        [ Identity.graphql "queue" "query", Identity.graphql "queue" "mutate" ]
+
+
+everything : Identity.Identity
+everything =
+    Identity.UserAuthenticated (user "root") [ { namespace = "**", object = "**", action = "**" } ]
+
+
 anonymous : Identity.Identity
 anonymous =
     Identity.Anonymous [ Identity.graphql "torrentContent" "query" ]
@@ -73,6 +89,21 @@ suite =
                     labels administrator
                         |> Expect.equal
                             [ "Your User", "API keys", "Users", "Invitations", "Roles" ]
+            , test "a User who may change the queue is offered its administration" <|
+                \_ ->
+                    labels queueAdministrator
+                        |> Expect.equal [ "Your User", "API keys", "Queue administration" ]
+            , test "a User who may only read the queue is not" <|
+                \_ ->
+                    -- The guard refuses the page without queue::mutate, so the menu does not
+                    -- offer it: the queue's own pages are offered on the status page instead.
+                    labels queueReader
+                        |> Expect.equal [ "Your User", "API keys" ]
+            , test "an Identity holding every Object action is offered every page, the queue's administration last" <|
+                \_ ->
+                    labels everything
+                        |> Expect.equal
+                            [ "Your User", "API keys", "Users", "Invitations", "Roles", "Queue administration" ]
             , test "the pages are the ones the guard admits, not a second opinion" <|
                 \_ ->
                     -- Every destination offered must survive the guard that protects it,

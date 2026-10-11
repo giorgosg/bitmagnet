@@ -1,6 +1,7 @@
 module Facet exposing
     ( ContentFilter(..)
     , Filters
+    , contentFilters
     , contentLabel
     , contentParam
     , count
@@ -70,6 +71,14 @@ server nothing and promises nothing false.
 fileTypes : List FileType
 fileTypes =
     FileType.list
+
+
+{-| Every content type, then unclassified: every value a content-type filter can hold, for a
+choice that is not read off an aggregation, as reprocessing's is.
+-}
+contentFilters : List ContentFilter
+contentFilters =
+    List.map Known ContentType.list ++ [ Unclassified ]
 
 
 

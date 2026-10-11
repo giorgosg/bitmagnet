@@ -91,6 +91,36 @@ suite =
                     )
                         |> Expect.equal ( Route.Allowed, Route.Allowed )
             ]
+        , describe "queue administration"
+            [ test "is a bare path" <|
+                \_ ->
+                    Route.toHref mount Route.AdminQueue
+                        |> Expect.equal "/magnes/admin/queue"
+            , test "is refused, not redirected, to an Identity without queue::mutate" <|
+                \_ ->
+                    -- Reading the queue is not enough to change it, and signing in would not
+                    -- help an Anonymous Identity whose instance grants it: the core `user` Role
+                    -- does not hold queue::mutate either.
+                    ( Route.guard mount (Identity.Anonymous [ Identity.graphql "queue" "query" ]) Route.AdminQueue
+                    , Route.guard mount (Identity.UserAuthenticated user [ Identity.graphql "queue" "query" ]) Route.AdminQueue
+                    )
+                        |> Expect.equal
+                            ( Route.Refused "Your Identity does not permit changing bitmagnet's queue."
+                            , Route.Refused "Your Identity does not permit changing bitmagnet's queue."
+                            )
+            , test "is refused to an Identity that may change the queue but not read it" <|
+                \_ ->
+                    -- A purge's confirmation says how many jobs it would delete, which only
+                    -- reading the queue can count.
+                    Route.guard mount (Identity.UserAuthenticated user [ Identity.graphql "queue" "mutate" ]) Route.AdminQueue
+                        |> Expect.equal (Route.Refused "Your Identity does not permit reading bitmagnet's queue, which changing it here needs.")
+            , test "is open to any Identity holding queue::query and queue::mutate" <|
+                \_ ->
+                    ( Route.guard mount (Identity.Anonymous [ Identity.graphql "queue" "query", Identity.graphql "queue" "mutate" ]) Route.AdminQueue
+                    , Route.guard mount adminIdentity Route.AdminQueue
+                    )
+                        |> Expect.equal ( Route.Allowed, Route.Allowed )
+            ]
         , describe "torrent statistics"
             [ test "the defaults are a bare path" <|
                 \_ ->
@@ -309,6 +339,7 @@ routes =
     , Route.AdminUsers
     , Route.AdminRoles
     , Route.AdminInvitations
+    , Route.AdminQueue
     , Route.Status
     , Route.QueueJobs Route.emptyJobs
     , Route.QueueJobs filteredJobs

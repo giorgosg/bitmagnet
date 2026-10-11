@@ -29,7 +29,8 @@ type alias Destination =
 
 {-| Every page the menu could offer, in the order it offers them: your own first, then the
 administration ones. The list is filtered by the guard, so an ordinary User simply does not
-see the last three.
+see the last four. The queue's administration is last: it is guarded by Object actions of its
+own, `queue::mutate` and `queue::query`, and an Identity may hold them without the others.
 -}
 candidates : List Destination
 candidates =
@@ -38,6 +39,7 @@ candidates =
     , { route = Route.AdminUsers, label = "Users" }
     , { route = Route.AdminInvitations, label = "Invitations" }
     , { route = Route.AdminRoles, label = "Roles" }
+    , { route = Route.AdminQueue, label = "Queue administration" }
     ]
 
 

@@ -24,8 +24,10 @@ import Json.Decode as Decode exposing (Value)
 import Login
 import Magnes.Api.Enum.ContentType as ContentType
 import Magnes.Api.Enum.FilesStatus exposing (FilesStatus(..))
+import Magnes.Api.Enum.QueueJobStatus exposing (QueueJobStatus)
 import Operations
 import Process
+import QueueAdmin
 import QueueJobs
 import QueueStats
 import Register
@@ -83,9 +85,11 @@ type alias Model =
     -- with filters already applied, so a shared search shows what is narrowing it.
     , filtersOpen : Bool
 
-    -- Bumped when the searched-for query actually changes, and when a statistics page looks
-    -- again. Responses carry the epoch they were asked under, so a page that arrives after
-    -- the query moved on is dropped rather than appended to the wrong list.
+    -- Bumped when the searched-for query actually changes, when a statistics page looks
+    -- again, and whenever the queue's administration asks bitmagnet anything. Responses carry
+    -- the epoch they were asked under, so a page that arrives after the query moved on is
+    -- dropped rather than appended to the wrong list, and a count of the queue that a newer
+    -- one has replaced is dropped rather than drawn.
     , epoch : Int
 
     -- The login form. It lives here rather than being rebuilt per render so a keystroke
@@ -178,6 +182,14 @@ type alias Model =
     -- The queue's statistics: the last answer, drawn with the queues and events the route
     -- chooses. Answers carry `epoch`, as the torrent timeline's do.
     , queueStats : QueueStats.State
+
+    -- The queue's administration: what a purge would delete, the reprocessing form, which
+    -- act has been asked about but not yet confirmed or is on its way, and what became of the
+    -- last. A count carries `epoch`, which drops an answer a newer request has replaced, and
+    -- the scope it was asked about, by which `QueueAdmin.counted` drops one about a scope no
+    -- longer chosen. What the page keeps as the person moves, or as their Identity changes, is
+    -- `QueueAdmin.settle`'s to decide, after every update (see `update`).
+    , queueAdmin : QueueAdmin.State
     }
 
 
@@ -358,6 +370,7 @@ init flags url key =
       , jobs = QueueJobs.empty
       , torrentStats = StatsLook.empty
       , queueStats = StatsLook.empty
+      , queueAdmin = QueueAdmin.empty
       , users = Users.empty
       , usersEpoch = 0
       , userTyping = 0
@@ -581,11 +594,52 @@ type Msg
     | StatsRefreshRequested
     | GotTorrentStats Int (Result (Graphql.Http.Error TorrentStats.Statistics) TorrentStats.Statistics)
     | GotQueueStats Int (Result (Graphql.Http.Error QueueStats.Statistics) QueueStats.Statistics)
+    | QueueAdminQueueToggled String
+    | QueueAdminStatusToggled QueueJobStatus
+    | QueueAdminFormEdited QueueAdmin.Edit
+    | QueueAdminPurgeAsked
+    | QueueAdminReprocessAsked
+    | QueueAdminActCancelled
+    | QueueAdminActConfirmed
+    | GotQueueAdminCount Int QueueAdmin.Scope (Result (Graphql.Http.Error QueueAdmin.Tally) QueueAdmin.Tally)
+    | QueueAdminRecountAsked
+    | GotQueueAdminAct QueueAdmin.Call (Result (Graphql.Http.Error ()) ())
     | Ignored
 
 
+{-| Every message, and then what it did to where the person is, for the one page that keeps
+something across that: the queue's administration (`QueueAdmin.settle`). Deciding it once,
+from where the person was and is, rather than at each place a route or an Identity changes,
+keeps a new such place from forgetting it.
+-}
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
+    let
+        ( updated, cmd ) =
+            updateModel msg model
+    in
+    ( { updated
+        | queueAdmin =
+            QueueAdmin.settle
+                { before = queueAdminWhereabouts model, after = queueAdminWhereabouts updated }
+                updated.queueAdmin
+      }
+    , cmd
+    )
+
+
+{-| Where the person is, as the queue's administration needs to know it.
+-}
+queueAdminWhereabouts : Model -> QueueAdmin.Whereabouts
+queueAdminWhereabouts model =
+    { route = model.route
+    , identity = model.identity
+    , access = Route.guard model.basePath model.identity model.route
+    }
+
+
+updateModel : Msg -> Model -> ( Model, Cmd Msg )
+updateModel msg model =
     case msg of
         Ignored ->
             ( model, Cmd.none )
@@ -623,7 +677,7 @@ update msg model =
                 -- server say what the new Identity may do — so it goes through the same
                 -- branch rather than a second copy of it that could drift.
                 ( refreshed, refresh ) =
-                    update (AuthenticationChangedHere Resolving) { model | login = Login.empty }
+                    updateModel (AuthenticationChangedHere Resolving) { model | login = Login.empty }
             in
             ( refreshed
             , Cmd.batch
@@ -1758,6 +1812,92 @@ update msg model =
         JobsChosen params ->
             ( model, Nav.pushUrl model.key (Route.toHref model.basePath (Route.QueueJobs params)) )
 
+        QueueAdminQueueToggled queue ->
+            let
+                ( queueAdmin, call ) =
+                    QueueAdmin.toggleQueue queue model.queueAdmin
+            in
+            callQueue call { model | queueAdmin = queueAdmin }
+
+        QueueAdminStatusToggled status ->
+            let
+                ( queueAdmin, call ) =
+                    QueueAdmin.toggleStatus status model.queueAdmin
+            in
+            callQueue call { model | queueAdmin = queueAdmin }
+
+        QueueAdminFormEdited change ->
+            ( { model | queueAdmin = QueueAdmin.edit change model.queueAdmin }, Cmd.none )
+
+        QueueAdminPurgeAsked ->
+            ( { model | queueAdmin = QueueAdmin.askPurge model.queueAdmin }, Cmd.none )
+
+        QueueAdminReprocessAsked ->
+            ( { model | queueAdmin = QueueAdmin.askReprocess model.queueAdmin }, Cmd.none )
+
+        QueueAdminActCancelled ->
+            ( { model | queueAdmin = QueueAdmin.cancel model.queueAdmin }, Cmd.none )
+
+        QueueAdminActConfirmed ->
+            case QueueAdmin.confirm model.queueAdmin of
+                ( queueAdmin, Just call ) ->
+                    callQueue call { model | queueAdmin = queueAdmin }
+
+                ( _, Nothing ) ->
+                    ( model, Cmd.none )
+
+        QueueAdminRecountAsked ->
+            let
+                ( queueAdmin, call ) =
+                    QueueAdmin.recount model.queueAdmin
+            in
+            callQueue call { model | queueAdmin = queueAdmin }
+
+        GotQueueAdminCount epoch scope result ->
+            if epoch /= model.epoch then
+                ( model, Cmd.none )
+
+            else
+                case result of
+                    Ok counts ->
+                        ( { model | queueAdmin = QueueAdmin.counted scope (Ok counts) model.queueAdmin }, Cmd.none )
+
+                    Err error ->
+                        onRequestFailure error
+                            model
+                            (\_ current ->
+                                ( { current | queueAdmin = QueueAdmin.counted scope (Err (ApiError.fromError error)) current.queueAdmin }
+                                , Cmd.none
+                                )
+                            )
+
+        GotQueueAdminAct call result ->
+            -- The answer is the act's first, whatever else it says: it ends the act on its way,
+            -- which outlasts leaving the page and a refetched Identity alike. Then a refusal
+            -- that says the Identity is stale refetches it, and anything else sends the recount
+            -- the page asks for, which it does only while it is showing and allowed.
+            let
+                ( queueAdmin, recount ) =
+                    QueueAdmin.answered (queueAdminWhereabouts model) call result model.queueAdmin
+
+                answered =
+                    { model | queueAdmin = queueAdmin }
+
+                counting current =
+                    case recount of
+                        Just countCall ->
+                            callQueue countCall current
+
+                        Nothing ->
+                            ( current, Cmd.none )
+            in
+            case result of
+                Ok () ->
+                    counting answered
+
+                Err error ->
+                    onRequestFailure error answered (\_ current -> counting current)
+
         JobToggled jobId ->
             ( { model | jobs = QueueJobs.toggle jobId model.jobs }, Cmd.none )
 
@@ -1905,6 +2045,48 @@ chooseStats route model =
         ( model, Nav.pushUrl model.key (Route.toHref model.basePath route) )
 
 
+{-| Send what the queue's administration asks for, under a fresh epoch, so that only the
+answer to the newest count is drawn. The page asks for nothing while it is not showing, and an
+act's answer, the one answer not checked by epoch, is checked by its number.
+-}
+callQueue : QueueAdmin.Call -> Model -> ( Model, Cmd Msg )
+callQueue call model =
+    let
+        epoch =
+            model.epoch + 1
+    in
+    ( { model | epoch = epoch }
+    , QueueAdmin.send model.apiUrl (queueAdminCalls epoch) call
+    )
+
+
+{-| Where the answers to the queue's administration's calls go: a count under `epoch`.
+-}
+queueAdminCalls :
+    Int
+    ->
+        { counted : QueueAdmin.Scope -> Result (Graphql.Http.Error QueueAdmin.Tally) QueueAdmin.Tally -> Msg
+        , acted : QueueAdmin.Call -> Result (Graphql.Http.Error ()) () -> Msg
+        }
+queueAdminCalls epoch =
+    { counted = GotQueueAdminCount epoch
+    , acted = GotQueueAdminAct
+    }
+
+
+queueAdminMessages : QueueAdmin.Messages Msg
+queueAdminMessages =
+    { queueToggled = QueueAdminQueueToggled
+    , statusToggled = QueueAdminStatusToggled
+    , edited = QueueAdminFormEdited
+    , recountAsked = QueueAdminRecountAsked
+    , purgeAsked = QueueAdminPurgeAsked
+    , reprocessAsked = QueueAdminReprocessAsked
+    , cancelled = QueueAdminActCancelled
+    , confirmed = QueueAdminActConfirmed
+    }
+
+
 torrentStatsMessages : TorrentStats.Messages Msg
 torrentStatsMessages =
     { navigate = TorrentStatsChosen
@@ -2003,7 +2185,7 @@ signedOut : Model -> ( Model, Cmd Msg )
 signedOut model =
     let
         ( refreshed, refresh ) =
-            update (AuthenticationChangedHere AfterSignOut)
+            updateModel (AuthenticationChangedHere AfterSignOut)
                 { model | signOut = UserOverview.Ready }
     in
     ( refreshed
@@ -2173,6 +2355,9 @@ lookAgain nudge model =
                 ( model, Cmd.none )
 
             Route.AdminInvitations ->
+                ( model, Cmd.none )
+
+            Route.AdminQueue ->
                 ( model, Cmd.none )
 
             Route.Status ->
@@ -2517,6 +2702,9 @@ routeNeedsSearch route =
         Route.AdminInvitations ->
             False
 
+        Route.AdminQueue ->
+            False
+
         Route.Status ->
             False
 
@@ -2702,6 +2890,11 @@ load identity apiUrl epochs route =
 
         Route.AdminInvitations ->
             ( Blank, Invitations.fetch apiUrl 0 (GotInvitations epochs.identity) )
+
+        Route.AdminQueue ->
+            ( Blank
+            , QueueAdmin.send apiUrl (queueAdminCalls epochs.query) QueueAdmin.opening
+            )
 
         -- The health report is the header's as well as this page's, so it is fetched
         -- and polled on its own rather than here: see `refreshHealth`.
@@ -2919,6 +3112,9 @@ documentTitle model =
 
         Route.AdminInvitations ->
             "Invitations — magnes"
+
+        Route.AdminQueue ->
+            "queue administration — magnes"
 
         Route.Status ->
             "status — magnes"
@@ -3171,6 +3367,9 @@ viewAllowedRoute model =
 
         Route.AdminInvitations ->
             Invitations.view model.basePath model.zone invitationsMessages model.identity model.invitations
+
+        Route.AdminQueue ->
+            QueueAdmin.view model.basePath queueAdminMessages model.queueAdmin
 
         Route.Status ->
             div []
