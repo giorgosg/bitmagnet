@@ -161,7 +161,7 @@ type alias Line =
 {-| The chart's columns, in time order, and the lines that run through them. `grid` is what
 the resolution came to, so a page can say what a bucket is, and `wanted` what it would have
 come to had a chart been able to draw any number of columns. `others` names the sources that
-were added together into one pair of lines.
+were added together into lines of their own.
 -}
 type alias Plot =
     { grid : Buckets.Grid
@@ -183,22 +183,30 @@ inkPairs =
     ]
 
 
-{-| How many pairs of lines there are inks for. While there are no more sources than this, each
-is a pair of its own; with more, one fewer are, and the rest are added together into the last.
+{-| The number of sources the palette can draw apart: three pairs, or six single lines.
+With more sources, the last place adds the remainder together.
 -}
-groupLimit : Int
-groupLimit =
-    List.length inkPairs
+groupLimit : Route.TorrentEvent -> Int
+groupLimit event =
+    case event of
+        Route.AllTorrentEvents ->
+            List.length inkPairs
+
+        Route.NewTorrents ->
+            List.length inkPairs * 2
+
+        Route.UpdatedTorrents ->
+            List.length inkPairs * 2
 
 
-{-| The name of the pair of lines that adds up the sources there are no more inks for.
+{-| The name of the lines that add up the sources there are no more inks for.
 -}
 otherSources : String
 otherSources =
     "Other sources"
 
 
-{-| One pair of lines, and the sources counted in it: one, or the rest.
+{-| One source group, and the sources counted in it: one, or the rest.
 -}
 type alias Group =
     { name : String
@@ -222,13 +230,14 @@ seriesKey group updated =
 
 {-| The chart of an answer, under the controls it was asked with.
 
-Each source with anything counted gets a line for its new torrents and one for its updated,
+Each source with anything counted for the chosen events gets one or two lines,
 inked by its place in the order the sources go in: the order bitmagnet lists them in, or the
 order they were chosen in, where some were. A source's ink is its place's, not a matter of
 which others have anything counted, so it does not change as they gain and lose counts or
-from one look to the next. Where there are more sources than inks, the first two are drawn
-apart and the rest added together as "Other sources", so the chart still adds up to everything
-bitmagnet counted. Choosing sources narrows the query, and so brings them back apart.
+from one look to the next. With both events, three sources can be drawn apart; with one,
+six can. Where there are more, one fewer are drawn apart and the rest added together as
+"Other sources", so the chart still adds up to everything bitmagnet counted for the chosen
+events. Choosing sources narrows the query, and so brings them back apart.
 
 -}
 plot : Route.TorrentStatsParams -> Statistics -> Plot
@@ -237,8 +246,11 @@ plot params statistics =
         order =
             orderOf params statistics
 
+        limit =
+            groupLimit params.event
+
         groups =
-            groupsOf (nameOf statistics) order
+            groupsOf limit (nameOf statistics) order
 
         groupOf source =
             groups
@@ -256,10 +268,13 @@ plot params statistics =
                     , count = bucket.count
                     }
                 )
-                statistics.buckets
+                selectedBuckets
+
+        selectedBuckets =
+            List.filter (\bucket -> includesEvent params.event bucket.updated) statistics.buckets
 
         counted =
-            Dict.fromList (List.map (\bucket -> ( bucket.source, () )) statistics.buckets)
+            Dict.fromList (List.map (\bucket -> ( bucket.source, () )) selectedBuckets)
 
         hasCounts group =
             List.any (\member -> Dict.member member counted) group.members
@@ -276,10 +291,10 @@ plot params statistics =
         groups
             |> List.indexedMap Tuple.pair
             |> List.filter (Tuple.second >> hasCounts)
-            |> List.concatMap (\( index, group ) -> linesOf index group)
+            |> List.concatMap (\( index, group ) -> linesOf params.event index group)
     , others =
-        if List.length order > groupLimit then
-            List.drop (groupLimit - 1) order
+        if List.length order > limit then
+            List.drop (limit - 1) order
                 |> List.filter (\key -> Dict.member key counted)
                 |> List.map (nameOf statistics)
 
@@ -294,6 +309,36 @@ plot params statistics =
         else
             Buckets.slots resolved window samples
     }
+
+
+{-| The words the chart uses for the events chosen.
+-}
+eventLabel : Route.TorrentEvent -> String
+eventLabel event =
+    case event of
+        Route.AllTorrentEvents ->
+            "new and updated"
+
+        Route.NewTorrents ->
+            "new"
+
+        Route.UpdatedTorrents ->
+            "updated"
+
+
+{-| Whether a bucket or line belongs to the events now chosen.
+-}
+includesEvent : Route.TorrentEvent -> Bool -> Bool
+includesEvent event updated =
+    case event of
+        Route.AllTorrentEvents ->
+            True
+
+        Route.NewTorrents ->
+            not updated
+
+        Route.UpdatedTorrents ->
+            updated
 
 
 {-| The sources in the order their inks go by. Those that were chosen, in the order they
@@ -337,21 +382,21 @@ nameOf statistics key =
         |> Maybe.withDefault key
 
 
-{-| The pairs of lines the sources in `order` are drawn as: each its own, or the first ones
-each its own and the rest, however many, one pair that adds them up.
+{-| The groups the sources in `order` are drawn as: each its own, or the first ones
+each its own and the rest, however many, one group that adds them up.
 -}
-groupsOf : (String -> String) -> List String -> List Group
-groupsOf nameFor order =
+groupsOf : Int -> (String -> String) -> List String -> List Group
+groupsOf limit nameFor order =
     let
         alone key =
             { name = nameFor key, members = [ key ] }
     in
-    if List.length order <= groupLimit then
+    if List.length order <= limit then
         List.map alone order
 
     else
-        List.map alone (List.take (groupLimit - 1) order)
-            ++ [ addedTogether (List.drop (groupLimit - 1) order) ]
+        List.map alone (List.take (limit - 1) order)
+            ++ [ addedTogether (List.drop (limit - 1) order) ]
 
 
 {-| The sources there are no more inks for, drawn as one.
@@ -361,32 +406,51 @@ addedTogether members =
     { name = otherSources, members = members }
 
 
-linesOf : Int -> Group -> List Line
-linesOf index group =
+{-| The first three sources keep their existing event ink. With one event selected,
+the other event's three inks draw the next three sources apart.
+-}
+linesOf : Route.TorrentEvent -> Int -> Group -> List Line
+linesOf event index group =
     let
-        ( new, updated ) =
-            List.drop index inkPairs
-                |> List.head
-                |> Maybe.withDefault ( Charts.Muted, Charts.Faint )
+        newInks =
+            List.map Tuple.first inkPairs
+
+        updatedInks =
+            List.map Tuple.second inkPairs
+
+        line updated inks =
+            { key = seriesKey index updated
+            , label =
+                group.name
+                    ++ (if updated then
+                            ": updated"
+
+                        else
+                            ": new"
+                       )
+            , ink = List.drop index inks |> List.head |> Maybe.withDefault Charts.Faint
+            }
     in
-    [ { key = seriesKey index False, label = group.name ++ ": new", ink = new }
-    , { key = seriesKey index True, label = group.name ++ ": updated", ink = updated }
-    ]
+    case event of
+        Route.AllTorrentEvents ->
+            [ line False newInks, line True updatedInks ]
+
+        Route.NewTorrents ->
+            [ line False (newInks ++ updatedInks) ]
+
+        Route.UpdatedTorrents ->
+            [ line True (updatedInks ++ newInks) ]
 
 
 
 -- STATE
 
 
-{-| An answer as the page keeps it: drawn once, when it comes, for the choices it was asked
-with, and the sources bitmagnet listed, by which chosen sources go on being named across looks
-that fail (`StatsLook.State`'s `latest`).
+{-| Keep both events so the selected event can be drawn without another request. The
+sources also stay named across looks that fail (`StatsLook.State`'s `latest`).
 -}
 type alias Answer =
-    { asked : Time.Posix
-    , plot : Plot
-    , sources : List Source
-    }
+    Statistics
 
 
 type alias State =
@@ -395,7 +459,7 @@ type alias State =
 
 loaded : Route.TorrentStatsParams -> Statistics -> State -> State
 loaded params statistics =
-    StatsLook.loaded params { asked = statistics.asked, plot = plot params statistics, sources = statistics.sources }
+    StatsLook.loaded params statistics
 
 
 failed : Route.TorrentStatsParams -> ApiError.Failure -> State -> State
@@ -415,15 +479,32 @@ type alias Messages msg =
 
 view : Time.Zone -> Messages msg -> Route.TorrentStatsParams -> State -> Html msg
 view zone messages params state =
+    let
+        -- Keep the question the answer was asked for while a new one is on its way,
+        -- but draw whichever event is now chosen from that answer's two events.
+        drawn =
+            StatsLook.shownOf state
+                |> Maybe.map
+                    (\shown ->
+                        let
+                            answeredParams =
+                                shown.params
+                        in
+                        ( shown, plot { answeredParams | event = params.event } shown.answer )
+                    )
+    in
     div [ class "page torrent-stats" ]
         [ h1 [] [ text "Torrent statistics" ]
-        , choices messages params state
-        , StatsLook.view zone .asked (.answer >> viewChart zone) state
+        , choices messages params state drawn
+        , StatsLook.view zone
+            .asked
+            (\_ -> drawn |> Maybe.map (\( shown, plotted ) -> viewChart zone params.event shown.answer plotted) |> Maybe.withDefault [])
+            state
         ]
 
 
-choices : Messages msg -> Route.TorrentStatsParams -> State -> Html msg
-choices messages params state =
+choices : Messages msg -> Route.TorrentStatsParams -> State -> Maybe ( StatsLook.Shown Route.TorrentStatsParams Answer, Plot ) -> Html msg
+choices messages params state drawn =
     let
         navigate controlsChosen =
             messages.navigate { params | controls = controlsChosen }
@@ -431,11 +512,11 @@ choices messages params state =
         -- The multiplier the chart on screen came to, in the unit now chosen: a chart that
         -- was drawn for another unit says nothing of this one.
         picked =
-            StatsLook.shownOf state
+            drawn
                 |> Maybe.andThen
-                    (\shown ->
+                    (\( shown, plotted ) ->
                         if shown.params.controls.resolution.unit == params.controls.resolution.unit then
-                            Just (Buckets.widthIn params.controls.resolution.unit shown.answer.plot.grid)
+                            Just (Buckets.widthIn params.controls.resolution.unit plotted.grid)
 
                         else
                             Nothing
@@ -461,6 +542,18 @@ choices messages params state =
                         )
                         (withChosen params.sources (state.latest |> Maybe.map .sources |> Maybe.withDefault []))
                     )
+               , Chip.facet "event"
+                    (List.map
+                        (\( label, event ) ->
+                            Chip.view
+                                { label = label
+                                , count = Nothing
+                                , selected = params.event == event
+                                , onToggle = messages.navigate { params | event = event }
+                                }
+                        )
+                        [ ( "both", Route.AllTorrentEvents ), ( "new", Route.NewTorrents ), ( "updated", Route.UpdatedTorrents ) ]
+                    )
                ]
         )
 
@@ -484,11 +577,11 @@ withChosen chosen known =
 
 {-| The chart, and how to read what it counts.
 -}
-viewChart : Time.Zone -> Answer -> List (Html msg)
-viewChart zone drawn =
+viewChart : Time.Zone -> Route.TorrentEvent -> Answer -> Plot -> List (Html msg)
+viewChart zone event drawn plotted =
     [ Charts.timeline
-        { title = "Torrents per " ++ Buckets.label drawn.plot.grid
-        , description = "Line chart: torrents new and updated per " ++ Buckets.label drawn.plot.grid ++ ", by source."
+        { title = "Torrents per " ++ Buckets.label plotted.grid
+        , description = "Line chart: torrents " ++ eventLabel event ++ " per " ++ Buckets.label plotted.grid ++ ", by source."
         , zone = zone
         , time = .start
         , series =
@@ -499,18 +592,18 @@ viewChart zone drawn =
                     , ink = line.ink
                     }
                 )
-                drawn.plot.lines
+                plotted.lines
         }
-        drawn.plot.slots
-    , StatsControls.capNote drawn.plot
-    , viewOthers drawn.plot
+        plotted.slots
+    , StatsControls.capNote plotted
+    , viewOthers plotted
     , p [ class "stats-note" ] [ text ("As of " ++ Format.dateTime zone drawn.asked) ]
     , p [ class "stats-note" ]
         [ text "Counted by when a source last updated a torrent: as new if that was within an hour of the source first reporting it, as updated if later." ]
     ]
 
 
-{-| Who "Other sources" are, since a pair of lines that adds up several cannot say.
+{-| Who "Other sources" are, since a line that adds up several cannot say.
 -}
 viewOthers : Plot -> Html msg
 viewOthers drawn =

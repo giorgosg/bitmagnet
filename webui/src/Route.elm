@@ -1,4 +1,4 @@
-module Route exposing (Access(..), BasePath, JobsParams, LoginParams, QueueStatsParams, RegisterParams, Route(..), SearchParams, TorrentStatsParams, basePath, emptyJobs, emptyQueueStats, emptySearch, emptyTorrentStats, fromUrl, guard, loginReturningTo, refreshInterval, returnDestination, sameQuestion, toHref)
+module Route exposing (Access(..), BasePath, JobsParams, LoginParams, QueueStatsParams, RegisterParams, Route(..), SearchParams, TorrentEvent(..), TorrentStatsParams, basePath, emptyJobs, emptyQueueStats, emptySearch, emptyTorrentStats, fromUrl, guard, loginReturningTo, refreshInterval, returnDestination, sameQuestion, toHref)
 
 {-| Routes are real paths, not fragments — see the README.
 
@@ -113,12 +113,21 @@ often to look again, and which sources, so a view of the index's growth is a lin
 type alias TorrentStatsParams =
     { controls : Controls
     , sources : List String
+    , event : TorrentEvent
     }
+
+
+{-| The torrent events drawn from an answer that always contains both.
+-}
+type TorrentEvent
+    = AllTorrentEvents
+    | NewTorrents
+    | UpdatedTorrents
 
 
 emptyTorrentStats : TorrentStatsParams
 emptyTorrentStats =
-    { controls = StatsControls.default, sources = [] }
+    { controls = StatsControls.default, sources = [], event = AllTorrentEvents }
 
 
 {-| Everything the URL says about the queue's statistics: how far back, how coarsely, how
@@ -179,6 +188,7 @@ parser =
                 <?> Query.int "every"
                 <?> Query.string "refresh"
                 <?> Query.custom "source" identity
+                <?> Query.string "event"
             )
         , Parser.map queueStatsWith
             (s "stats"
@@ -238,8 +248,8 @@ jobsWith queues statuses order direction page =
 for a page bounded by what it holds, as the queue's statistics will be; the torrent query is
 not, so a link to it is read as the default.
 -}
-torrentStatsWith : Maybe String -> Maybe String -> Maybe Int -> Maybe String -> List String -> Route
-torrentStatsWith timeframe resolution every refresh sources =
+torrentStatsWith : Maybe String -> Maybe String -> Maybe Int -> Maybe String -> List String -> Maybe String -> Route
+torrentStatsWith timeframe resolution every refresh sources event =
     TorrentStats
         { controls =
             StatsControls.fromParams
@@ -251,6 +261,16 @@ torrentStatsWith timeframe resolution every refresh sources =
                 , refresh = refresh
                 }
         , sources = unique (List.filterMap nonBlank sources)
+        , event =
+            case event of
+                Just "new" ->
+                    NewTorrents
+
+                Just "updated" ->
+                    UpdatedTorrents
+
+                _ ->
+                    AllTorrentEvents
         }
 
 
@@ -388,7 +408,7 @@ refreshInterval route =
 
 {-| Whether two routes ask bitmagnet the same question, so that a page showing the answer to
 one need not ask again to show the other: how often to look again is not what to look at, and
-the queue's statistics pick their queues and events out of an answer about all of them.
+the statistics pages pick their events (and the queue's queues) out of an answer about all of them.
 -}
 sameQuestion : Route -> Route -> Bool
 sameQuestion one other =
@@ -438,7 +458,7 @@ question route =
             route
 
         TorrentStats params ->
-            TorrentStats { params | controls = StatsControls.withoutRefresh params.controls }
+            TorrentStats { params | controls = StatsControls.withoutRefresh params.controls, event = AllTorrentEvents }
 
         QueueStats params ->
             QueueStats { params | controls = StatsControls.withoutRefresh params.controls, queues = [], events = [] }
@@ -520,6 +540,16 @@ toHref (BasePath prefix) route =
                     Builder.absolute [ "stats", "torrents" ]
                         (StatsControls.toParams StatsControls.default params.controls
                             ++ List.map (Builder.string "source") params.sources
+                            ++ (case params.event of
+                                    AllTorrentEvents ->
+                                        []
+
+                                    NewTorrents ->
+                                        [ Builder.string "event" "new" ]
+
+                                    UpdatedTorrents ->
+                                        [ Builder.string "event" "updated" ]
+                               )
                         )
 
                 QueueStats params ->
