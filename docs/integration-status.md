@@ -102,13 +102,11 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#87](https://github.com/giorgosg/bitmagnet/pull/87) | Start the anonymous role empty by default                                   | local — default anonymous access issue 1                             | New-role, upgrade, GraphQL and Torznab tests observed red      |
 | [#88](https://github.com/giorgosg/bitmagnet/pull/88) | Bound facet counts and group language and content-type values               | local — fork review finding 13                                       | Pool reached 32; 62 language counts; both observed red         |
 | [#89](https://github.com/giorgosg/bitmagnet/pull/89) | Keep search query values bound                                              | local — review finding 0002                                          | Nonconforming-string exact count failed; observed red          |
+| [#90](https://github.com/giorgosg/bitmagnet/pull/90) | Race metadata requests under shared and per-hash limits                     | lodestone `751a09607`, redesigned; local finding 0008b               | Stalled peer, TCP cancellation and node loops observed red     |
 
 ## In flight
 
-[PR #90](https://github.com/giorgosg/bitmagnet/pull/90) redesigns the metadata request
-race from lodestone `751a09607` / integration candidate `f32ebd2f0`. It races up to five
-peers per hash under a crawler-wide limit, cancels losing TCP requests, and fixes
-cancellation in the peer and scrape discovery loops.
+Nothing currently in flight.
 
 ## The static review findings
 
@@ -120,14 +118,13 @@ transaction, both serialisation points in the auth path, and the anonymous-acces
 findings. `files_count`/`size` was settled without a backfill: `size` keeps the total
 length, padding included.
 
-Still open, as of 2026-10-10:
+Still open, as of 2026-10-11:
 
 - **The same-origin CORS default**, decided and deferred to the release that removes the
   Angular UI, whose dev server is the one caller relying on `*`.
 
-The crawler peer and scrape loops' cancellation finding is addressed in the metadata
-request redesign above. A deterministic test observed both loops walking all remaining
-nodes after cancellation before the fix.
+The crawler peer and scrape loops' cancellation finding was fixed in #90. A deterministic
+test observed both loops walking all remaining nodes after cancellation before the fix.
 
 The search SQL re-execution is resolved: count plans, exact counts, existence checks and
 the limited CTE item path keep values bound. The historical `budgeted_count` function
@@ -142,7 +139,7 @@ would matter.
 
 ## Next candidate
 
-No candidate selected while the metadata request redesign is in flight.
+No candidate selected after #90.
 
 ## Rejected, deferred, or already resolved
 
