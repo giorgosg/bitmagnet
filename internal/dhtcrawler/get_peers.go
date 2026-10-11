@@ -67,10 +67,11 @@ func (c *crawler) requestPeersForHash(
 		// block the channel for up to a second in an attempt to add the nodes to the discoveredNodes channel
 		cancelCtx, cancel := context.WithTimeout(ctx, time.Second)
 
+	discoverNodes:
 		for _, n := range res.Nodes {
 			select {
 			case <-cancelCtx.Done():
-				break
+				break discoverNodes
 			case c.discoveredNodes.In() <- ktable.NewNode(n.ID, n.Addr):
 				continue
 			}

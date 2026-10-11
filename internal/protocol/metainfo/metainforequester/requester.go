@@ -96,6 +96,11 @@ func (r requester) Request(ctx context.Context, infoHash protocol.ID, addr netip
 		_ = conn.Close()
 	}()
 
+	stopCloseOnCancel := context.AfterFunc(timeoutCtx, func() {
+		_ = conn.Close()
+	})
+	defer stopCloseOnCancel()
+
 	hsInfo, btHandshakeErr := btHandshake(conn, infoHash, r.clientID)
 	if btHandshakeErr != nil {
 		return Response{}, btHandshakeErr

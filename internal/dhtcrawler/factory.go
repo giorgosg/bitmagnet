@@ -95,6 +95,7 @@ func New(params Params) Result {
 						kTable:                       params.KTable,
 						client:                       cl,
 						metainfoRequester:            params.MetainfoRequester,
+						metadataRequestSlots:         make(chan struct{}, 10*scalingFactor),
 						banningChecker:               params.BanningChecker,
 						bootstrapNodes:               params.Config.BootstrapNodes,
 						reseedBootstrapNodesInterval: settings.reseedBootstrapNodesInterval,
