@@ -8,6 +8,7 @@ import Browser.Dom
 import Browser.Events
 import Browser.Navigation as Nav
 import Chip
+import Credential exposing (Credential)
 import Facet
 import FileTree
 import Format
@@ -26,6 +27,8 @@ import Magnes.Api.Enum.ContentType as ContentType
 import Magnes.Api.Enum.FilesStatus exposing (FilesStatus(..))
 import Magnes.Api.Enum.QueueJobStatus exposing (QueueJobStatus)
 import Operations
+import PasswordChange
+import PasswordEntropy
 import Process
 import QueueAdmin
 import QueueJobs
@@ -75,6 +78,13 @@ type alias Model =
     , route : Route
     , identity : Identity.Identity
     , identityEpoch : Int
+
+    -- How many times bitmagnet has been asked who this is, which numbers each ask. The epoch
+    -- above drops an answer from before an authentication change, but two looks under one
+    -- epoch, such as a tab coming back to the front, can still answer out of order; the number
+    -- lets the password change tell the newer answer from the older (see
+    -- `PasswordChange.identityAnswered`).
+    , identityAsks : Int
     , field : String
     , results : Results
     , infiniteList : InfiniteList.Model
@@ -101,6 +111,14 @@ type alias Model =
     -- local erasure: bitmagnet owns the cookie, so until it answers the User is still
     -- signed in and the page has to be able to say a refusal out loud.
     , signOut : UserOverview.SignOut
+
+    -- The password change on the User overview: its form, and a change sent but not yet
+    -- settled, kept beside the form with its new password. Leaving the page and every
+    -- Identity refresh drop the form, so the passwords typed stop existing in the model when
+    -- nothing needs them, but never an unsettled change: those are exactly what follows a
+    -- change that went through, and its new password may be the only one that now signs in.
+    -- It goes once bitmagnet's answer settles it, or a sign-in does. See `PasswordChange`.
+    , passwordChange : PasswordChange.State
 
     -- The registration form, held for the same reason the login form is: a keystroke
     -- must not lose what is typed, and it is dropped on success so the password stops
@@ -150,7 +168,9 @@ type alias Model =
     , identityRefresh : Refresh
 
     -- Separate counter for the password-entropy debounce. `self.passwordEntropy` is a
-    -- server round trip, and bitmagnet's own UI spends one per keystroke.
+    -- server round trip, and bitmagnet's own UI spends one per keystroke. One counter serves
+    -- both forms that measure a password, since only one is ever on screen; a measurement
+    -- also says which form asked for it (`ScoredFor`).
     , scoring : Int
 
     -- Separate counter for the debounce, because a keystroke is not yet a new query.
@@ -204,6 +224,15 @@ allows without a User.
 type Refresh
     = Resolving
     | AfterSignOut
+    | AfterPasswordChange
+
+
+{-| Which form's password a measurement was asked for, so that its answer can only land in
+that form.
+-}
+type ScoredFor
+    = ForRegistration
+    | ForPasswordChange
 
 
 {-| Hand-rolled rather than `RemoteData`: these are the states Magnes actually has, and
@@ -357,6 +386,7 @@ init flags url key =
       , route = route
       , identity = Identity.Unknown
       , identityEpoch = 0
+      , identityAsks = 1
       , field = fieldFor route
       , results = results
       , infiniteList = InfiniteList.init
@@ -365,6 +395,7 @@ init flags url key =
       , filtersOpen = not (Facet.isEmpty (filtersFor route))
       , login = Login.empty
       , signOut = UserOverview.Ready
+      , passwordChange = PasswordChange.initial
       , register = Register.prefilled (invitationCodeFor route)
       , invitations = Invitations.empty
       , jobs = QueueJobs.empty
@@ -388,7 +419,7 @@ init flags url key =
       , visible = not flags.hidden
       }
     , Cmd.batch
-        [ Identity.fetch flags.apiUrl (GotIdentity 0)
+        [ Identity.fetch flags.apiUrl (GotIdentity 0 1)
         , Task.perform (\vp -> Resized (round vp.viewport.height)) Browser.Dom.getViewport
         , Task.perform GotZone Time.here
         ]
@@ -491,14 +522,19 @@ needing it.
 It exists because Elm cannot let the browser see a form submission. `Html.Events.onSubmit`
 is `preventDefaultOn`, which always prevents the default, and a submission is the main
 signal a password manager uses to offer saving. Without this, a generated password is lost
-the moment the form clears — and bitmagnet has no password change and no reset, so losing
-one means deleting the User in SQL.
+the moment the form clears — and bitmagnet has no password reset, and changing a password
+needs the current one, so losing it means deleting the User and inviting them again.
+
+Three successes offer one: a registration, a sign-in, and a password change bitmagnet
+accepted, which is the only moment its new password is known to be accepted. A password
+change whose answer was lost offers nothing; the login form tries its new password instead,
+and the sign-in offers it if bitmagnet accepts it there.
 
 Nothing waits on the outcome. Whether a manager saved anything is not knowable here, and
 the browsers that implement none of this must behave exactly as they do today.
 
 -}
-port storeCredential : { id : String, password : String } -> Cmd msg
+port storeCredential : Credential -> Cmd msg
 
 
 type Msg
@@ -518,18 +554,18 @@ type Msg
     | ToggleFolder String String
     | GotFiles String (Result (Graphql.Http.Error Bitmagnet.FileList) Bitmagnet.FileList)
     | GotResults Int (Result (Graphql.Http.Error Page) Page)
-    | GotIdentity Int (Result (Graphql.Http.Error Identity.Identity) Identity.Identity)
+    | GotIdentity Int Int (Result (Graphql.Http.Error Identity.Identity) Identity.Identity)
     | VisibilityChanged Browser.Events.Visibility
     | LoginUsernameChanged String
     | LoginPasswordChanged String
     | LoginSubmitted
-    | GotLogin (Result (Graphql.Http.Error ()) ())
+    | GotLogin Credential (Result (Graphql.Http.Error ()) ())
     | RegisterUsernameChanged String
     | RegisterPasswordChanged String
     | RegisterInvitationCodeChanged String
     | RegisterSubmitted
-    | ScoringDebounceElapsed Int
-    | GotPasswordEntropy Int (Result (Graphql.Http.Error Register.Strength) Register.Strength)
+    | ScoringDebounceElapsed ScoredFor Int
+    | GotPasswordEntropy ScoredFor Int (Result (Graphql.Http.Error PasswordEntropy.Strength) PasswordEntropy.Strength)
     | GotRegistration (Result (Graphql.Http.Error String) String)
     | MenuToggled
     | MenuClosed
@@ -581,6 +617,10 @@ type Msg
     | GotApiKeyDeleted (Result (Graphql.Http.Error ()) ())
     | SignOutRequested
     | GotSignOut (Result (Graphql.Http.Error ()) ())
+    | PasswordChangeCurrentChanged String
+    | PasswordChangeNewChanged String
+    | PasswordChangeSubmitted
+    | GotPasswordChange PasswordChange.Sent (Result (Graphql.Http.Error ()) ())
     | AuthenticationChangedHere Refresh
     | AuthenticationChanged
     | HealthPollDue
@@ -655,33 +695,42 @@ updateModel msg model =
                 ( model, Cmd.none )
 
             else
+                -- The credential travels with the request and comes back with its answer, so
+                -- what is offered to the credential store is what bitmagnet accepted, whatever
+                -- the form holds by then.
+                let
+                    credential =
+                        Login.credentials model.login
+                in
                 ( { model | login = Login.withState Login.Submitting model.login }
-                , Login.submit model.apiUrl (Login.credentials model.login) GotLogin
+                , Login.submit model.apiUrl credential (GotLogin credential)
                 )
 
-        GotLogin (Err error) ->
+        GotLogin _ (Err error) ->
             ( { model | login = Login.withState (Login.Rejected (ApiError.fromError error)) model.login }
             , Cmd.none
             )
 
-        GotLogin (Ok ()) ->
+        GotLogin credential (Ok ()) ->
             let
-                offered =
-                    Login.credentials model.login
-
                 destination =
                     Route.returnDestination model.basePath model.route
 
                 -- Dropping the form takes the password with it. The rest is exactly what
                 -- any other authentication change does — tell the other tabs, and let the
                 -- server say what the new Identity may do — so it goes through the same
-                -- branch rather than a second copy of it that could drift.
+                -- branch rather than a second copy of it that could drift. A password change
+                -- left unsettled is settled by it.
                 ( refreshed, refresh ) =
-                    updateModel (AuthenticationChangedHere Resolving) { model | login = Login.empty }
+                    updateModel (AuthenticationChangedHere Resolving)
+                        { model
+                            | login = Login.empty
+                            , passwordChange = PasswordChange.signedIn model.passwordChange
+                        }
             in
             ( refreshed
             , Cmd.batch
-                [ storeCredential { id = offered.username, password = offered.password }
+                [ storeCredential credential
                 , Nav.replaceUrl model.key (Route.toHref model.basePath destination)
                 , refresh
                 ]
@@ -694,52 +743,28 @@ updateModel msg model =
             ( { model | register = Register.withInvitationCode code model.register }, Cmd.none )
 
         RegisterPasswordChanged password ->
-            let
-                scoring =
-                    model.scoring + 1
-            in
-            ( { model
-                | register = Register.withPassword password model.register
-                , scoring = scoring
-              }
-            , if String.isEmpty password then
-                Cmd.none
+            scorePassword ForRegistration
+                password
+                { model | register = Register.withPassword password model.register }
 
-              else
-                Process.sleep scoringDebounceMs
-                    |> Task.perform (\_ -> ScoringDebounceElapsed scoring)
-            )
-
-        ScoringDebounceElapsed scoring ->
+        ScoringDebounceElapsed scored scoring ->
             if scoring /= model.scoring then
                 -- Another keystroke landed; that one owns the measurement.
                 ( model, Cmd.none )
 
             else
                 ( model
-                , Register.measure model.apiUrl
-                    (Register.passwordOf model.register)
-                    (GotPasswordEntropy scoring)
+                , PasswordEntropy.measure model.apiUrl
+                    (scoredPassword scored model)
+                    (GotPasswordEntropy scored scoring)
                 )
 
-        GotPasswordEntropy scoring result ->
+        GotPasswordEntropy scored scoring result ->
             if scoring /= model.scoring then
                 ( model, Cmd.none )
 
             else
-                let
-                    measurement =
-                        case result of
-                            Ok strength ->
-                                Register.Measured strength
-
-                            -- The password is not the thing that failed, so nothing is
-                            -- claimed about it. Registration remains submittable, and
-                            -- bitmagnet is the one that decides anyway.
-                            Err _ ->
-                                Register.Unmeasurable
-                in
-                ( { model | register = Register.withEntropy measurement model.register }
+                ( withMeasurement scored (PasswordEntropy.answered result) model
                 , Cmd.none
                 )
 
@@ -1437,13 +1462,38 @@ updateModel msg model =
                 -- and the page says so and offers the action again.
                 ( { model | signOut = UserOverview.Refused failure }, Cmd.none )
 
+        PasswordChangeCurrentChanged current ->
+            ( { model | passwordChange = PasswordChange.withCurrent current model.passwordChange }
+            , Cmd.none
+            )
+
+        PasswordChangeNewChanged new ->
+            scorePassword ForPasswordChange
+                new
+                { model | passwordChange = PasswordChange.withNew new model.passwordChange }
+
+        PasswordChangeSubmitted ->
+            case PasswordChange.sending model.identity model.passwordChange of
+                Just ( sending, sent ) ->
+                    ( { model | passwordChange = sending }
+                    , PasswordChange.submit model.apiUrl sending (GotPasswordChange sent)
+                    )
+
+                Nothing ->
+                    ( model, Cmd.none )
+
+        GotPasswordChange sent result ->
+            passwordChangeAnswered
+                (PasswordChange.answered model.basePath sent result model.passwordChange model.login)
+                model
+
         AuthenticationChanged ->
             beginIdentityRefresh Resolving model
 
         AuthenticationChangedHere reason ->
-            -- Login and logout will dispatch this after bitmagnet confirms the mutation.
-            -- Keeping local state updates in those workflows avoids bouncing our own
-            -- notification back through the channel.
+            -- Sign-in, sign-out and an accepted password change dispatch this after bitmagnet
+            -- confirms the mutation. Keeping local state updates in those workflows avoids
+            -- bouncing our own notification back through the channel.
             let
                 ( refreshing, refresh ) =
                     beginIdentityRefresh reason model
@@ -1465,8 +1515,12 @@ updateModel msg model =
                     else
                         ( refreshed, Cmd.none )
             in
-            ( looked
-            , Cmd.batch [ Identity.fetch model.apiUrl (GotIdentity model.identityEpoch), healthCmd, statsCmd ]
+            ( { looked | identityAsks = looked.identityAsks + 1 }
+            , Cmd.batch
+                [ Identity.fetch model.apiUrl (GotIdentity model.identityEpoch (looked.identityAsks + 1))
+                , healthCmd
+                , statsCmd
+                ]
             )
 
         VisibilityChanged Browser.Events.Hidden ->
@@ -1507,7 +1561,7 @@ updateModel msg model =
                                         )
                                     )
 
-        GotIdentity identityEpoch result ->
+        GotIdentity identityEpoch ask result ->
             if identityEpoch /= model.identityEpoch then
                 ( model, Cmd.none )
 
@@ -1529,7 +1583,19 @@ updateModel msg model =
                             }
 
                     Ok identity ->
-                        identityResolved identity model
+                        let
+                            answered =
+                                PasswordChange.identityAnswered model.basePath
+                                    ask
+                                    identity
+                                    model.passwordChange
+                                    model.login
+
+                            ( resolved, cmd ) =
+                                identityResolved identity
+                                    { model | passwordChange = answered.change, login = answered.login }
+                        in
+                        ( resolved, Cmd.batch [ cmd, goTo model answered.goTo ] )
 
         LinkClicked (Browser.Internal url) ->
             case ( Route.fromUrl model.basePath url, model.route ) of
@@ -1636,6 +1702,25 @@ updateModel msg model =
                             -- page ends it, so coming back does not reopen it as though
                             -- something had just failed.
                             , signOut = UserOverview.Ready
+
+                            -- And takes the passwords typed into the password change with
+                            -- it, though not a change sent and unsettled: its answer may still
+                            -- come, and if it is lost, its new password may be the one that
+                            -- now signs in.
+                            , passwordChange = PasswordChange.left model.passwordChange
+
+                            -- Why the login form was opened is said only on arrival there.
+                            , login =
+                                case route of
+                                    Route.Login _ ->
+                                        PasswordChange.loginOnArrival model.basePath
+                                            model.identity
+                                            model.route
+                                            model.passwordChange
+                                            model.login
+
+                                    _ ->
+                                        Login.withoutReason model.login
 
                             -- Arriving at registration takes the Invitation from the
                             -- link; arriving anywhere else drops a password that is no
@@ -2170,7 +2255,58 @@ registerMessages =
 
 userOverviewMessages : UserOverview.Messages Msg
 userOverviewMessages =
-    { signOutRequested = SignOutRequested }
+    { signOutRequested = SignOutRequested
+    , passwordChange =
+        { currentChanged = PasswordChangeCurrentChanged
+        , newChanged = PasswordChangeNewChanged
+        , submitted = PasswordChangeSubmitted
+        }
+    }
+
+
+{-| Carry out what `PasswordChange.answered` decided about an answer to a password change.
+
+An accepted change ended every sign-in the User had, this one included, so it is an
+authentication change like sign-out: the other tabs are told, and the Identity is asked for
+again. A refusal saying the Identity is stale asks for it again without telling anyone, as for
+any other request. The new password is offered to the credential store only when bitmagnet
+accepted it.
+
+-}
+passwordChangeAnswered : PasswordChange.Answered -> Model -> ( Model, Cmd Msg )
+passwordChangeAnswered answered model =
+    let
+        settled =
+            { model | passwordChange = answered.change, login = answered.login }
+
+        ( refreshed, refresh ) =
+            case answered.signIn of
+                PasswordChange.Ended ->
+                    updateModel (AuthenticationChangedHere AfterPasswordChange) settled
+
+                PasswordChange.Stale ->
+                    beginIdentityRefresh Resolving settled
+
+                PasswordChange.Unaffected ->
+                    ( settled, Cmd.none )
+    in
+    ( refreshed
+    , Cmd.batch
+        [ answered.offer |> Maybe.map storeCredential |> Maybe.withDefault Cmd.none
+        , goTo model answered.goTo
+        , refresh
+        ]
+    )
+
+
+{-| Replace the address with `destination`, if there is one. `replaceUrl`, so that going back
+does not return to a page the browser has just been signed out of.
+-}
+goTo : Model -> Maybe Route -> Cmd Msg
+goTo model destination =
+    destination
+        |> Maybe.map (\route -> Nav.replaceUrl model.key (Route.toHref model.basePath route))
+        |> Maybe.withDefault Cmd.none
 
 
 {-| bitmagnet has cleared the cookie, so this is an authentication change like any other:
@@ -2195,6 +2331,46 @@ signedOut model =
         , refresh
         ]
     )
+
+
+{-| Ask for a typed password to be measured once typing pauses. Every keystroke in either form
+moves the counter, so only the last one's measurement is asked for, and only its answer lands.
+An empty field has nothing to measure.
+-}
+scorePassword : ScoredFor -> String -> Model -> ( Model, Cmd Msg )
+scorePassword scored password model =
+    let
+        scoring =
+            model.scoring + 1
+    in
+    ( { model | scoring = scoring }
+    , if String.isEmpty password then
+        Cmd.none
+
+      else
+        Process.sleep scoringDebounceMs
+            |> Task.perform (\_ -> ScoringDebounceElapsed scored scoring)
+    )
+
+
+scoredPassword : ScoredFor -> Model -> String
+scoredPassword scored model =
+    case scored of
+        ForRegistration ->
+            Register.passwordOf model.register
+
+        ForPasswordChange ->
+            PasswordChange.newPassword model.passwordChange
+
+
+withMeasurement : ScoredFor -> PasswordEntropy.Entropy -> Model -> Model
+withMeasurement scored measurement model =
+    case scored of
+        ForRegistration ->
+            { model | register = Register.measured measurement model.register }
+
+        ForPasswordChange ->
+            { model | passwordChange = PasswordChange.measured measurement model.passwordChange }
 
 
 loginMessages : Login.Messages Msg
@@ -2238,7 +2414,7 @@ firstField : Model -> Maybe String
 firstField model =
     case ( model.route, Route.guard model.basePath model.identity model.route ) of
         ( Route.Login _, Route.Allowed ) ->
-            Just Login.usernameFieldId
+            Just (Login.focusFieldId model.login)
 
         ( Route.Register _, Route.Allowed ) ->
             Just Register.usernameFieldId
@@ -2733,6 +2909,12 @@ refreshFailure reason message =
             "You are signed out. Magnes could not load what this instance allows without a User: "
                 ++ message
 
+        -- The change worked; only what came after it did not. Saying so first keeps a
+        -- failure to load from reading as the password change having failed.
+        AfterPasswordChange ->
+            "Your password was changed, and that signed you out everywhere. Magnes could not load what this instance allows without a User: "
+                ++ message
+
 
 beginIdentityRefresh : Refresh -> Model -> ( Model, Cmd Msg )
 beginIdentityRefresh reason model =
@@ -2742,15 +2924,23 @@ beginIdentityRefresh reason model =
 
         identityEpoch =
             model.identityEpoch + 1
+
+        ask =
+            model.identityAsks + 1
     in
     ( { model
         | identity = Identity.Unknown
         , identityEpoch = identityEpoch
+        , identityAsks = ask
         , identityRefresh = reason
 
         -- Whatever the Identity turns out to be, it is no longer the one any sign-out in
         -- flight or already refused was about.
         , signOut = UserOverview.Ready
+
+        -- Nor the one whose passwords are typed into the password change. A change sent and
+        -- unsettled is kept: this refresh may be what finds out it went through.
+        , passwordChange = PasswordChange.left model.passwordChange
 
         -- Nor the one the administration listings were fetched under. The epoch keeps an
         -- older answer from landing; this keeps the older data from being held.
@@ -2776,7 +2966,7 @@ beginIdentityRefresh reason model =
         , infiniteList = InfiniteList.init
       }
     , Cmd.batch
-        [ Identity.fetch model.apiUrl (GotIdentity identityEpoch)
+        [ Identity.fetch model.apiUrl (GotIdentity identityEpoch ask)
         , scrollListToTop
         ]
     )
@@ -3349,7 +3539,7 @@ viewAllowedRoute model =
         Route.UserOverview ->
             case model.identity of
                 Identity.UserAuthenticated user _ ->
-                    UserOverview.view model.zone userOverviewMessages model.signOut user
+                    UserOverview.view model.zone userOverviewMessages model.signOut model.passwordChange user
 
                 -- Unreachable: the guard admits no other Identity to this route, and has
                 -- already answered them with a redirect.

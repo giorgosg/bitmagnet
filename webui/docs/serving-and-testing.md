@@ -227,30 +227,44 @@ instance changes what every other client of that instance can do. See `e2e/READM
 
 ## Regenerating the client
 
+Both ways below generate into `.dev/codegen`, which is gitignored, and then install the
+result with `npm run codegen:install`. That step deletes every generated module in
+`src/Magnes/Api/` except `ScalarCodecs.elm` and copies the fresh ones in, so a type the
+schema dropped goes with it.
+
+Generating straight into `src` does not work. The committed `ScalarCodecs.elm` is hand
+edited and carries no elm-graphql "do not edit" header, so elm-graphql refuses to write
+beside a file it did not generate ("found some files that it did not generate") and writes
+nothing. The scratch directory also gets a fresh, unmapped `ScalarCodecs.elm`, which is why
+the install step leaves it out: the committed one, with the custom scalar mappings, stays.
+
 The simplest way needs no running instance and no introspection. Read the fork's committed
 SDL directly, taking it from `trunk` rather than from whatever branch `../bitmagnet` has
 checked out:
 
 ```bash
 (cd ../bitmagnet && for f in $(git ls-tree --name-only trunk graphql/schema/ | grep '\.graphqls$'); do git show "trunk:$f"; echo; done) > /tmp/bitmagnet.graphql
-npx elm-graphql --schema-file /tmp/bitmagnet.graphql --base Magnes.Api --output src
-npm run format
+BITMAGNET_SDL=/tmp/bitmagnet.graphql npm run codegen:sdl
+git status --short src/Magnes/Api
 ```
 
-Ticket 11 regenerated the committed client this way. It was re-run on 2026-10-05 into a
-scratch directory, and the only difference from the committed client was
-`self.updatePassword`, which is ticket 20. `ScalarCodecs.elm` is preserved when it already
-exists, so the custom scalar mappings survive.
+Generated files are not run through `npm run format`; `git status` names what changed.
+
+Ticket 11 regenerated the committed client from the SDL. Ticket 20 regenerated it on
+2026-10-11 against `trunk` at `e76818643`: the only files that changed were
+`InputObject.elm` and `Object/SelfMutation.elm`, both for `self.updatePassword`. Run again
+through `npm run codegen:sdl` the same day, it reproduced the committed client exactly.
 
 Against a live instance instead:
 
 ```bash
 BITMAGNET_URL=http://your-bitmagnet:3333 npm run codegen
-npm run format
 ```
 
 Be explicit about the URL rather than relying on the `http://localhost:3333` default, and
 generate against the target fork. That path needs `graphql.introspection` on; see below.
+It shares the install step with the SDL path, but its own first step, introspecting an
+instance, was not run on 2026-10-11, when it was changed to generate into `.dev/codegen`.
 Confirm before committing: the schema should include `Self`, `User`, `Role`, `APIKey`,
 `Invitation`, `AuthQuery` and `AuthMutation`.
 

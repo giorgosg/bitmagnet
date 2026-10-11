@@ -37,12 +37,15 @@
       // Elm cannot let the browser see a form submission: `Html.Events.onSubmit` is
       // `preventDefaultOn` and always prevents the default, and that submission is the
       // main cue a password manager takes to offer saving. So Magnes asks explicitly,
-      // at the moment registration or sign-in succeeds.
+      // at the moment a registration or a sign-in succeeds, or bitmagnet accepts a
+      // password change. A password change whose answer was lost offers nothing: the
+      // login form is opened on its new password instead, and signing in with it offers
+      // it here like any other sign-in, once bitmagnet has accepted it.
       //
       // This is the person's own password, not bitmagnet's credential — that stays an
-      // HttpOnly cookie no script can read. It matters because bitmagnet has neither a
-      // password change nor a reset: a generated password nobody saved is a User that
-      // has to be deleted in SQL.
+      // HttpOnly cookie no script can read. It matters because bitmagnet has no password
+      // reset, and changing a password needs the current one: a generated password
+      // nobody saved is a User that has to be deleted and invited again.
       //
       // `PasswordCredential` is Chromium-only, and the constructor needs a secure
       // context. Where any of it is missing, or the browser declines, nothing happens

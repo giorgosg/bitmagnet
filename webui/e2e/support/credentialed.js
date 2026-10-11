@@ -79,7 +79,13 @@ export function uniqueName(prefix) {
 // A username and password nobody chose. The password is a real User's for as long as the
 // run lasts, so the suite's claim to hold no password should stay literally true.
 function newUser(prefix) {
-  return { username: uniqueName(prefix), password: crypto.randomBytes(24).toString("base64url") };
+  return { username: uniqueName(prefix), password: newPassword() };
+}
+
+// A password nobody chose, well above bitmagnet's minimum entropy: for a User registered
+// here, or for one changing its password to it.
+export function newPassword() {
+  return crypto.randomBytes(24).toString("base64url");
 }
 
 // Signs in through the form, the way a person does, and waits for the Identity that follows

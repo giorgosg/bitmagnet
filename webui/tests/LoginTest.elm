@@ -66,7 +66,7 @@ suite =
             [ test "a trailing space in the username is a typo, not a username" <|
                 \_ ->
                     Login.credentials (typed "  ada " "correct horse")
-                        |> .username
+                        |> .id
                         |> Expect.equal "ada"
             , test "a space in the password is a character the User chose" <|
                 \_ ->
@@ -87,7 +87,7 @@ suite =
                     typed "ada" "correct horse"
                         |> Login.withPassword "changed"
                         |> Expect.equal
-                            { username = "ada", password = "changed", state = Login.Ready }
+                            { username = "ada", password = "changed", state = Login.Ready, reason = Nothing, filled = False }
             ]
         , describe "view"
             [ test "invalid credentials are announced beside the fields" <|
@@ -123,6 +123,153 @@ suite =
                         |> Query.fromHtml
                         |> Query.find [ Selector.tag "button" ]
                         |> Query.has [ Selector.disabled True ]
+            ]
+        , describe "after a password change"
+            [ test "opens on the User's own name, with no password" <|
+                \_ ->
+                    Login.afterPasswordChange "ada"
+                        |> Expect.all
+                            [ .username >> Expect.equal "ada"
+                            , .password >> Expect.equal ""
+                            ]
+            , test "says why the person is here, so the change does not look as though it failed" <|
+                \_ ->
+                    Login.afterPasswordChange "ada"
+                        |> Login.view messages
+                        |> Query.fromHtml
+                        |> Query.find [ Selector.attribute (Html.Attributes.attribute "role" "status") ]
+                        |> Query.has
+                            [ Selector.text "Your password was changed, and that signed you out everywhere, this browser included. Sign in with the new password." ]
+            , test "keeps saying so while the person types" <|
+                \_ ->
+                    Login.afterPasswordChange "ada"
+                        |> Login.withPassword "new horse"
+                        |> .reason
+                        |> Expect.equal (Just Login.PasswordChanged)
+            , test "keeps saying so beside a refused attempt" <|
+                \_ ->
+                    -- The old password being refused is exactly when the reason is worth reading.
+                    Login.afterPasswordChange "ada"
+                        |> Login.withState (Login.Rejected ApiError.InvalidCredentials)
+                        |> .reason
+                        |> Expect.equal (Just Login.PasswordChanged)
+            , test "is forgotten once the form is left" <|
+                \_ ->
+                    Login.afterPasswordChange "ada"
+                        |> Login.withoutReason
+                        |> .reason
+                        |> Expect.equal Nothing
+            , test "puts the cursor in the password field, the one left to fill" <|
+                \_ ->
+                    Login.focusFieldId (Login.afterPasswordChange "ada")
+                        |> Expect.equal "login-password"
+            , test "has the password field read the reason out when it is focused" <|
+                \_ ->
+                    -- A status present from the start is often not announced; the description
+                    -- of the field the cursor lands in is.
+                    Login.afterPasswordChange "ada"
+                        |> Login.view messages
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.find [ Selector.id "login-password" ]
+                                >> Query.has [ Selector.attribute (Html.Attributes.attribute "aria-describedby" "login-reason") ]
+                            , Query.find [ Selector.id "login-reason" ]
+                                >> Query.has [ Selector.text "Your password was changed" ]
+                            ]
+            , test "points the password field at the reason and at a refusal, both" <|
+                \_ ->
+                    Login.afterPasswordChange "ada"
+                        |> Login.withPassword "old horse"
+                        |> Login.withState (Login.Rejected ApiError.InvalidCredentials)
+                        |> Login.view messages
+                        |> Query.fromHtml
+                        |> Query.find [ Selector.id "login-password" ]
+                        |> Query.has [ Selector.attribute (Html.Attributes.attribute "aria-describedby" "login-reason login-rejection") ]
+            ]
+        , describe "after a password change whose answer was lost"
+            [ test "opens on the User's name and the new password, to be tried first" <|
+                \_ ->
+                    Login.afterLostChange { id = "ada", password = "new horse" }
+                        |> Expect.all
+                            [ .username >> Expect.equal "ada"
+                            , .password >> Expect.equal "new horse"
+                            , .reason >> Expect.equal (Just Login.PasswordMayHaveChanged)
+                            ]
+            , test "says the password may have changed, and what a refusal of the new one means" <|
+                \_ ->
+                    Login.afterLostChange { id = "ada", password = "new horse" }
+                        |> Login.view messages
+                        |> Query.fromHtml
+                        |> Query.find [ Selector.id "login-reason" ]
+                        |> Query.has
+                            [ Selector.text "Your password may have changed: the answer to the change was lost, and you are signed out, as a change would sign you out. Try the new password first; it is filled in. If it is refused, the change was not made, and your old password still works." ]
+            , test "puts the cursor in the filled password field, so Enter tries it" <|
+                \_ ->
+                    Login.focusFieldId (Login.afterLostChange { id = "ada", password = "new horse" })
+                        |> Expect.equal "login-password"
+            , test "can be sent as it is" <|
+                \_ ->
+                    Login.canSubmit (Login.afterLostChange { id = "ada", password = "new horse" })
+                        |> Expect.equal True
+            , test "what is sent, and offered once accepted, is the password filled in" <|
+                \_ ->
+                    -- The credential travels with the request and comes back with its answer,
+                    -- so what the credential store is offered is what bitmagnet accepted.
+                    Login.credentials (Login.afterLostChange { id = "ada", password = "new horse" })
+                        |> Expect.equal { id = "ada", password = "new horse" }
+            , test "keeps a password the person typed over the one it filled in, when the form is left" <|
+                \_ ->
+                    Login.afterLostChange { id = "ada", password = "new horse" }
+                        |> Login.withPassword "old horse"
+                        |> Login.withoutReason
+                        |> .password
+                        |> Expect.equal "old horse"
+            , test "a change confirmed while the form is open keeps what is in it, and says so" <|
+                \_ ->
+                    -- The confirmation is the moment the filled-in password is known to work;
+                    -- wiping it then would lose Magnes's only copy where the browser has no
+                    -- credential store.
+                    Login.afterLostChange { id = "ada", password = "new horse" }
+                        |> Login.withState Login.Submitting
+                        |> Login.changeConfirmed
+                        |> Expect.all
+                            [ .username >> Expect.equal "ada"
+                            , .password >> Expect.equal "new horse"
+                            , .reason >> Expect.equal (Just Login.PasswordChanged)
+                            , .state >> Expect.equal Login.Submitting
+                            ]
+            , test "a confirmed password Magnes filled in still goes when the form is left" <|
+                \_ ->
+                    Login.afterLostChange { id = "ada", password = "new horse" }
+                        |> Login.changeConfirmed
+                        |> Login.withoutReason
+                        |> .password
+                        |> Expect.equal ""
+            , test "forgets the password it filled in once the form is left" <|
+                \_ ->
+                    -- Magnes put it there for that reason; without the reason it is a password
+                    -- nobody typed.
+                    Login.afterLostChange { id = "ada", password = "new horse" }
+                        |> Login.withoutReason
+                        |> Expect.all
+                            [ .reason >> Expect.equal Nothing
+                            , .password >> Expect.equal ""
+                            , .username >> Expect.equal "ada"
+                            ]
+            ]
+        , describe "with no reason to give"
+            [ test "puts the cursor in the username field" <|
+                \_ ->
+                    Login.focusFieldId Login.empty
+                        |> Expect.equal Login.usernameFieldId
+            , test "keeps a password typed when the form is left" <|
+                \_ ->
+                    -- As it always has: the form outlives a visit, and a reason is what is
+                    -- dropped on leaving, not what the person typed.
+                    typed "ada" "correct horse"
+                        |> Login.withoutReason
+                        |> .password
+                        |> Expect.equal "correct horse"
             ]
         , describe "the outcomes the form must tell apart"
             [ test "invalid credentials, a disabled User, and throttling stay distinct" <|

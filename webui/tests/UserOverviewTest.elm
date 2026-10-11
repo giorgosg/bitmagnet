@@ -4,6 +4,7 @@ import ApiError
 import Expect
 import Html.Attributes
 import Identity
+import PasswordChange
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
@@ -25,12 +26,14 @@ ada =
 
 messages : UserOverview.Messages ()
 messages =
-    { signOutRequested = () }
+    { signOutRequested = ()
+    , passwordChange = { currentChanged = always (), newChanged = always (), submitted = () }
+    }
 
 
 rendered : UserOverview.SignOut -> Identity.User -> Query.Single ()
 rendered state user =
-    UserOverview.view Time.utc messages state user
+    UserOverview.view Time.utc messages state PasswordChange.initial user
         |> Query.fromHtml
 
 
@@ -59,25 +62,29 @@ suite =
                     rendered UserOverview.Ready ada
                         |> Query.hasNot [ Selector.text "ada@example.test" ]
             ]
-        , describe "no password section"
-            -- bitmagnet has no password-change mutation, so there is nothing here to
-            -- offer. A disabled control would promise one that does not exist.
-            [ test "renders no password field" <|
+        , describe "the password section"
+            -- bitmagnet 77f3fd9e3 added self.updatePassword. Until then this page drew no
+            -- password field at all, rather than a disabled one.
+            [ test "offers to change the password" <|
+                \_ ->
+                    rendered UserOverview.Ready ada
+                        |> Query.has [ Selector.tag "h2", Selector.text "Change your password" ]
+            , test "asks for the current password and a new one" <|
                 \_ ->
                     rendered UserOverview.Ready ada
                         |> Query.findAll [ Selector.attribute (Html.Attributes.type_ "password") ]
-                        |> Query.count (Expect.equal 0)
+                        |> Query.count (Expect.equal 2)
             ]
         , describe "signing out"
             [ test "offers the action when nothing is in flight" <|
                 \_ ->
                     rendered UserOverview.Ready ada
-                        |> Query.find [ Selector.tag "button" ]
+                        |> signOutButton
                         |> Query.has [ Selector.text "Sign out", Selector.disabled False ]
             , test "does not offer a second one while the first is in flight" <|
                 \_ ->
                     rendered UserOverview.SigningOut ada
-                        |> Query.find [ Selector.tag "button" ]
+                        |> signOutButton
                         |> Query.has [ Selector.disabled True ]
             , test "a refusal is announced, and leaves the User signed in" <|
                 \_ ->
@@ -87,8 +94,13 @@ suite =
                                 [ Selector.attribute (Html.Attributes.attribute "role" "alert")
                                 , Selector.text (ApiError.toMessage ApiError.Unreachable)
                                 ]
-                            , Query.find [ Selector.tag "button" ]
+                            , signOutButton
                                 >> Query.has [ Selector.disabled False ]
                             ]
             ]
         ]
+
+
+signOutButton : Query.Single () -> Query.Single ()
+signOutButton =
+    Query.find [ Selector.class "sign-out" ]

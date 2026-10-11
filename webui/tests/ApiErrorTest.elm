@@ -100,6 +100,12 @@ suite =
                             , ApiError.PasswordInsufficientEntropy
                             , ApiError.UsernameInvalid
                             ]
+            , test "a wrong current password is its own outcome, not a failed sign-in" <|
+                \_ ->
+                    -- updatePassword's refusal. It says the password offered as the current one
+                    -- is wrong; it says nothing about the username, which was never asked for.
+                    from [ coded "PASSWORD_INCORRECT" [] ]
+                        |> Expect.equal ApiError.PasswordIncorrect
             , test "an instance that requires an email says so rather than refusing barely" <|
                 \_ ->
                     from [ coded "EMAIL_REQUIRED" [] ]
@@ -191,6 +197,28 @@ suite =
                 \_ ->
                     ApiError.fromError (Graphql.Http.HttpError Graphql.Http.NetworkError)
                         |> Expect.equal ApiError.Unreachable
+            , test "a request bitmagnet could not validate is refused as written, in a 200 too" <|
+                \_ ->
+                    -- gqlgen answers these with 422, but nothing in the code depends on the status.
+                    List.map (\code -> from [ coded code [] ])
+                        [ "GRAPHQL_VALIDATION_FAILED", "GRAPHQL_PARSE_FAILED" ]
+                        |> Expect.equal
+                            [ ApiError.RequestInvalid "some human-readable message"
+                            , ApiError.RequestInvalid "some human-readable message"
+                            ]
+            , test "a 403 whose body cannot be read is still a refusal" <|
+                \_ ->
+                    ApiError.fromError (Graphql.Http.HttpError (badStatus 403 "<html>Forbidden</html>"))
+                        |> Expect.equal (ApiError.Forbidden "")
+            , test "a 422 whose body cannot be read is only a status" <|
+                \_ ->
+                    -- Without gqlgen's code there is nothing to say what refused it.
+                    ApiError.fromError (Graphql.Http.HttpError (badStatus 422 "unprocessable"))
+                        |> Expect.equal (ApiError.BadStatus 422)
+            , test "a bad gateway is only a status, whatever its body" <|
+                \_ ->
+                    ApiError.fromError (Graphql.Http.HttpError (badStatus 502 """{"errors":[{"message":"upstream"}]}"""))
+                        |> Expect.equal (ApiError.BadStatus 502)
             , test "a bad status keeps its status code" <|
                 \_ ->
                     ApiError.fromError
@@ -230,6 +258,51 @@ suite =
                     ApiError.isUnauthorized (ApiError.ServerRejected "unauthorized-looking text")
                         |> Expect.equal False
             ]
+        , describe "mayHaveActed"
+            [ test "bitmagnet's refusals say nothing was done" <|
+                \_ ->
+                    [ ApiError.InvalidCredentials
+                    , ApiError.UserDisabled
+                    , ApiError.LoginThrottled
+                    , ApiError.UserAlreadyExists
+                    , ApiError.UsernameInvalid
+                    , ApiError.InvitationRequired
+                    , ApiError.InvitationInvalid
+                    , ApiError.InvitationExpired
+                    , ApiError.InvitationClaimed
+                    , ApiError.PasswordInsufficientEntropy
+                    , ApiError.PasswordIncorrect
+                    , ApiError.EmailRequired
+                    , ApiError.Unauthorized unrefused
+                    , ApiError.AuthenticationRequired unrefused
+                    , ApiError.UserAuthenticationRequired
+                    , ApiError.ApiKeyManagementForbidden
+                    , ApiError.ServiceUnavailable
+                    , ApiError.ServerRejected "x"
+                    ]
+                        |> List.filter ApiError.mayHaveActed
+                        |> Expect.equal []
+            , test "a request refused before anything ran says nothing was done" <|
+                \_ ->
+                    [ ApiError.RequestInvalid "x", ApiError.Forbidden "x", ApiError.BadUrl "nope" ]
+                        |> List.filter ApiError.mayHaveActed
+                        |> Expect.equal []
+            , test "no answer, an unreadable one, or a bare failing status leaves it open" <|
+                \_ ->
+                    [ ApiError.Unreachable
+                    , ApiError.Timeout
+                    , ApiError.BadStatus 502
+                    , ApiError.SchemaMismatch
+                    ]
+                        |> List.filter (not << ApiError.mayHaveActed)
+                        |> Expect.equal []
+            , test "a fault inside bitmagnet leaves it open" <|
+                \_ ->
+                    -- A connection lost during COMMIT surfaces as INTERNAL_SERVER_ERROR, and
+                    -- Postgres may have committed all the same.
+                    ApiError.mayHaveActed ApiError.ServerFault
+                        |> Expect.equal True
+            ]
         , describe "toMessage"
             [ test "every outcome has a non-empty message" <|
                 \_ ->
@@ -243,6 +316,7 @@ suite =
                     , ApiError.InvitationExpired
                     , ApiError.InvitationClaimed
                     , ApiError.PasswordInsufficientEntropy
+                    , ApiError.PasswordIncorrect
                     , ApiError.Unauthorized unrefused
                     , ApiError.UserAuthenticationRequired
                     , ApiError.AuthenticationRequired unrefused
@@ -255,6 +329,8 @@ suite =
                     , ApiError.BadStatus 502
                     , ApiError.BadUrl "nope"
                     , ApiError.SchemaMismatch
+                    , ApiError.RequestInvalid "x"
+                    , ApiError.Forbidden ""
                     ]
                         |> List.filter (String.isEmpty << ApiError.toMessage)
                         |> Expect.equal []
@@ -279,9 +355,36 @@ suite =
                             { unrefused | objectAction = Just { namespace = "graphql", object = "queue", action = "mutate" } }
                         )
                         |> Expect.equal "Sign in first: Anonymous is not allowed to mutate queue."
+            , test "a wrong current password is not worded as a failed sign-in" <|
+                \_ ->
+                    -- Nobody is signing in: the User is, and stays, signed in. Reading
+                    -- "username and password" here would point at a field that is not there.
+                    ApiError.toMessage ApiError.PasswordIncorrect
+                        |> Expect.notEqual (ApiError.toMessage ApiError.InvalidCredentials)
+            , test "a refusal of the request as written keeps bitmagnet's words" <|
+                \_ ->
+                    ApiError.toMessage (ApiError.RequestInvalid "Cannot query field \"x\".")
+                        |> String.contains "Cannot query field \"x\"."
+                        |> Expect.equal True
+            , test "a 403 says bitmagnet refused, with its reason when it gave one" <|
+                \_ ->
+                    ( ApiError.toMessage (ApiError.Forbidden "browser session request must be same-origin")
+                    , ApiError.toMessage (ApiError.Forbidden "")
+                    )
+                        |> Expect.equal
+                            ( "bitmagnet refused the request: browser session request must be same-origin."
+                            , "bitmagnet refused the request."
+                            )
             , test "an unrecognized error keeps the server's own words" <|
                 \_ ->
                     ApiError.toMessage (ApiError.ServerRejected "user: register failed: nope")
                         |> Expect.equal "user: register failed: nope"
             ]
         ]
+
+
+badStatus : Int -> String -> Graphql.Http.HttpError
+badStatus status body =
+    Graphql.Http.BadStatus
+        { url = "/graphql", statusCode = status, statusText = "", headers = Dict.empty }
+        body

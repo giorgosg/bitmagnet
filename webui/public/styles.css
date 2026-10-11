@@ -708,8 +708,9 @@ main {
 
 /* Administration ---------------------------------------------------------- */
 
-/* A screen that is a list rather than a form: it takes the full content column, and the
-   form inside it keeps the narrow fields every other form has. */
+/* A screen of more than one panel, such as a list with a form, or the User overview with
+   its password change: it takes the full content column and scrolls as one, and each form
+   inside it keeps the narrow fields every other form has. */
 .page {
   padding-bottom: 2rem;
   overflow-y: auto;
@@ -1260,12 +1261,22 @@ main {
 }
 
 /* Throttling is a wait, not a wrong answer, so it is drawn above the fields in the
-   neutral colour rather than beside them in the accent. */
-.panel .wait {
+   neutral colour rather than beside them in the accent. So is the reason the login form
+   gives after a password change: nothing went wrong, and it must not read as though the
+   change had failed. */
+.panel .wait,
+.panel .because {
   margin: 0 0 0.5rem;
   padding: 0.5rem 0.75rem;
   border-radius: 6px;
   background: var(--faint);
+  font-size: 0.875rem;
+}
+
+/* What a password change will do, said before it is asked for: two short paragraphs read
+   as one warning, so they sit together rather than a paragraph's margin apart. */
+.panel .password-change-warning {
+  margin: 0 0 0.25rem;
   font-size: 0.875rem;
 }
 

@@ -11,7 +11,9 @@
     "review": "elm-review",
     "test:e2e": "playwright test",
     "test:e2e:credentialed": "env MAGNES_E2E_CREDENTIALED=1 playwright test",
-    "codegen": "elm-graphql ${BITMAGNET_URL:-http://localhost:3333}/graphql --base Magnes.Api --output src"
+    "codegen": "rm -rf .dev/codegen && elm-graphql ${BITMAGNET_URL:-http://localhost:3333}/graphql --base Magnes.Api --output .dev/codegen && npm run codegen:install",
+    "codegen:sdl": "rm -rf .dev/codegen && elm-graphql --schema-file ${BITMAGNET_SDL:?name the SDL file in BITMAGNET_SDL} --base Magnes.Api --output .dev/codegen && npm run codegen:install",
+    "codegen:install": "rm .dev/codegen/Magnes/Api/ScalarCodecs.elm && find src/Magnes/Api -name '*.elm' ! -name ScalarCodecs.elm -delete && cp -R .dev/codegen/Magnes/Api/. src/Magnes/Api/"
   },
   "license": "MIT",
   "devDependencies": {

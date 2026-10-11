@@ -563,7 +563,20 @@ suite =
                             , Tuple.first
                                 >> rendered
                                 >> Query.find [ Selector.attribute (Html.Attributes.attribute "role" "alert") ]
-                                >> Query.has [ Selector.text "bitmagnet did not purge the jobs: ", Selector.text (ApiError.toMessage ApiError.ServerFault) ]
+                                >> Query.has [ Selector.text "bitmagnet did not purge the jobs: ", Selector.text (ApiError.toMessage (ApiError.Forbidden "browser session request must be same-origin")) ]
+                            ]
+            , test "a request bitmagnet could not run as written was not done either" <|
+                \_ ->
+                    scoped failedInProcessTorrent
+                        |> QueueAdmin.askPurge
+                        |> QueueAdmin.confirm
+                        |> answer onPage (Err invalidRequest)
+                        |> Tuple.first
+                        |> rendered
+                        |> Query.find [ Selector.attribute (Html.Attributes.attribute "role" "alert") ]
+                        |> Expect.all
+                            [ Query.has [ Selector.text "bitmagnet did not purge the jobs: " ]
+                            , Query.hasNot [ Selector.text "is not known" ]
                             ]
             , test "a purge with no usable answer is not known to be done or not, said so for every cause, and points to the jobs to check" <|
                 \_ ->
@@ -916,23 +929,41 @@ batchDocument chosen =
     Graphql.Document.serializeMutation (QueueAdmin.reprocessMutation chosen)
 
 
-{-| bitmagnet answered, with an error: the act was not done.
+{-| bitmagnet turning the act away before running any of it: its answer to a cookie-authenticated
+mutation from another origin, as the fixture server gave it on 2026-10-11. The act was not
+done.
 -}
 refusedByBitmagnet : Graphql.Http.Error ()
 refusedByBitmagnet =
-    Graphql.Http.GraphqlError (GraphqlError.UnparsedData Encode.null)
+    Graphql.Http.HttpError
+        (Graphql.Http.BadStatus { url = "/graphql", statusCode = 403, statusText = "Forbidden", headers = Dict.empty }
+            """{"errors":[{"message":"browser session request must be same-origin"}],"data":null}"""
+        )
+
+
+{-| gqlgen turning away a document it could not validate, with 422: nothing in it ran.
+-}
+invalidRequest : Graphql.Http.Error ()
+invalidRequest =
+    Graphql.Http.HttpError
+        (Graphql.Http.BadStatus { url = "/graphql", statusCode = 422, statusText = "Unprocessable Entity", headers = Dict.empty }
+            """{"errors":[{"message":"Cannot query field \\"purgeJobs\\" on type \\"QueueMutation\\".","extensions":{"code":"GRAPHQL_VALIDATION_FAILED"}}],"data":null}"""
+        )
+
+
+{-| No answer that says whether the act was done: it may have been. A fault inside bitmagnet is
+among them, since a connection lost during COMMIT gives INTERNAL\_SERVER\_ERROR though Postgres
+may have committed.
+-}
+unanswered : List (Graphql.Http.Error ())
+unanswered =
+    [ Graphql.Http.GraphqlError (GraphqlError.UnparsedData Encode.null)
         [ { message = "internal server error"
           , locations = Nothing
           , details = Dict.fromList [ ( "extensions", Encode.object [ ( "code", Encode.string "INTERNAL_SERVER_ERROR" ) ] ) ]
           }
         ]
-
-
-{-| No answer bitmagnet can be read to have given: the act may have been done.
--}
-unanswered : List (Graphql.Http.Error ())
-unanswered =
-    [ Graphql.Http.HttpError Graphql.Http.NetworkError
+    , Graphql.Http.HttpError Graphql.Http.NetworkError
     , Graphql.Http.HttpError Graphql.Http.Timeout
     , Graphql.Http.HttpError (Graphql.Http.BadStatus { url = "/graphql", statusCode = 504, statusText = "Gateway Timeout", headers = Dict.empty } "")
     , Graphql.Http.HttpError (Graphql.Http.BadPayload (Decode.Failure "not the schema" Encode.null))

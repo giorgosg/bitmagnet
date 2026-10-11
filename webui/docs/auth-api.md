@@ -151,9 +151,9 @@ revoked cookie. API keys are not affected.
 
 `updatePassword` checks `currentPassword` and holds `newPassword` to
 `auth.password_min_entropy`. It requires a User-authenticated Identity, so Anonymous and
-API-key Identities are refused. It does not re-issue a credential: the caller is Anonymous
-afterwards and has to sign in again. The Angular UI does not call it; Magnes's side is
-ticket 20.
+API-key Identities are refused. It does not re-issue a credential: the Identity is Anonymous
+afterwards, and the User has to sign in again. The Angular UI does not call it; Magnes calls it from
+`/account` (ticket 20).
 
 `putRole` is a **replace, not a merge**: the object actions given become the role's entire
 permission set. Read the role first, or an edit silently revokes everything unlisted. It
@@ -356,7 +356,7 @@ for telling which of several fields failed, but it is no longer the only signal.
 | `INVITATION_EXPIRED` | Registration, code past its expiry |
 | `INVITATION_CLAIMED` | Registration, code already used |
 | `PASSWORD_INSUFFICIENT_ENTROPY` | Below `auth.password_min_entropy` (default 70) |
-| `PASSWORD_INCORRECT` | `updatePassword`, wrong `currentPassword`; not yet mapped in `ApiError.elm` |
+| `PASSWORD_INCORRECT` | `updatePassword`, wrong `currentPassword` |
 | `EMAIL_REQUIRED` | `auth.email_required` is on and no address was given |
 | `EMAIL_INVALID` | Registration or invitation, malformed address |
 | `UNAUTHORIZED` | Refusal; carries `namespace`, `object`, `action` |
