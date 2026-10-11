@@ -40,6 +40,7 @@ const baseURL = `https://localhost:${port}`;
 process.env.MAGNES_E2E_CREDENTIALS = path.resolve(".dev/e2e-credentials.json");
 
 const queueChangingSpecs = ["**/queue-admin.spec.js"];
+const anonymousChangingSpecs = ["**/anonymous-role.spec.js"];
 
 const credentialFree = {
   name: "chromium",
@@ -53,7 +54,7 @@ const credentialFree = {
 const withCredentials = {
   name: "credentialed",
   testDir: "e2e/credentialed",
-  testIgnore: queueChangingSpecs,
+  testIgnore: [...queueChangingSpecs, ...anonymousChangingSpecs],
   use: { ...devices["Desktop Chrome"] },
 };
 
@@ -73,6 +74,17 @@ const changesTheQueue = {
   use: { ...devices["Desktop Chrome"] },
 };
 
+// anon is shared by every Anonymous browser. Changing it waits until all readers have
+// finished, and these tests run one at a time and restore the stored Role in finally.
+const changesAnonymous = {
+  name: "credentialed-anonymous-changes",
+  testDir: "e2e/credentialed",
+  testMatch: anonymousChangingSpecs,
+  dependencies: ["credentialed-queue-changes"],
+  fullyParallel: false,
+  use: { ...devices["Desktop Chrome"] },
+};
+
 export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
@@ -87,7 +99,7 @@ export default defineConfig({
     ignoreHTTPSErrors: true,
     trace: "on-first-retry",
   },
-  projects: credentialed ? [withCredentials, changesTheQueue] : [credentialFree],
+  projects: credentialed ? [withCredentials, changesTheQueue, changesAnonymous] : [credentialFree],
   // Only the credentialed run has anything to take down. See e2e/harness/teardown.js for
   // why Playwright's own web-server teardown is not enough.
   globalTeardown: credentialed ? "./e2e/harness/teardown.js" : undefined,

@@ -1,4 +1,4 @@
-module Roles exposing (Confirming(..), Draft, Listing(..), Messages, Page, Permission, Role, State, Submission(..), delete, desiredActions, draftNamed, empty, fetch, newDraft, ownRole, put, toggle, view, withConfirming, withDeletion, withDraft, withListing, withName, withSubmission, writable)
+module Roles exposing (Confirming(..), Draft, Listing(..), Messages, Page, Permission, Role, State, Submission(..), confirmationFor, delete, desiredActions, draftNamed, empty, fetch, newDraft, ownRole, put, toggle, view, withConfirming, withDeletion, withDraft, withListing, withName, withSubmission, writable)
 
 {-| Administering Roles: what each one grants, and the two ways that changes.
 
@@ -97,11 +97,9 @@ type Naming
 
 {-| Whether this Role's Permissions may be written at all, and if not, why.
 
-The spec settles two of them: "`admin` remains fixed at its wildcard Permission and `anon`
-remains governed by Anonymous access configuration", and additional Permissions are for
-`editor` and `user`. Neither is a rule bitmagnet enforces — `putRole` would write rows for
-either — so it is enforced here, and the reason is carried rather than inferred, because a
-disabled grid with no explanation is indistinguishable from a broken one.
+`admin` stays fixed at its in-memory wildcard Permission. `anon` is stored and editable;
+Anonymous access configuration only switches its grants off. A read-only reason is carried
+rather than inferred, because a disabled grid with no explanation looks broken.
 
 -}
 type Writing
@@ -110,12 +108,13 @@ type Writing
 
 
 {-| The ask that has been made but not yet answered. One at a time, as on the User screen:
-arming two is how the wrong one gets clicked. Neither carries anything but the Role's name,
-because the ask itself is what the confirmation means.
+arming two is how the wrong one gets clicked. An Anonymous write ask always names `anon`;
+the other asks carry the Role name.
 -}
 type Confirming
     = Deleting String
     | SavingOwn String
+    | SavingAnonymous
 
 
 {-| A Role as it would be saved. `chosen` holds the keys of the Object actions ticked;
@@ -172,7 +171,7 @@ that is no longer the one on the form.
 -}
 withDraft : Draft -> State -> State
 withDraft draft state =
-    { state | draft = draft, submission = Ready }
+    { state | draft = draft, submission = Ready, confirming = Nothing }
 
 
 withSubmission : Submission -> State -> State
@@ -194,7 +193,7 @@ withDeletion deletion state =
 
 withName : String -> Draft -> Draft
 withName name draft =
-    { draft | name = name }
+    { draft | name = name, writing = writingFor (String.trim name) }
 
 
 {-| The Role under this name as a Draft, with its Permissions sorted into the three kinds:
@@ -212,7 +211,7 @@ draftFor : List Identity.ObjectAction -> Role -> Draft
 draftFor offered role =
     let
         offeredKeys =
-            Set.fromList (List.map Identity.actionKey offered)
+            Set.fromList (List.map Identity.actionKey (offeredFor role.name offered))
 
         ( held, stored ) =
             List.partition .core role.permissions
@@ -222,7 +221,7 @@ draftFor offered role =
     in
     { name = role.name
     , naming = Named
-    , writing = writingFor role
+    , writing = writingFor role.name
     , chosen = Set.fromList (List.map (.objectAction >> Identity.actionKey) shown)
     , locked = List.map .objectAction held
     , carried = List.map .objectAction unshown
@@ -237,14 +236,11 @@ writable draft =
     draft.writing == Writable
 
 
-writingFor : Role -> Writing
-writingFor role =
-    case role.name of
+writingFor : String -> Writing
+writingFor name =
+    case name of
         "admin" ->
             ReadOnly "bitmagnet fixes admin at its wildcard Permission, which grants everything and is held in memory. Nothing written here would add to it or take anything away."
-
-        "anon" ->
-            ReadOnly "What anon holds follows the instance's Anonymous access setting, not this form. Editing it here would be overruled by the setting."
 
         _ ->
             Writable
@@ -275,7 +271,27 @@ Role can do changes, because the core grant is what was answering anyway.
 -}
 desiredActions : List Identity.ObjectAction -> Draft -> List Identity.ObjectAction
 desiredActions offered draft =
-    List.filter (\action -> Set.member (Identity.actionKey action) draft.chosen) offered ++ draft.carried
+    List.filter (\action -> Set.member (Identity.actionKey action) draft.chosen) (offeredFor draft.name offered) ++ draft.carried
+
+
+{-| A save with Anonymous write authority always asks, including carried wildcard grants.
+Other Roles only ask when the change affects the Identity holding this screen.
+-}
+confirmationFor : List Identity.ObjectAction -> Maybe String -> Draft -> Maybe Confirming
+confirmationFor offered own draft =
+    if isAnonymous draft && List.any grantsWrites (desiredActions offered draft ++ draft.locked) then
+        Just SavingAnonymous
+
+    else if own == Just (String.trim draft.name) then
+        Just (SavingOwn (String.trim draft.name))
+
+    else
+        Nothing
+
+
+grantsWrites : Identity.ObjectAction -> Bool
+grantsWrites action =
+    List.member action.action [ "mutate", "delete", "**" ]
 
 
 
@@ -419,9 +435,11 @@ editor messages busy own state loadedPage =
         [ h2 [] [ text (heading state.draft) ]
         , naming messages busy state.draft
         , readOnlyNotice state.draft
+        , anonymousNotice state.draft
         , permissionGrid messages (busy || not mayWrite) loadedPage.actions state.draft
         , lockedNotice state.draft
         , carriedNotice state.draft
+        , carriedAuthNotice state.draft
         , outcome state.submission
         , if not mayWrite then
             -- Visible, and immutable: there is nothing to press, because nothing pressed
@@ -432,6 +450,9 @@ editor messages busy own state loadedPage =
             case state.confirming of
                 Just (SavingOwn _) ->
                     ownSaveAsk messages busy state.draft
+
+                Just SavingAnonymous ->
+                    anonymousSaveAsk messages busy
 
                 _ ->
                     button
@@ -464,6 +485,15 @@ ownSaveAsk messages busy draft =
         , button
             [ type_ "button", disabled busy, onClick messages.cancelled ]
             [ text "Keep" ]
+        ]
+
+
+anonymousSaveAsk : Messages msg -> Bool -> Html msg
+anonymousSaveAsk messages busy =
+    div [ class "role-confirm", attribute "role" "alert" ]
+        [ Html.span [] [ text "Allow Anonymous writes? Any page you visit can issue these write actions cross-origin because CORS defaults to *. This can change or delete data without a credential, which is why Anonymous reads are safer. Saving keeps any carried write grants too." ]
+        , button [ type_ "button", class "danger", disabled busy, onClick messages.confirmed ] [ text "Allow Anonymous writes" ]
+        , button [ type_ "button", disabled busy, onClick messages.cancelled ] [ text "Keep" ]
         ]
 
 
@@ -555,10 +585,56 @@ naming messages busy draft =
                 ]
 
 
+isAnonymous : Draft -> Bool
+isAnonymous draft =
+    String.trim draft.name == "anon"
+
+
+offeredFor : String -> List Identity.ObjectAction -> List Identity.ObjectAction
+offeredFor name offered =
+    if String.trim name == "anon" then
+        List.filter (\action -> action.object /= "auth" && not (grantsAuth action)) offered
+
+    else
+        offered
+
+
+{-| A wildcard offered by a newer registry must not bypass the same restriction.
+-}
+grantsAuth : Identity.ObjectAction -> Bool
+grantsAuth action =
+    let
+        identity =
+            Identity.Anonymous [ action ]
+    in
+    Identity.can (Identity.graphql "auth" "query") identity
+        || Identity.can (Identity.graphql "auth" "mutate") identity
+
+
+anonymousNotice : Draft -> Html msg
+anonymousNotice draft =
+    if isAnonymous draft then
+        p [ class "notice" ]
+            [ text "anon's stored grants apply only while the Anonymous access setting, auth.anonymous_access, is on. Magnes cannot see whether it is on. auth Permissions are omitted: Anonymous administration could grant itself everything and hand the instance away." ]
+
+    else
+        text ""
+
+
+carriedAuthNotice : Draft -> Html msg
+carriedAuthNotice draft =
+    if isAnonymous draft && List.any grantsAuth draft.carried then
+        p [ class "notice error" ]
+            [ text "anon already holds a carried Permission that grants auth access, possibly through a wildcard. Saving preserves this access; no checkbox here can remove it. Anonymous administration can give itself everything. Turn off auth.anonymous_access to deny it, then remove the stored grant through another administrator client or the database before turning Anonymous access back on." ]
+
+    else
+        text ""
+
+
 permissionGrid : Messages msg -> Bool -> List Identity.ObjectAction -> Draft -> Html msg
 permissionGrid messages busy offered draft =
     div [ class "permissions" ]
-        (List.map (namespaceGroup messages busy draft) (Identity.byNamespace offered))
+        (List.map (namespaceGroup messages busy draft) (Identity.byNamespace (offeredFor draft.name offered)))
 
 
 {-| Grouped by namespace, in the order bitmagnet listed them. Only `graphql` is reachable
@@ -637,8 +713,8 @@ lockedNotice draft =
 
 
 {-| Permissions already stored that no checkbox can express, because bitmagnet does not
-name them in `listObjectActions`. Saving keeps them, which is the whole reason they are
-counted here rather than lost in the replace.
+name them in `listObjectActions`, or this editor withholds them for `anon`. Saving keeps
+them, which is the whole reason they are named here rather than lost in the replace.
 -}
 carriedNotice : Draft -> Html msg
 carriedNotice draft =
@@ -651,7 +727,7 @@ carriedNotice draft =
                 ("Kept as they are: this Role holds "
                     ++ Format.forCount (List.length draft.carried)
                         { one = "a Permission", many = "Permissions" }
-                    ++ " bitmagnet does not list as an Object action, so no box above can show "
+                    ++ " this editor cannot offer as an Object action, so no box above can show "
                     ++ Format.forCount (List.length draft.carried) { one = "it", many = "them" }
                     ++ " — "
                     ++ String.join ", " (List.map Identity.actionKey draft.carried)
@@ -771,7 +847,7 @@ so rather than promising an edit that the form will then refuse.
 -}
 openLabel : Role -> String
 openLabel role =
-    case writingFor role of
+    case writingFor role.name of
         Writable ->
             "Edit"
 

@@ -173,6 +173,58 @@ suite =
                     Roles.desiredActions offered (draftOf "curator")
                         |> List.member wildcard
                         |> Expect.equal True
+            , test "anon keeps pre-existing auth Permissions as carried, never as boxes" <|
+                \_ ->
+                    let
+                        listing =
+                            { roles = [ { anonymous | permissions = [ { objectAction = Identity.graphql "auth" "query", core = False } ] } ], actions = offered }
+
+                        draft =
+                            Roles.draftNamed "anon" listing |> Maybe.withDefault Roles.newDraft
+                    in
+                    Roles.empty
+                        |> Roles.withListing (Roles.Loaded listing)
+                        |> Roles.withDraft draft
+                        |> rendered administratorIdentity
+                        |> Expect.all
+                            [ Query.has [ Selector.text "graphql::auth::query" ]
+                            , Query.has [ Selector.text "Saving preserves this access" ]
+                            , Query.hasNot [ Selector.tag "label", Selector.text "auth::query" ]
+                            , always (Expect.equal [ Identity.graphql "auth" "query" ] (Roles.desiredActions offered draft))
+                            ]
+            , test "naming a new draft anon cannot add auth Permissions" <|
+                \_ ->
+                    Roles.newDraft
+                        |> Roles.toggle (Identity.graphql "auth" "query")
+                        |> Roles.withName " anon "
+                        |> Roles.desiredActions offered
+                        |> Expect.equal []
+            , test "anon cannot select any auth action or a wildcard granting auth" <|
+                \_ ->
+                    let
+                        forbidden =
+                            [ Identity.graphql "auth" "mutate", Identity.graphql "auth" "delete", { namespace = "**", object = "**", action = "**" } ]
+
+                        draft =
+                            List.foldl Roles.toggle (draftOf "anon") forbidden
+                    in
+                    Roles.desiredActions (forbidden ++ offered) draft |> Expect.equal []
+            , test "a carried wildcard granting auth is named and warned about" <|
+                \_ ->
+                    let
+                        draft =
+                            draftOf "anon"
+                    in
+                    loaded
+                        |> Roles.withDraft { draft | carried = [ { namespace = "**", object = "**", action = "**" } ] }
+                        |> rendered administratorIdentity
+                        |> Expect.all
+                            [ Query.has [ Selector.text "**::**::**" ]
+                            , Query.has [ Selector.text "Saving preserves this access" ]
+                            ]
+            , test "typing admin into a create draft still leaves it read-only" <|
+                \_ ->
+                    Roles.newDraft |> Roles.withName " admin " |> Roles.writable |> Expect.equal False
             , test "sends nothing for a Role whose only Permission is core" <|
                 \_ ->
                     -- admin's `**` is held in memory, not stored. Sending it back would
@@ -337,7 +389,7 @@ suite =
             [ test "nothing offers a second act while one is running" <|
                 \_ ->
                     -- A save and a deletion both refetch the list, so two in flight would
-                    -- race. Four Roles: a View each for admin and anon, an Edit for user,
+                    -- race. Four Roles: a View for admin, an Edit each for anon and user,
                     -- an Edit and a Delete for curator, and the form's own submit. All of
                     -- them wait.
                     loaded
@@ -360,7 +412,7 @@ suite =
                         |> Query.findAll [ Selector.tag "button", Selector.disabled True ]
                         |> Query.count (Expect.equal 6)
             ]
-        , describe "a Role this screen may not write"
+        , describe "the core Roles"
             [ test "admin is opened to be read, not edited" <|
                 \_ ->
                     -- The spec: "`admin` remains fixed at its wildcard Permission". A save
@@ -373,27 +425,27 @@ suite =
                             [ Query.hasNot [ Selector.class "submit" ]
                             , Query.has [ Selector.text "fixes admin at its wildcard Permission" ]
                             ]
-            , test "anon is left to the Anonymous access setting" <|
+            , test "anon offers an editable save and explains its setting dependency" <|
                 \_ ->
-                    -- The spec: "`anon` remains governed by Anonymous access
-                    -- configuration".
                     loaded
                         |> Roles.withDraft (draftOf "anon")
                         |> rendered administratorIdentity
                         |> Expect.all
-                            [ Query.hasNot [ Selector.class "submit" ]
-                            , Query.has [ Selector.text "Anonymous access setting" ]
+                            [ Query.has [ Selector.class "submit" ]
+                            , Query.has [ Selector.text "auth.anonymous_access" ]
+                            , Query.has [ Selector.text "Magnes cannot see whether" ]
                             ]
-            , test "none of its boxes can be ticked" <|
+            , test "anon omits auth actions and explains why" <|
                 \_ ->
                     loaded
                         |> Roles.withDraft (draftOf "anon")
                         |> rendered administratorIdentity
-                        |> Query.findAll
-                            [ Selector.attribute (Html.Attributes.type_ "checkbox")
-                            , Selector.disabled True
+                        |> Expect.all
+                            [ Query.hasNot [ Selector.tag "label", Selector.text "auth::query" ]
+                            , Query.has [ Selector.text "hand the instance away" ]
+                            , Query.findAll [ Selector.attribute (Html.Attributes.type_ "checkbox"), Selector.disabled False ]
+                                >> Query.count (Expect.equal 4)
                             ]
-                        |> Query.count (Expect.equal (List.length offered))
             , test "its row offers a read rather than an edit" <|
                 \_ ->
                     Roles.empty
@@ -451,6 +503,45 @@ suite =
                         |> Roles.withDraft (draftOf "curator")
                         |> rendered administratorIdentity
                         |> Query.has [ Selector.class "submit" ]
+            ]
+        , describe "Anonymous writes"
+            [ test "read-only anon changes do not require confirmation" <|
+                \_ ->
+                    Roles.confirmationFor offered Nothing (Roles.toggle (Identity.graphql "torrent" "query") (draftOf "anon"))
+                        |> Expect.equal Nothing
+            , test "every anon mutate and delete save requires confirmation" <|
+                \_ ->
+                    [ Identity.graphql "torrent" "mutate", Identity.graphql "torrent" "delete", { namespace = "http", object = "import", action = "mutate" } ]
+                        |> List.map (\action -> Roles.confirmationFor (action :: offered) Nothing (Roles.toggle action (draftOf "anon")))
+                        |> Expect.equal [ Just Roles.SavingAnonymous, Just Roles.SavingAnonymous, Just Roles.SavingAnonymous ]
+            , test "carried write wildcards also require confirmation" <|
+                \_ ->
+                    let
+                        draft =
+                            draftOf "anon"
+                    in
+                    Roles.confirmationFor offered Nothing { draft | carried = [ wildcard ] }
+                        |> Expect.equal (Just Roles.SavingAnonymous)
+            , test "confirmation names the cross-origin risk and offers an explicit choice" <|
+                \_ ->
+                    loaded
+                        |> Roles.withDraft (Roles.toggle (Identity.graphql "torrent" "mutate") (draftOf "anon"))
+                        |> Roles.withConfirming (Just Roles.SavingAnonymous)
+                        |> rendered administratorIdentity
+                        |> Expect.all
+                            [ Query.has [ Selector.attribute (Html.Attributes.attribute "role" "alert"), Selector.text "cross-origin" ]
+                            , Query.has [ Selector.text "CORS defaults to *" ]
+                            , Query.has [ Selector.tag "button", Selector.text "Allow Anonymous writes" ]
+                            , Query.has [ Selector.tag "button", Selector.text "Keep" ]
+                            , Query.hasNot [ Selector.class "submit" ]
+                            ]
+            , test "editing a confirmed draft requires a new decision" <|
+                \_ ->
+                    loaded
+                        |> Roles.withConfirming (Just (Roles.SavingOwn "curator"))
+                        |> Roles.withDraft (draftOf "anon")
+                        |> .confirming
+                        |> Expect.equal Nothing
             ]
         , describe "a refused save"
             [ test "is announced rather than leaving the form looking saved" <|
