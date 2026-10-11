@@ -202,7 +202,7 @@ test("events filter the answer without refetching, and survive reload and browse
     await expect(page).toHaveURL(new RegExp(`/stats/torrents\\?event=${event}$`));
     await expect(chip(page, event)).toHaveAttribute("aria-pressed", "true");
     await expect.poll(() => chartedCounts(page)).toEqual(expectedLines(buckets, sources, event));
-    const legend = page.locator(".chart-legend li");
+    const legend = page.getByRole("figure").getByRole("listitem");
     await expect(legend).toHaveText(Object.keys(expectedLines(buckets, sources, event)));
     await quietMoment(page);
     expect(asked).toHaveLength(before);
