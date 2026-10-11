@@ -1,4 +1,4 @@
-module Login exposing (Form, Messages, Reason(..), Submission(..), afterPasswordChange, canSubmit, credentials, empty, left, submit, usernameFieldId, view, withPassword, withState, withUsername)
+module Login exposing (Form, Messages, Reason(..), Submission(..), afterLostChange, afterPasswordChange, canSubmit, credentials, empty, focusFieldId, submit, usernameFieldId, view, withPassword, withState, withUsername, withoutReason)
 
 {-| Establishing a User-backed Identity in a browser.
 
@@ -14,6 +14,7 @@ answer and is never guessed at: `Identity.fetch` asks the server.
 
 import ApiError
 import Bitmagnet
+import Credential exposing (Credential)
 import Graphql.Http
 import Graphql.Operation exposing (RootMutation)
 import Graphql.SelectionSet as SelectionSet exposing (SelectionSet)
@@ -42,12 +43,14 @@ type alias Form =
 
 
 {-| Why the form is on screen, when that is something other than a person choosing to sign
-in. Only one thing sends someone here who was signed in a moment ago and did not ask to be
-signed out: changing their password, which bitmagnet answers by ending every sign-in the
-User has.
+in. Only one thing Magnes itself does sends someone here who was signed in a moment ago and
+did not ask to be signed out: changing their password, which bitmagnet answers by ending
+every sign-in the User has. There are two reasons because that answer can be lost: then the
+change may or may not have been made, and the form says so (see `PasswordChange`).
 -}
 type Reason
     = PasswordChanged
+    | PasswordMayHaveChanged
 
 
 type Submission
@@ -70,12 +73,33 @@ afterPasswordChange username =
     { empty | username = username, reason = Just PasswordChanged }
 
 
-{-| The reason describes an arrival, so leaving the form ends it. Coming back later is not
-the moment the password changed.
+{-| The form as a password change whose answer was lost leaves it: on the User's own name and
+the new password, saying that the change may have been made. Signing in with it is how the
+person finds out. Accepted, the change was made, and the sign-in offers the password to the
+credential store as any sign-in does; refused, it was not, and the old password still works.
+The password exists here only in memory, as it did in the password change's form.
 -}
-left : Form -> Form
-left form =
-    { form | reason = Nothing }
+afterLostChange : Credential -> Form
+afterLostChange credential =
+    { empty | username = credential.id, password = credential.password, reason = Just PasswordMayHaveChanged }
+
+
+{-| The reason describes an arrival, so leaving the form ends it. Coming back later is not
+the moment the password changed. A password Magnes filled in for that reason goes with it:
+without the reason, it is a password nobody typed. One the person typed stays, as it always
+has.
+-}
+withoutReason : Form -> Form
+withoutReason form =
+    case form.reason of
+        Just PasswordMayHaveChanged ->
+            { form | reason = Nothing, password = "" }
+
+        Just PasswordChanged ->
+            { form | reason = Nothing }
+
+        Nothing ->
+            form
 
 
 {-| Typing is also how a rejection is dismissed: the message described the credentials
@@ -163,6 +187,25 @@ usernameFieldId =
     "login-username"
 
 
+passwordFieldId : String
+passwordFieldId =
+    "login-password"
+
+
+{-| Where the cursor belongs when the form appears. With a reason to give, the username is
+already filled, so it is the password field; that field is described by the reason, so the
+reason is read out as the cursor lands, which a status present from the start often is not.
+-}
+focusFieldId : Form -> String
+focusFieldId form =
+    case form.reason of
+        Just _ ->
+            passwordFieldId
+
+        Nothing ->
+            usernameFieldId
+
+
 view : Messages msg -> Form -> Html msg
 view messages form =
     let
@@ -183,18 +226,18 @@ view messages form =
             , attribute "autocapitalize" "none"
             , spellcheck False
             , ariaInvalid form.state
-            , describedByRejection form.state
+            , describedBy (rejectionIds form.state)
             ]
             []
-        , label [ for "login-password" ] [ text "Password" ]
+        , label [ for passwordFieldId ] [ text "Password" ]
         , input
-            [ id "login-password"
+            [ id passwordFieldId
             , type_ "password"
             , value form.password
             , onInput messages.passwordChanged
             , attribute "autocomplete" "current-password"
             , ariaInvalid form.state
-            , describedByRejection form.state
+            , describedBy (reasonIds form.reason ++ rejectionIds form.state)
             ]
             []
         , fieldError
@@ -215,17 +258,37 @@ view messages form =
 
 
 {-| Above the fields, in the neutral colour of a status rather than the accent of an error:
-nothing has gone wrong, and this has to read as the change having worked.
+nothing has gone wrong. After a change, this has to read as the change having worked; after
+a lost answer, as a question the next sign-in answers.
 -}
 because : Maybe Reason -> Html msg
 because reason =
     case reason of
         Just PasswordChanged ->
-            p [ class "notice because", attribute "role" "status" ]
+            p [ id reasonId, class "notice because", attribute "role" "status" ]
                 [ text "Your password was changed, and that signed you out everywhere, this browser included. Sign in with the new password." ]
+
+        Just PasswordMayHaveChanged ->
+            p [ id reasonId, class "notice because", attribute "role" "status" ]
+                [ text "Your password may have changed: the answer to the change was lost, and you are signed out, as a change would sign you out. Try the new password first; it is filled in. If it is refused, the change was not made, and your old password still works." ]
 
         Nothing ->
             text ""
+
+
+reasonId : String
+reasonId =
+    "login-reason"
+
+
+reasonIds : Maybe Reason -> List String
+reasonIds reason =
+    case reason of
+        Just _ ->
+            [ reasonId ]
+
+        Nothing ->
+            []
 
 
 {-| One decision, two slots, so the two cannot drift into being shown together.
@@ -285,14 +348,27 @@ ariaInvalid state =
             attribute "aria-invalid" "false"
 
 
-describedByRejection : Submission -> Html.Attribute msg
-describedByRejection state =
+rejectionIds : Submission -> List String
+rejectionIds state =
     case state of
         Rejected ApiError.LoginThrottled ->
-            class ""
+            []
 
         Rejected _ ->
-            attribute "aria-describedby" rejectionId
+            [ rejectionId ]
+
+        Ready ->
+            []
+
+        Submitting ->
+            []
+
+
+describedBy : List String -> Html.Attribute msg
+describedBy ids =
+    case ids of
+        [] ->
+            class ""
 
         _ ->
-            class ""
+            attribute "aria-describedby" (String.join " " ids)

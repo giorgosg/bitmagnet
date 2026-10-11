@@ -33,7 +33,7 @@ messages =
 
 rendered : UserOverview.SignOut -> Identity.User -> Query.Single ()
 rendered state user =
-    UserOverview.view Time.utc messages state PasswordChange.empty user
+    UserOverview.view Time.utc messages state PasswordChange.initial user
         |> Query.fromHtml
 
 

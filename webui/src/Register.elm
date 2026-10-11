@@ -1,4 +1,4 @@
-module Register exposing (Form, Messages, Submission(..), canSubmit, credentials, empty, entropy, invitationCode, passwordOf, prefilled, state, submit, usernameFieldId, view, withEntropy, withInvitationCode, withPassword, withState, withUsername)
+module Register exposing (Form, Messages, Submission(..), canSubmit, credentials, empty, entropy, invitationCode, measured, passwordOf, prefilled, state, submit, usernameFieldId, view, withInvitationCode, withPassword, withState, withUsername)
 
 {-| Registering a User.
 
@@ -94,9 +94,11 @@ withInvitationCode code form =
     withState Ready { form | invitation = code }
 
 
-withEntropy : PasswordEntropy.Entropy -> Form -> Form
-withEntropy measurement form =
-    { form | entropy = measurement }
+{-| bitmagnet's measurement of the password: see `PasswordEntropy.landed`.
+-}
+measured : PasswordEntropy.Entropy -> Form -> Form
+measured measurement form =
+    { form | entropy = PasswordEntropy.landed measurement form.entropy }
 
 
 withState : Submission -> Form -> Form

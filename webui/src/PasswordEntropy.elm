@@ -1,4 +1,4 @@
-module PasswordEntropy exposing (Entropy(..), Strength, answered, forPassword, measure, meter)
+module PasswordEntropy exposing (Entropy(..), Strength, answered, forPassword, landed, measure, meter)
 
 {-| What bitmagnet says about a password being typed, and the meter that draws it.
 
@@ -95,6 +95,20 @@ answered result =
 
         Err _ ->
             Unmeasurable
+
+
+{-| A measurement, landing on what a form holds for its password. It lands only on a password
+still waiting for one: a field emptied since the measurement was asked for, by the person or by
+the form being dropped, has no password for it to describe. Both forms that measure go through
+here, so they keep the same rule.
+-}
+landed : Entropy -> Entropy -> Entropy
+landed measurement current =
+    if current == Measuring then
+        measurement
+
+    else
+        current
 
 
 {-| A real `progress` element, so the platform draws it and assistive technology reads it

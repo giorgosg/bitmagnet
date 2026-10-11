@@ -708,8 +708,9 @@ main {
 
 /* Administration ---------------------------------------------------------- */
 
-/* A screen that is a list rather than a form: it takes the full content column, and the
-   form inside it keeps the narrow fields every other form has. */
+/* A screen of more than one panel, such as a list with a form, or the User overview with
+   its password change: it takes the full content column and scrolls as one, and each form
+   inside it keeps the narrow fields every other form has. */
 .page {
   padding-bottom: 2rem;
   overflow-y: auto;

@@ -17,9 +17,11 @@ covers registration through an Invitation, sign-in, a User overview with sign-ou
 password change, API-key management, and administration of Users, Invitations and Roles.
 Changing a password signs the User out everywhere, this browser included, which the form says
 before it is sent and the login form says again afterwards; the new password is offered to the
-browser's password manager on the way. The header menu offers only the pages the current
-Identity may reach. A credentialed end-to-end suite drives the signed-in half in a real
-browser, against a disposable bitmagnet it starts itself, so no real password is involved.
+browser's password manager on the way. If the answer to a change is lost, Magnes keeps the new
+password until it knows, and the login form tries it first. The header menu offers only the
+pages the current Identity may reach. A credentialed end-to-end suite drives the signed-in
+half in a real browser, against a disposable bitmagnet it starts itself, so no real password
+is involved.
 
 `/status` shows bitmagnet's health checks, and its workers to an Identity that may see them.
 A dot in the header gives the same answer at a glance, polled every 30 seconds while the tab

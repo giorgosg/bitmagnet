@@ -174,9 +174,11 @@ In dependency order, each usable before the next exists:
 2. **Account** — who you are, your role, when you last signed in, sign out, and a password
    change (ticket 20). The change ends every sign-in the User has, this one included, so the
    form says so before it is sent, and afterwards the browser lands on the login form, asked
-   to return to the account, with a sentence saying why. The new password is offered to the
-   password manager on success only. API keys are untouched by it, and the form says that
-   too.
+   to return to the User overview, with a sentence saying why. The new password is offered to
+   the password manager on success only. API keys are untouched by it, and the form says that
+   too. If the answer is lost, Magnes keeps the new password until the change is settled; the
+   next time the browser is found signed out, the login form says the password may have
+   changed and tries the new one first, and signing in with it is what offers it.
 3. **API keys** — list, create, **delete**. The secret is shown once, at creation, and is
    never retrievable; the UI has to be emphatic about that. Scoping a key means the object
    action list from `listObjectActions`.
@@ -225,7 +227,7 @@ in this repository. One has since been closed:
 
 1. **No password-change mutation** — **closed** by bitmagnet `77f3fd9e3` (2026-09-14),
    which adds `self.updatePassword` and ends every session for the account when it
-   succeeds. The account screen's password section is built (ticket 20,
+   succeeds. The User overview's password section is built (ticket 20,
    `.scratch/identity-and-permissions/issues/20-build-password-change.md`).
 2. **`User` has no `enabled` field.** Still true on trunk on 2026-10-05. `setUserEnabled` exists, the column exists, and the
    type does not expose it — so a users table cannot show who is disabled, or reflect the

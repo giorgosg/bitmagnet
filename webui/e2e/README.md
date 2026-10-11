@@ -88,9 +88,14 @@ follows: the browser is Anonymous on the login form, which says why and opens on
 name; another device and another tab are signed out too; the new password was offered to the
 password manager; and bitmagnet refuses the old password and accepts the new one. It checks
 that a wrong current password and a weak new password are each refused on their own field,
-offer nothing and leave the User signed in, and it drops bitmagnet's answer to a change
-bitmagnet made, to check that the page says the outcome is unknown rather than that it failed.
-Every test registers a User of its own: see "Each worker has its own User" below.
+offer nothing and leave the User signed in. Two tests drop bitmagnet's answer to a change. In
+one, bitmagnet made the change: the page says the outcome is unknown rather than that it
+failed, refuses a second change, and once a tab switch finds the browser signed out, the
+login form says the password may have changed and has the new one filled in, which signs in
+and is offered to the password manager then. In the other, the change never reached
+bitmagnet: the User stays signed in with the change unsettled, and signing out and in, as the
+page says, settles it, the new password refused and the old one accepted. Every test
+registers a User of its own: see "Each worker has its own User" below.
 
 `queue-jobs.spec.js` (ticket 04 in `.scratch/dashboard`) reaches the queue's jobs from the
 status page, filters them by status and checks the facet counts against what is listed,
@@ -222,9 +227,8 @@ and changing the issuer's would leave every worker unable to mint an Invitation,
 issuer signs in afresh for each. The rest would take away what they sign in as.
 
 `password-change.spec.js` keeps to this. Verified 2026-10-11 against bitmagnet `trunk` at
-`e76818643`: three consecutive runs of the whole suite at the default worker count, 71 of 71
-each time with its five tests among them, after three earlier runs at 70 of 70 before the
-fifth was added.
+`e76818643`: three consecutive runs of the whole suite at the default worker count, 72 of 72
+each time with its six tests among them, after its review was answered.
 
 ## Conventions
 

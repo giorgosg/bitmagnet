@@ -151,8 +151,8 @@ revoked cookie. API keys are not affected.
 
 `updatePassword` checks `currentPassword` and holds `newPassword` to
 `auth.password_min_entropy`. It requires a User-authenticated Identity, so Anonymous and
-API-key Identities are refused. It does not re-issue a credential: the caller is Anonymous
-afterwards and has to sign in again. The Angular UI does not call it; Magnes calls it from
+API-key Identities are refused. It does not re-issue a credential: the Identity is Anonymous
+afterwards, and the User has to sign in again. The Angular UI does not call it; Magnes calls it from
 `/account` (ticket 20).
 
 `putRole` is a **replace, not a merge**: the object actions given become the role's entire

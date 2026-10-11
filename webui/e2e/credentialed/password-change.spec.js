@@ -1,27 +1,27 @@
-// Changing a password from /account (ticket 20), against a real bitmagnet.
+// Changing a password from the User overview (ticket 20), against a real bitmagnet.
 //
 // Every test here changes, or tries to change, the password of a User registered for that
-// test alone. bitmagnet ends every sign-in a User has when their password changes, so doing
-// it to the worker's administrator would sign out that worker's later tests, and doing it to
-// the issuer would end the token every worker mints Invitations with. See "Each worker has
-// its own User" in e2e/README.md.
+// test alone. Changing the worker's administrator's password would leave that worker's later
+// tests signing in with the old one, and changing the issuer's would leave every worker unable
+// to mint an Invitation, since the issuer signs in afresh for each. See "Each worker has its
+// own User" in e2e/README.md.
 
-import crypto from "crypto";
-
-import { inAnotherBrowser, registerUser, signIn, expect, test } from "../support/credentialed.js";
+import {
+  inAnotherBrowser,
+  newPassword,
+  registerUser,
+  signIn,
+  signInAt,
+  expect,
+  test,
+} from "../support/credentialed.js";
 import { recordCredentialStores, storedCredentials } from "../support/credential-store.js";
-
-// A password nobody chose, as the harness makes them: well above bitmagnet's minimum entropy.
-function newPassword() {
-  return crypto.randomBytes(24).toString("base64url");
-}
+import { setHidden } from "../support/stats.js";
 
 // Registers a User of the test's own, signs it in, and opens the User overview on it.
 async function onAccountAs(page, request, issuer, prefix) {
   const user = await registerUser(page, request, issuer, prefix);
-  await signIn(page, user);
-  await page.goto("/account");
-  await expect(page.getByRole("heading", { name: "Change your password" })).toBeVisible();
+  await signInAt(page, user, "/account", "Change your password");
   return user;
 }
 
@@ -41,6 +41,29 @@ async function changePassword(page, current, next) {
   return answered;
 }
 
+// Fills the form and sends it, with bitmagnet's answer dropped before the page sees it.
+// `reaching` decides whether the change reaches bitmagnet first; the answer it gives back,
+// if it does, is returned.
+async function changePasswordLosingTheAnswer(page, current, next, { reaching }) {
+  let reached;
+  await page.route("**/graphql", async (route) => {
+    if ((route.request().postData() ?? "").includes("updatePassword")) {
+      if (reaching) {
+        reached = await (await route.fetch()).json();
+      }
+      await route.abort();
+    } else {
+      await route.continue();
+    }
+  });
+  await page.getByLabel("Current password").fill(current);
+  await page.getByLabel("New password").fill(next);
+  await page.getByRole("button", { name: "Change password" }).click();
+  await expect(page.getByRole("alert")).toContainText("Whether your password was changed is not known.");
+  await page.unroute("**/graphql");
+  return reached;
+}
+
 function codeOf(answer) {
   return answer.errors?.[0]?.extensions?.code;
 }
@@ -52,6 +75,8 @@ async function expectStillSignedIn(page, user) {
   await expect(page.getByRole("button", { name: user.username })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Your User" })).toBeVisible();
 }
+
+const mayHaveChanged = "Your password may have changed: the answer to the change was lost";
 
 test("a changed password signs the User out, says why, and only the new one signs in", async ({
   page,
@@ -76,17 +101,19 @@ test("a changed password signs the User out, says why, and only the new one sign
     expect(answer.errors).toBeUndefined();
     expect(answer.data.self.updatePassword).toBeNull();
 
-    // This browser is Anonymous, on the login form, on the User's own name, and told why.
-    await expect(
-      page
-        .getByRole("status")
-        .filter({ hasText: "Your password was changed, and that signed you out everywhere" }),
-    ).toBeVisible();
+    // This browser is Anonymous, on the login form, on the User's own name, and told why,
+    // with the cursor in the password field, which the reason describes.
+    const reason = page
+      .getByRole("status")
+      .filter({ hasText: "Your password was changed, and that signed you out everywhere" });
+    await expect(reason).toBeVisible();
     await expect(page.getByRole("link", { name: "Sign in" })).toBeVisible();
     await expect(page.getByRole("button", { name: user.username })).toHaveCount(0);
     expect(new URL(page.url()).pathname).toBe("/login");
     expect(new URL(page.url()).searchParams.get("returnUrl")).toBe("/account");
     await expect(page.getByLabel("Username")).toHaveValue(user.username);
+    await expect(page.getByLabel("Password")).toBeFocused();
+    await expect(page.getByLabel("Password")).toHaveAccessibleDescription(await reason.textContent());
 
     // The other device was signed out too, which is what the form said would happen.
     await elsewhere.reload();
@@ -189,9 +216,8 @@ test("a weak new password is refused on that field, and changes nothing", async 
   await expectStillSignedIn(page, user);
 });
 
-test("an answer lost on the way back leaves the change unknown, though bitmagnet made it", async ({
+test("a change bitmagnet made whose answer was lost is found out at the next look, and its password tried first", async ({
   page,
-  browser,
   request,
   issuer,
 }) => {
@@ -202,35 +228,80 @@ test("an answer lost on the way back leaves the change unknown, though bitmagnet
   // The change reaches bitmagnet, which makes it, and its answer is dropped before the page
   // sees it: the case where saying "not changed" would send the person back to a password
   // that no longer works.
-  let reached;
-  await page.route("**/graphql", async (route) => {
-    if ((route.request().postData() ?? "").includes("updatePassword")) {
-      reached = await (await route.fetch()).json();
-      await route.abort();
-    } else {
-      await route.continue();
-    }
-  });
-  await page.getByLabel("Current password").fill(user.password);
-  await page.getByLabel("New password").fill(next);
-  await page.getByRole("button", { name: "Change password" }).click();
-
-  await expect(page.getByRole("alert")).toContainText("Whether your password was changed is not known.");
-  await expect(page.getByText("was not changed")).toHaveCount(0);
+  const reached = await changePasswordLosingTheAnswer(page, user.password, next, { reaching: true });
   expect(reached.errors).toBeUndefined();
+  await expect(page.getByText("was not changed")).toHaveCount(0);
+
+  // No second change can be sent while this one is unsettled, and the page says why.
+  await expect(page.getByText("Another change cannot be sent until this one is settled")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Change password" })).toBeDisabled();
 
   // Only a change the page saw accepted offers a credential.
   expect(await storedCredentials(page)).toEqual([]);
 
-  // And it was made: elsewhere, the old password is refused and the new one signs in.
-  await inAnotherBrowser(browser, async (elsewhere) => {
-    await elsewhere.goto("/login");
-    await elsewhere.getByLabel("Username").fill(user.username);
-    await elsewhere.getByLabel("Password").fill(user.password);
-    const refused = answerTo(elsewhere, "loginBrowser");
-    await elsewhere.getByRole("button", { name: "Sign in" }).click();
-    expect(codeOf(await refused)).toBe("INVALID_CREDENTIALS");
+  // Switching away and back asks bitmagnet who this is, which is Anonymous, since the change
+  // ended every sign-in. The login form says the password may have changed and has the new
+  // one filled in, ready to be sent.
+  await setHidden(page, true);
+  await setHidden(page, false);
+  const reason = page.getByRole("status").filter({ hasText: mayHaveChanged });
+  await expect(reason).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe("/login");
+  expect(new URL(page.url()).searchParams.get("returnUrl")).toBe("/account");
+  await expect(page.getByLabel("Username")).toHaveValue(user.username);
+  await expect(page.getByLabel("Password")).toHaveValue(next);
+  await expect(page.getByLabel("Password")).toBeFocused();
+  await expect(page.getByLabel("Password")).toHaveAccessibleDescription(await reason.textContent());
+  expect(await storedCredentials(page)).toEqual([]);
 
-    await signIn(elsewhere, { username: user.username, password: next });
-  });
+  // Pressing Enter sends it. bitmagnet accepts it, and the sign-in offers it, once.
+  const signedIn = answerTo(page, "loginBrowser");
+  await page.getByLabel("Password").press("Enter");
+  expect((await signedIn).errors).toBeUndefined();
+  await expect(page.getByRole("button", { name: user.username })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your User" })).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe("/account");
+  expect(await storedCredentials(page)).toEqual([{ id: user.username, password: next }]);
+
+  // Settled: the form offers a change again.
+  await expect(page.getByText("Another change cannot be sent")).toHaveCount(0);
+  await page.getByLabel("Current password").fill(next);
+  await page.getByLabel("New password").fill(newPassword());
+  await expect(page.getByRole("button", { name: "Change password" })).toBeEnabled();
+});
+
+test("a change that never reached bitmagnet is settled by signing out and in, with the old password", async ({
+  page,
+  request,
+  issuer,
+}) => {
+  await recordCredentialStores(page);
+  const user = await onAccountAs(page, request, issuer, "e2e-pw-unmade");
+  const next = newPassword();
+
+  await changePasswordLosingTheAnswer(page, user.password, next, { reaching: false });
+
+  // Still signed in, which a change would have ended, but the page does not guess: it keeps
+  // the change unsettled and says how to settle it.
+  await setHidden(page, true);
+  await setHidden(page, false);
+  await expect(page.getByRole("button", { name: user.username })).toBeVisible();
+  await expect(page.getByText("Another change cannot be sent until this one is settled")).toBeVisible();
+
+  // Signing out, as the page says, finds the browser signed out with the change unsettled,
+  // so the login form tries the new password first. bitmagnet refuses it: never made.
+  await page.getByRole("button", { name: "Sign out" }).first().click();
+  await expect(page.getByRole("status").filter({ hasText: mayHaveChanged })).toBeVisible();
+  await expect(page.getByLabel("Password")).toHaveValue(next);
+  const refused = answerTo(page, "loginBrowser");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  expect(codeOf(await refused)).toBe("INVALID_CREDENTIALS");
+  await expect(page.getByRole("alert")).toHaveText("That username and password do not match.");
+  expect(await storedCredentials(page)).toEqual([]);
+
+  // The old password signs in, and that settles it.
+  await signIn(page, user);
+  await expect(page.getByRole("heading", { name: "Your User" })).toBeVisible();
+  await expect(page.getByText("Another change cannot be sent")).toHaveCount(0);
+  expect(await storedCredentials(page)).toEqual([{ id: user.username, password: user.password }]);
 });

@@ -1,4 +1,4 @@
-module ApiError exposing (Failure(..), ObjectAction, Refusal, fromError, isUnauthorized, toMessage)
+module ApiError exposing (Failure(..), ObjectAction, Refusal, fromError, isUnauthorized, mayHaveActed, toMessage)
 
 {-| The single boundary where a bitmagnet failure becomes a UI state.
 
@@ -48,8 +48,9 @@ type alias Refusal =
     }
 
 
-{-| What a failed request means. Server outcomes come from `extensions.code`; the last
-group is transport, which never reached bitmagnet's resolvers at all.
+{-| What a failed request means. Server outcomes come from `extensions.code`. `RequestInvalid`
+and `Forbidden` are bitmagnet turning the request away before running any of it. The last
+group is transport: no answer, or none that could be read.
 -}
 type Failure
     = InvalidCredentials
@@ -71,6 +72,8 @@ type Failure
     | ServiceUnavailable
     | ServerFault
     | ServerRejected String
+    | RequestInvalid String
+    | Forbidden String
     | Unreachable
     | Timeout
     | BadStatus Int
@@ -92,8 +95,8 @@ fromError error =
                 Graphql.Http.Timeout ->
                     Timeout
 
-                Graphql.Http.BadStatus metadata _ ->
-                    BadStatus metadata.statusCode
+                Graphql.Http.BadStatus metadata body ->
+                    fromBadStatus metadata.statusCode body
 
                 Graphql.Http.BadUrl url ->
                     BadUrl url
@@ -122,10 +125,51 @@ fromGraphqlErrors errors =
                     ServerRejected "The server rejected the query."
 
 
+{-| A status other than 2xx, which elm-graphql hands over with the body undecoded. Two are
+bitmagnet turning a request away before running any of it, and saying so: gqlgen answers a
+document it cannot parse or validate with 422 and a code in the body, and bitmagnet answers a
+cookie-authenticated mutation from another origin, or from none, with 403 and a message but no
+code. Anything else is only a status, whatever its body says, since it may not be bitmagnet's.
+
+The body is read with elm-graphql's own error decoder, the one its 200 responses go through.
+
+-}
+fromBadStatus : Int -> String -> Failure
+fromBadStatus status body =
+    let
+        errors =
+            Decode.decodeString GraphqlError.decoder body
+                |> Result.withDefault []
+
+        invalid =
+            List.filterMap classify errors
+                |> List.filter isRequestInvalid
+    in
+    case ( invalid, status ) of
+        ( refused :: _, _ ) ->
+            refused
+
+        ( [], 403 ) ->
+            Forbidden (List.head errors |> Maybe.map .message |> Maybe.withDefault "")
+
+        ( [], _ ) ->
+            BadStatus status
+
+
+isRequestInvalid : Failure -> Bool
+isRequestInvalid failure =
+    case failure of
+        RequestInvalid _ ->
+            True
+
+        _ ->
+            False
+
+
 classify : GraphqlError.GraphqlError -> Maybe Failure
 classify error =
     decode codeDecoder error
-        |> Maybe.andThen (\code -> fromCode code (refusal error))
+        |> Maybe.andThen (\code -> fromCode code error)
 
 
 refusal : GraphqlError.GraphqlError -> Refusal
@@ -168,8 +212,8 @@ objectActionDecoder =
         )
 
 
-fromCode : String -> Refusal -> Maybe Failure
-fromCode code refused =
+fromCode : String -> GraphqlError.GraphqlError -> Maybe Failure
+fromCode code error =
     case code of
         "INVALID_CREDENTIALS" ->
             Just InvalidCredentials
@@ -209,12 +253,12 @@ fromCode code refused =
             Just EmailRequired
 
         "UNAUTHORIZED" ->
-            Just (Unauthorized refused)
+            Just (Unauthorized (refusal error))
 
         -- The same refusal, made to an Anonymous Identity (bitmagnet `4efaae142`). It carries
         -- the same extensions.
         "AUTHENTICATION_REQUIRED" ->
-            Just (AuthenticationRequired refused)
+            Just (AuthenticationRequired (refusal error))
 
         "USER_SESSION_REQUIRED" ->
             Just UserAuthenticationRequired
@@ -227,6 +271,14 @@ fromCode code refused =
 
         "INTERNAL_SERVER_ERROR" ->
             Just ServerFault
+
+        -- gqlgen's own, for a document it could not parse or validate against the schema:
+        -- nothing in it ran. Its message names what was wrong, so it is kept.
+        "GRAPHQL_VALIDATION_FAILED" ->
+            Just (RequestInvalid error.message)
+
+        "GRAPHQL_PARSE_FAILED" ->
+            Just (RequestInvalid error.message)
 
         _ ->
             Nothing
@@ -255,6 +307,99 @@ isUnauthorized failure =
 
         _ ->
             False
+
+
+{-| Whether bitmagnet may have done what the failed request asked, which decides whether a
+mutation's failure may be reported as "not done".
+
+Its refusals say it did nothing: each is decided before anything is written, or, for an
+unrecognised code, is bitmagnet answering rather than going quiet. So is a request turned away
+before it ran, or never sent. No answer, an answer that could not be read, a bare failing
+status, and a fault inside bitmagnet leave it open: the work may have committed before the
+answer was lost, and `INTERNAL_SERVER_ERROR` is what a connection lost during `COMMIT` gives,
+though Postgres may have committed.
+
+-}
+mayHaveActed : Failure -> Bool
+mayHaveActed failure =
+    case failure of
+        InvalidCredentials ->
+            False
+
+        UserDisabled ->
+            False
+
+        LoginThrottled ->
+            False
+
+        UserAlreadyExists ->
+            False
+
+        UsernameInvalid ->
+            False
+
+        InvitationRequired ->
+            False
+
+        InvitationInvalid ->
+            False
+
+        InvitationExpired ->
+            False
+
+        InvitationClaimed ->
+            False
+
+        PasswordInsufficientEntropy ->
+            False
+
+        PasswordIncorrect ->
+            False
+
+        EmailRequired ->
+            False
+
+        Unauthorized _ ->
+            False
+
+        AuthenticationRequired _ ->
+            False
+
+        UserAuthenticationRequired ->
+            False
+
+        ApiKeyManagementForbidden ->
+            False
+
+        ServiceUnavailable ->
+            False
+
+        ServerRejected _ ->
+            False
+
+        RequestInvalid _ ->
+            False
+
+        Forbidden _ ->
+            False
+
+        BadUrl _ ->
+            False
+
+        ServerFault ->
+            True
+
+        Unreachable ->
+            True
+
+        Timeout ->
+            True
+
+        BadStatus _ ->
+            True
+
+        SchemaMismatch ->
+            True
 
 
 toMessage : Failure -> String
@@ -338,6 +483,16 @@ toMessage failure =
 
         ServerRejected message ->
             message
+
+        RequestInvalid message ->
+            "bitmagnet could not run the request as Magnes wrote it, which may mean it is a different version from the one Magnes was built against: "
+                ++ message
+
+        Forbidden "" ->
+            "bitmagnet refused the request."
+
+        Forbidden message ->
+            "bitmagnet refused the request: " ++ message ++ "."
 
         Unreachable ->
             "Could not reach bitmagnet."

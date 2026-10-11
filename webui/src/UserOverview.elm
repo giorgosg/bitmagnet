@@ -67,8 +67,8 @@ type alias Messages msg =
     }
 
 
-view : Time.Zone -> Messages msg -> SignOut -> PasswordChange.Form -> Identity.User -> Html msg
-view zone messages state passwordForm user =
+view : Time.Zone -> Messages msg -> SignOut -> PasswordChange.State -> Identity.User -> Html msg
+view zone messages state passwordChange user =
     div [ class "page" ]
         [ div [ class "panel" ]
             [ h1 [] [ text "Your User" ]
@@ -94,7 +94,7 @@ view zone messages state passwordForm user =
                     )
                 ]
             ]
-        , PasswordChange.view messages.passwordChange passwordForm
+        , PasswordChange.view messages.passwordChange passwordChange
         ]
 
 
