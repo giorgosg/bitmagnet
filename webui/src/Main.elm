@@ -1636,9 +1636,9 @@ updateModel msg model =
 
             else if Route.sameQuestion model.route route then
                 -- The page has the answer to this already: how often to look again is not
-                -- what to look at, and the queue's statistics pick their queues and events out
-                -- of the answer they have. The chart stays, drawn as the route now says, and
-                -- the timer is the subscription's to restart.
+                -- what to look at, and the statistics pages pick their events (and the queue's
+                -- queues) out of the answer they have. The chart stays, drawn as the route now says,
+                -- and the timer is the subscription's to restart.
                 ( { model | route = route }, Cmd.none )
 
             else

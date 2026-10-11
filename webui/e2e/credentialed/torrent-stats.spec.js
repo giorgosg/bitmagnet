@@ -100,25 +100,29 @@ function sourcesWithData(buckets) {
 // counted, new and updated apart, as the page draws them. Up to three sources are drawn
 // apart; with more, the first two, in the order bitmagnet lists them in, are, and the rest are
 // added together.
-function expectedLines(buckets, sources) {
+function expectedLines(buckets, sources, event = "both") {
   const listed = sources.map((source) => source.key);
   const order = [...listed, ...sourcesWithData(buckets).filter((key) => !listed.includes(key))];
   const nameOf = (key) => sources.find((source) => source.key === key)?.name ?? key;
 
+  const limit = event === "both" ? 3 : 6;
   const groups =
-    order.length <= 3
+    order.length <= limit
       ? order.map((key) => ({ name: nameOf(key), members: [key] }))
       : [
-          ...order.slice(0, 2).map((key) => ({ name: nameOf(key), members: [key] })),
-          { name: "Other sources", members: order.slice(2) },
+          ...order.slice(0, limit - 1).map((key) => ({ name: nameOf(key), members: [key] })),
+          { name: "Other sources", members: order.slice(limit - 1) },
         ];
 
   const lines = {};
   for (const group of groups) {
-    const counted = buckets.filter((bucket) => group.members.includes(bucket.source));
+    const counted = buckets.filter(
+      (bucket) => group.members.includes(bucket.source) &&
+        (event === "both" || bucket.updated === (event === "updated")),
+    );
     if (counted.length > 0) {
-      lines[`${group.name}: new`] = total(counted, (bucket) => !bucket.updated);
-      lines[`${group.name}: updated`] = total(counted, (bucket) => bucket.updated);
+      if (event !== "updated") lines[`${group.name}: new`] = total(counted, (bucket) => !bucket.updated);
+      if (event !== "new") lines[`${group.name}: updated`] = total(counted, (bucket) => bucket.updated);
     }
   }
   return lines;
@@ -181,6 +185,48 @@ test("an administrator finds the timeline from the status page, and it draws wha
       await expect(legend.filter({ hasText: new RegExp(`^${key}: `) })).toHaveCount(0);
     }
   }
+});
+
+test("events filter the answer without refetching, and survive reload and browser history", async ({ page, credentials }) => {
+  const asked = metricsRequests(page);
+  let answered = nextMetrics(page);
+  await signInAt(page, credentials, "/stats/torrents", "Torrent statistics");
+  let { buckets, sources } = await answered;
+  await drawn(page);
+  expect(total(buckets, (bucket) => !bucket.updated)).toBeGreaterThan(0);
+  expect(total(buckets, (bucket) => bucket.updated)).toBeGreaterThan(0);
+
+  const before = asked.length;
+  for (const event of ["new", "updated"]) {
+    await chip(page, event).click();
+    await expect(page).toHaveURL(new RegExp(`/stats/torrents\\?event=${event}$`));
+    await expect(chip(page, event)).toHaveAttribute("aria-pressed", "true");
+    await expect.poll(() => chartedCounts(page)).toEqual(expectedLines(buckets, sources, event));
+    const legend = page.locator(".chart-legend li");
+    await expect(legend).toHaveText(Object.keys(expectedLines(buckets, sources, event)));
+    await quietMoment(page);
+    expect(asked).toHaveLength(before);
+  }
+
+  answered = nextMetrics(page);
+  await page.reload();
+  ({ buckets, sources } = await answered);
+  await drawn(page);
+  await expect(chip(page, "updated")).toHaveAttribute("aria-pressed", "true");
+  expect(await chartedCounts(page)).toEqual(expectedLines(buckets, sources, "updated"));
+
+  const afterReload = asked.length;
+  await page.goBack();
+  await expect(page).toHaveURL(/event=new$/);
+  await expect.poll(() => chartedCounts(page)).toEqual(expectedLines(buckets, sources, "new"));
+  await page.goForward();
+  await expect(page).toHaveURL(/event=updated$/);
+  await expect.poll(() => chartedCounts(page)).toEqual(expectedLines(buckets, sources, "updated"));
+  await chip(page, "both").click();
+  await expect(page).toHaveURL(/\/stats\/torrents$/);
+  await expect.poll(() => chartedCounts(page)).toEqual(expectedLines(buckets, sources));
+  await quietMoment(page);
+  expect(asked).toHaveLength(afterReload);
 });
 
 test("Anonymous is offered the timeline on the status page and may open it", async ({ page }) => {

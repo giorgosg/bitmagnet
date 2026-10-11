@@ -101,6 +101,11 @@ suite =
                 \_ ->
                     Route.toHref mount (Route.QueueJobs { emptyJobs | order = { field = Ran_at, descending = True } })
                         |> Expect.equal "/magnes/queue/jobs?order=ran_at"
+            , test "unknown, legacy and repeated torrent events use both events" <|
+                \_ ->
+                    [ "event=created", "event=all", "event=unknown", "event=new&event=updated" ]
+                        |> List.map (\query -> Url.fromString ("https://example.test/magnes/stats/torrents?" ++ query) |> Maybe.map (Route.fromUrl mount))
+                        |> Expect.equal (List.repeat 4 (Just (Route.TorrentStats emptyStats)))
             , test "drops what it does not recognise rather than failing the page" <|
                 \_ ->
                     "https://example.test/magnes/queue/jobs?status=bogus&status=failed&queue=&order=size&direction=sideways&page=0"
@@ -154,7 +159,26 @@ suite =
                         |> Expect.equal ( Route.Allowed, Route.Allowed )
             ]
         , describe "torrent statistics"
-            [ test "the defaults are a bare path" <|
+            [ test "round-trips a chosen torrent event and leaves both events out of the URL" <|
+                \_ ->
+                    [ Route.AllTorrentEvents, Route.NewTorrents, Route.UpdatedTorrents ]
+                        |> List.map
+                            (\event ->
+                                let
+                                    chosen =
+                                        Route.TorrentStats { emptyStats | event = event }
+
+                                    href =
+                                        Route.toHref mount chosen
+                                in
+                                ( href, Url.fromString ("https://example.test" ++ href) |> Maybe.map (Route.fromUrl mount) )
+                            )
+                        |> Expect.equal
+                            [ ( "/magnes/stats/torrents", Just (Route.TorrentStats emptyStats) )
+                            , ( "/magnes/stats/torrents?event=new", Just (Route.TorrentStats { emptyStats | event = Route.NewTorrents }) )
+                            , ( "/magnes/stats/torrents?event=updated", Just (Route.TorrentStats { emptyStats | event = Route.UpdatedTorrents }) )
+                            ]
+            , test "the defaults are a bare path" <|
                 \_ ->
                     Route.toHref mount (Route.TorrentStats Route.emptyTorrentStats)
                         |> Expect.equal "/magnes/stats/torrents"
@@ -272,6 +296,11 @@ suite =
                     , Route.sameQuestion (Route.TorrentStats chosenStats) (Route.TorrentStats { chosenStats | sources = [] })
                     )
                         |> Expect.equal ( True, False )
+            , test "torrent events are drawn from the same answer without another request" <|
+                \_ ->
+                    [ Route.NewTorrents, Route.UpdatedTorrents ]
+                        |> List.map (\event -> Route.sameQuestion (Route.TorrentStats chosenStats) (Route.TorrentStats { chosenStats | event = event }))
+                        |> Expect.equal [ True, True ]
             , test "two looks at the queue ask the same whatever they look again at, and whichever queues and events they pick out of the answer" <|
                 \_ ->
                     ( Route.sameQuestion (Route.QueueStats chosenQueueStats)
@@ -398,6 +427,7 @@ chosenStats =
         , refresh = Every30Seconds
         }
     , sources = [ "dht", "rarbg" ]
+    , event = Route.AllTorrentEvents
     }
 
 

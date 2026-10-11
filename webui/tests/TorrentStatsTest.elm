@@ -111,7 +111,78 @@ suite =
                             )
             ]
         , describe "plot"
-            [ test "has nothing to draw when bitmagnet counted nothing" <|
+            [ test "a chosen event draws only its lines and counts, leaving an opposite-only source out" <|
+                \_ ->
+                    [ Route.NewTorrents, Route.UpdatedTorrents ]
+                        |> List.map
+                            (\event ->
+                                let
+                                    plotted =
+                                        TorrentStats.plot { emptyParams | event = event }
+                                            { counted | buckets = counted.buckets ++ [ bucket "magnetico" -1 True 7 ] }
+                                in
+                                ( List.map .label plotted.lines, List.sum (List.concatMap (.counts >> Dict.values) plotted.slots) )
+                            )
+                        |> Expect.equal
+                            [ ( [ "DHT: new", "RARBG: new" ], 4 )
+                            , ( [ "DHT: updated", "magnetico: updated", "RARBG: updated" ], 14 )
+                            ]
+            , test "one event gives six sources separate inks, keeping the first three event inks" <|
+                \_ ->
+                    let
+                        sixSources =
+                            { statistics
+                                | sources = List.map (\key -> { key = key, name = key }) [ "a", "b", "c", "d", "e", "f" ]
+                                , buckets = List.map (\key -> bucket key 0 False 1) [ "a", "b", "c", "d", "e", "f" ]
+                            }
+                    in
+                    TorrentStats.plot { emptyParams | event = Route.NewTorrents } sixSources
+                        |> Expect.all
+                            [ .lines
+                                >> List.map (\line -> ( line.label, line.ink ))
+                                >> Expect.equal
+                                    [ ( "a: new", Charts.Accent )
+                                    , ( "b: new", Charts.Strong )
+                                    , ( "c: new", Charts.Muted )
+                                    , ( "d: new", Charts.AccentSoft )
+                                    , ( "e: new", Charts.StrongSoft )
+                                    , ( "f: new", Charts.Faint )
+                                    ]
+                            , .others >> Expect.equal []
+                            ]
+            , test "updated-only keeps each source's updated ink from the paired view" <|
+                \_ ->
+                    TorrentStats.plot { emptyParams | event = Route.UpdatedTorrents } counted
+                        |> .lines
+                        |> List.map (\line -> ( line.label, line.ink ))
+                        |> Expect.equal [ ( "DHT: updated", Charts.AccentSoft ), ( "RARBG: updated", Charts.Faint ) ]
+            , test "seven sources leave five apart and sum the selected event of the rest" <|
+                \_ ->
+                    let
+                        sevenSources =
+                            { statistics
+                                | sources = List.map (\key -> { key = key, name = String.toUpper key }) [ "a", "b", "c", "d", "e", "f", "g" ]
+                                , buckets =
+                                    [ bucket "a" -1 True 2
+                                    , bucket "f" 0 True 3
+                                    , bucket "g" 0 True 5
+                                    , bucket "f" 0 False 100
+                                    , bucket "g" 0 False 200
+                                    ]
+                            }
+                    in
+                    TorrentStats.plot { emptyParams | event = Route.UpdatedTorrents } sevenSources
+                        |> Expect.all
+                            [ .lines >> List.map .label >> Expect.equal [ "A: updated", "Other sources: updated" ]
+                            , .others >> Expect.equal [ "F", "G" ]
+                            , .slots >> List.concatMap (.counts >> Dict.toList) >> Expect.equal [ ( 1, 2 ), ( 11, 8 ) ]
+                            ]
+            , test "a chosen event with nothing counted has no chart" <|
+                \_ ->
+                    TorrentStats.plot { emptyParams | event = Route.NewTorrents }
+                        { statistics | buckets = [ bucket "dht" 0 True 5 ] }
+                        |> Expect.all [ .lines >> Expect.equal [], .slots >> Expect.equal [] ]
+            , test "has nothing to draw when bitmagnet counted nothing" <|
                 \_ ->
                     TorrentStats.plot emptyParams { statistics | buckets = [] }
                         |> .slots
@@ -314,7 +385,35 @@ suite =
                 ]
             ]
         , describe "view"
-            [ test "says it is loading, with the controls already there to change" <|
+            [ test "changing only the event redraws the retained answer's legend and hidden table" <|
+                \_ ->
+                    viewed { emptyParams | event = Route.NewTorrents } shown
+                        |> Expect.all
+                            [ Query.find [ Selector.class "chart-legend" ]
+                                >> Query.findAll [ Selector.tag "li" ]
+                                >> Expect.all
+                                    [ Query.count (Expect.equal 2)
+                                    , Query.index 0 >> Query.has [ Selector.text "DHT: new" ]
+                                    , Query.index 1 >> Query.has [ Selector.text "RARBG: new" ]
+                                    ]
+                            , Query.find [ Selector.class "visually-hidden" ]
+                                >> Expect.all
+                                    [ Query.has [ Selector.text "DHT: new", Selector.text "RARBG: new" ]
+                                    , Query.hasNot [ Selector.text "DHT: updated", Selector.text "RARBG: updated" ]
+                                    ]
+                            ]
+            , test "the torrent-only event control chooses one event and can return to both" <|
+                \_ ->
+                    [ ( "new", Route.NewTorrents ), ( "updated", Route.UpdatedTorrents ), ( "both", Route.AllTorrentEvents ) ]
+                        |> List.map
+                            (\( label, event ) ->
+                                viewed emptyParams shown
+                                    |> Query.find [ Selector.tag "button", Selector.containing [ Selector.text label ] ]
+                                    |> Event.simulate Event.click
+                                    |> Event.expect (Just { emptyParams | event = event })
+                            )
+                        |> (\checks -> Expect.all (List.map always checks) ())
+            , test "says it is loading, with the controls already there to change" <|
                 \_ ->
                     viewed emptyParams StatsLook.empty
                         |> Expect.all
@@ -463,11 +562,12 @@ suite =
                         viewed chosenParams shown
                             |> Query.findAll [ Selector.attribute (Html.Attributes.attribute "aria-pressed" "true") ]
                             |> Expect.all
-                                [ Query.count (Expect.equal 4)
+                                [ Query.count (Expect.equal 5)
                                 , Query.index 0 >> Query.has [ Selector.text "6 hours" ]
                                 , Query.index 1 >> Query.has [ Selector.text "hours" ]
                                 , Query.index 2 >> Query.has [ Selector.text "30 seconds" ]
                                 , Query.index 3 >> Query.has [ Selector.text "DHT" ]
+                                , Query.index 4 >> Query.has [ Selector.text "both" ]
                                 ]
                 , test "choosing a timeframe asks for it and keeps the rest" <|
                     \_ ->
@@ -689,6 +789,7 @@ chosenParams =
         , refresh = Every30Seconds
         }
     , sources = [ "dht" ]
+    , event = Route.AllTorrentEvents
     }
 
 
