@@ -9,10 +9,11 @@ import Graphql.Http
 import Graphql.Http.GraphqlError as GraphqlError
 import Graphql.OptionalArgument exposing (OptionalArgument(..))
 import Html.Attributes
+import Identity
 import Json.Decode as Decode
 import Json.Encode as Encode
 import Magnes.Api.Enum.ContentType exposing (ContentType(..))
-import Magnes.Api.Enum.QueueJobStatus exposing (QueueJobStatus(..))
+import Magnes.Api.Enum.QueueJobStatus as QueueJobStatus exposing (QueueJobStatus(..))
 import Magnes.Api.InputObject as InputObject
 import QueueAdmin
 import Route
@@ -20,6 +21,7 @@ import Test exposing (Test, describe, test)
 import Test.Html.Event as Event
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import Time
 
 
 suite : Test
@@ -107,6 +109,17 @@ suite =
                             (Ok { tally | statuses = [ ( Pending, 2 ), ( Retry, 2 ), ( Failed, 3 ), ( Processed, 2 ) ] })
                         |> rendered
                         |> Query.has [ Selector.text "5 jobs match." ]
+            , test "every status the schema has is offered for a purge, and counted" <|
+                \_ ->
+                    QueueAdmin.empty
+                        |> QueueAdmin.counted QueueAdmin.emptyScope
+                            (Ok { tally | statuses = List.map (\status -> ( status, 1 )) QueueJobStatus.list, everything = List.length QueueJobStatus.list })
+                        |> rendered
+                        |> Expect.all
+                            [ Query.has [ Selector.text (String.fromInt (List.length QueueJobStatus.list) ++ " jobs match.") ]
+                            , Query.findAll [ Selector.class "chip", Selector.containing [ Selector.class "chip-count" ] ]
+                                >> Query.count (Expect.equal (List.length QueueJobStatus.list + 2))
+                            ]
             , test "with nothing chosen, every job matches" <|
                 \_ ->
                     rendered opened
@@ -134,14 +147,14 @@ suite =
         , describe "purging"
             [ test "nothing is sent without being asked about first" <|
                 \_ ->
-                    QueueAdmin.confirm 1 opened
+                    QueueAdmin.confirm opened
                         |> Tuple.second
                         |> Expect.equal Nothing
             , test "once asked about, confirming sends the purge of the scope asked about" <|
                 \_ ->
                     scoped failedInProcessTorrent
                         |> QueueAdmin.askPurge
-                        |> QueueAdmin.confirm 1
+                        |> QueueAdmin.confirm
                         |> Tuple.second
                         |> Maybe.map QueueAdmin.document
                         |> Expect.equal (Just (purgeDocument failedInProcessTorrent))
@@ -196,7 +209,7 @@ suite =
                         |> choose failedInProcessTorrent
                         |> Tuple.first
                         |> Expect.all
-                            [ QueueAdmin.askPurge >> QueueAdmin.confirm 1 >> Tuple.second >> Expect.equal Nothing
+                            [ QueueAdmin.askPurge >> QueueAdmin.confirm >> Tuple.second >> Expect.equal Nothing
                             , rendered >> Query.find [ Selector.tag "button", Selector.containing [ Selector.text "Purge…" ] ] >> Query.has [ Selector.disabled True ]
                             ]
             , test "is not asked about while nothing matches" <|
@@ -204,7 +217,7 @@ suite =
                     opened
                         |> QueueAdmin.counted QueueAdmin.emptyScope (Ok { tally | statuses = [], everything = 0 })
                         |> Expect.all
-                            [ QueueAdmin.askPurge >> QueueAdmin.confirm 1 >> Tuple.second >> Expect.equal Nothing
+                            [ QueueAdmin.askPurge >> QueueAdmin.confirm >> Tuple.second >> Expect.equal Nothing
                             , rendered >> Query.find [ Selector.tag "button", Selector.containing [ Selector.text "Purge…" ] ] >> Query.has [ Selector.disabled True ]
                             ]
             , test "choosing another scope takes the question back" <|
@@ -213,7 +226,7 @@ suite =
                         |> QueueAdmin.askPurge
                         |> choose failedInProcessTorrent
                         |> Tuple.first
-                        |> QueueAdmin.confirm 1
+                        |> QueueAdmin.confirm
                         |> Tuple.second
                         |> Expect.equal Nothing
             , test "cancelling takes the question back" <|
@@ -222,7 +235,7 @@ suite =
                         |> QueueAdmin.askPurge
                         |> QueueAdmin.cancel
                         |> Expect.all
-                            [ QueueAdmin.confirm 1 >> Tuple.second >> Expect.equal Nothing
+                            [ QueueAdmin.confirm >> Tuple.second >> Expect.equal Nothing
                             , rendered >> Query.hasNot [ Selector.text "matched when last counted" ]
                             ]
             , test "the question offers to purge or to keep them" <|
@@ -241,7 +254,7 @@ suite =
                 \_ ->
                     opened
                         |> edits [ QueueAdmin.RematchSet True ]
-                        |> QueueAdmin.confirm 1
+                        |> QueueAdmin.confirm
                         |> Tuple.second
                         |> Expect.equal Nothing
             , test "once asked about, confirming queues the batch the form makes" <|
@@ -249,7 +262,7 @@ suite =
                     opened
                         |> edits [ QueueAdmin.RematchSet True, QueueAdmin.BatchSizeTyped "50" ]
                         |> QueueAdmin.askReprocess
-                        |> QueueAdmin.confirm 1
+                        |> QueueAdmin.confirm
                         |> Tuple.second
                         |> Maybe.map QueueAdmin.document
                         |> Expect.equal
@@ -266,7 +279,7 @@ suite =
                     opened
                         |> edits [ QueueAdmin.BatchSizeTyped "0", QueueAdmin.TorrentsChosen QueueAdmin.OfContentTypes ]
                         |> Expect.all
-                            [ QueueAdmin.askReprocess >> QueueAdmin.confirm 1 >> Tuple.second >> Expect.equal Nothing
+                            [ QueueAdmin.askReprocess >> QueueAdmin.confirm >> Tuple.second >> Expect.equal Nothing
                             , rendered >> Query.has [ Selector.text "A whole number of torrents, at least 1." ]
                             , rendered >> Query.has [ Selector.text "Choose at least one content type, or another choice of torrents." ]
                             , rendered >> Query.find [ Selector.tag "button", Selector.containing [ Selector.text "Reprocess…" ] ] >> Query.has [ Selector.disabled True ]
@@ -374,21 +387,42 @@ suite =
                             , Query.has [ Selector.text "16 jobs were in the queue when last counted, in every queue and status. Jobs still waiting to run will never run, and the deletion cannot be undone." ]
                             , Query.hasNot [ Selector.text "It adds one job" ]
                             ]
-            , test "no batch is asked about until the queue has been counted" <|
+            , test "a batch that purges first is not asked about until the queue has been counted" <|
                 \_ ->
                     opened
                         |> choose failedInProcessTorrent
                         |> Tuple.first
+                        |> edits [ QueueAdmin.PurgeSet True ]
+                        |> Expect.all
+                            [ QueueAdmin.askReprocess >> QueueAdmin.confirm >> Tuple.second >> Expect.equal Nothing
+                            , rendered >> Query.find [ Selector.tag "button", Selector.containing [ Selector.text "Reprocess…" ] ] >> Query.has [ Selector.disabled True ]
+                            ]
+            , test "a batch that does not purge first may be asked about while the queue is being counted, or after a count failed" <|
+                \_ ->
+                    -- It needs no count: the first build allowed it, and a count that cannot be
+                    -- had must not stop it.
+                    [ opened |> choose failedInProcessTorrent |> Tuple.first
+                    , QueueAdmin.empty |> QueueAdmin.counted QueueAdmin.emptyScope (Err (ApiError.BadStatus 504))
+                    ]
+                        |> List.map (QueueAdmin.askReprocess >> QueueAdmin.confirm >> Tuple.second >> Maybe.map QueueAdmin.document)
+                        |> Expect.equal (List.repeat 2 (Just (batchDocument defaultBatch)))
+            , test "its question then says it adds one job, without a count it does not have" <|
+                \_ ->
+                    QueueAdmin.empty
+                        |> QueueAdmin.counted QueueAdmin.emptyScope (Err (ApiError.BadStatus 504))
                         |> QueueAdmin.askReprocess
-                        |> QueueAdmin.confirm 1
-                        |> Tuple.second
-                        |> Expect.equal Nothing
+                        |> rendered
+                        |> Query.find [ Selector.class "queue-admin-confirm" ]
+                        |> Expect.all
+                            [ Query.has [ Selector.text "It adds one job to the queue." ]
+                            , Query.hasNot [ Selector.text "when last counted" ]
+                            ]
             , test "changing the form takes the question back" <|
                 \_ ->
                     opened
                         |> QueueAdmin.askReprocess
                         |> edits [ QueueAdmin.ApisSet True ]
-                        |> QueueAdmin.confirm 1
+                        |> QueueAdmin.confirm
                         |> Tuple.second
                         |> Expect.equal Nothing
             , test "one question at a time: asking about a purge takes back the batch" <|
@@ -396,7 +430,7 @@ suite =
                     opened
                         |> QueueAdmin.askReprocess
                         |> QueueAdmin.askPurge
-                        |> QueueAdmin.confirm 1
+                        |> QueueAdmin.confirm
                         |> Tuple.second
                         |> Maybe.map QueueAdmin.document
                         |> Expect.equal (Just (purgeDocument QueueAdmin.emptyScope))
@@ -446,7 +480,7 @@ suite =
                     opened
                         |> edits [ QueueAdmin.RematchSet True, QueueAdmin.BatchSizeTyped "50" ]
                         |> QueueAdmin.askReprocess
-                        |> QueueAdmin.confirm 1
+                        |> QueueAdmin.confirm
                         |> Tuple.second
                         |> Maybe.map QueueAdmin.document
                         |> Maybe.map (\mutation -> ( String.contains "classifierRematch: true" mutation, String.contains "batchSize: 50" mutation ))
@@ -466,9 +500,8 @@ suite =
                 \_ ->
                     scoped failedInProcessTorrent
                         |> QueueAdmin.askPurge
-                        |> QueueAdmin.confirm 1
-                        |> Tuple.first
-                        |> QueueAdmin.answered 1 (Ok ())
+                        |> QueueAdmin.confirm
+                        |> answer onPage (Ok ())
                         |> Expect.all
                             [ Tuple.second >> Maybe.map QueueAdmin.document >> Expect.equal (Just (countDocument failedInProcessTorrent))
                             , Tuple.first >> rendered >> Query.hasNot [ Selector.text "2 jobs match." ]
@@ -480,9 +513,8 @@ suite =
                         purged =
                             scoped failedInProcessTorrent
                                 |> QueueAdmin.askPurge
-                                |> QueueAdmin.confirm 1
-                                |> Tuple.first
-                                |> QueueAdmin.answered 1 (Ok ())
+                                |> QueueAdmin.confirm
+                                |> answer onPage (Ok ())
                                 |> Tuple.first
                     in
                     Expect.all
@@ -518,15 +550,14 @@ suite =
                     scoped failedInProcessTorrent
                         |> Expect.all
                             [ linksToThem
-                            , QueueAdmin.askPurge >> QueueAdmin.confirm 1 >> Tuple.first >> QueueAdmin.answered 1 (Ok ()) >> Tuple.first >> linksToThem
+                            , QueueAdmin.askPurge >> QueueAdmin.confirm >> answer onPage (Ok ()) >> Tuple.first >> linksToThem
                             ]
             , test "a refusal from bitmagnet says the act was not done, and the counts are asked for again" <|
                 \_ ->
                     scoped failedInProcessTorrent
                         |> QueueAdmin.askPurge
-                        |> QueueAdmin.confirm 1
-                        |> Tuple.first
-                        |> QueueAdmin.answered 1 (Err refusedByBitmagnet)
+                        |> QueueAdmin.confirm
+                        |> answer onPage (Err refusedByBitmagnet)
                         |> Expect.all
                             [ Tuple.second >> Maybe.map QueueAdmin.document >> Expect.equal (Just (countDocument failedInProcessTorrent))
                             , Tuple.first
@@ -534,17 +565,17 @@ suite =
                                 >> Query.find [ Selector.attribute (Html.Attributes.attribute "role" "alert") ]
                                 >> Query.has [ Selector.text "bitmagnet did not purge the jobs: ", Selector.text (ApiError.toMessage ApiError.ServerFault) ]
                             ]
-            , test "a purge whose answer did not come back is not known to be done or not, and points to the jobs to check" <|
+            , test "a purge with no usable answer is not known to be done or not, said so for every cause, and points to the jobs to check" <|
                 \_ ->
                     -- The database may have committed before the answer was lost, so saying
-                    -- it was not done would invite doing it twice.
+                    -- it was not done would invite doing it twice. "No answer came back" would be
+                    -- untrue of a proxy's status or an answer that is not the schema.
                     List.map
                         (\lost ->
                             scoped failedInProcessTorrent
                                 |> QueueAdmin.askPurge
-                                |> QueueAdmin.confirm 1
-                                |> Tuple.first
-                                |> QueueAdmin.answered 1 (Err lost)
+                                |> QueueAdmin.confirm
+                                |> answer onPage (Err lost)
                                 |> Tuple.first
                                 |> rendered
                                 |> Query.find [ Selector.attribute (Html.Attributes.attribute "role" "alert") ]
@@ -554,34 +585,35 @@ suite =
                             (\alert () ->
                                 alert
                                     |> Expect.all
-                                        [ Query.has [ Selector.text "Whether bitmagnet purged them is not known." ]
+                                        [ Query.has [ Selector.text "No usable answer to the purge came back." ]
+                                        , Query.hasNot [ Selector.text "No answer" ]
+                                        , Query.has [ Selector.text "Whether bitmagnet purged them is not known." ]
                                         , Query.hasNot [ Selector.text "did not purge" ]
                                         , Query.find [ Selector.tag "a" ] >> Query.has [ Selector.attribute (Html.Attributes.href "/queue/jobs?queue=process_torrent&status=failed") ]
                                         ]
                             )
                         |> (\checks -> Expect.all checks ())
-            , test "a batch whose answer did not come back is not known to be queued or not, and points to the jobs to check" <|
+            , test "a batch with no usable answer is not known to be queued or not, and points to the jobs to check" <|
                 \_ ->
                     opened
                         |> QueueAdmin.askReprocess
-                        |> QueueAdmin.confirm 1
-                        |> Tuple.first
-                        |> QueueAdmin.answered 1 (Err (Graphql.Http.HttpError Graphql.Http.Timeout))
+                        |> QueueAdmin.confirm
+                        |> answer onPage (Err (Graphql.Http.HttpError (Graphql.Http.BadStatus { url = "/graphql", statusCode = 504, statusText = "Gateway Timeout", headers = Dict.empty } "")))
                         |> Tuple.first
                         |> rendered
                         |> Query.find [ Selector.attribute (Html.Attributes.attribute "role" "alert") ]
                         |> Expect.all
-                            [ Query.has [ Selector.text "Whether bitmagnet queued it is not known." ]
-                            , Query.has [ Selector.text (ApiError.toMessage ApiError.Timeout) ]
+                            [ Query.has [ Selector.text "No usable answer to the batch came back." ]
+                            , Query.has [ Selector.text (ApiError.toMessage (ApiError.BadStatus 504)) ]
+                            , Query.has [ Selector.text "Whether bitmagnet queued it is not known." ]
                             , Query.find [ Selector.tag "a" ] >> Query.has [ Selector.attribute (Html.Attributes.href "/queue/jobs") ]
                             ]
             , test "a batch bitmagnet queued is said, with where to watch it" <|
                 \_ ->
                     opened
                         |> QueueAdmin.askReprocess
-                        |> QueueAdmin.confirm 1
-                        |> Tuple.first
-                        |> QueueAdmin.answered 1 (Ok ())
+                        |> QueueAdmin.confirm
+                        |> answer onPage (Ok ())
                         |> Tuple.first
                         |> rendered
                         |> Query.find [ Selector.class "queue-admin-outcome" ]
@@ -595,51 +627,207 @@ suite =
                             ]
             , test "an answer with nothing on its way is not taken for one" <|
                 \_ ->
-                    QueueAdmin.answered 1 (Ok ()) opened
-                        |> Expect.equal ( opened, Nothing )
-            , test "an answer to another act than the one on its way is not taken for it" <|
+                    case opened |> QueueAdmin.askPurge |> QueueAdmin.confirm |> Tuple.second of
+                        Just call ->
+                            QueueAdmin.answered onPage call (Ok ()) opened
+                                |> Expect.equal ( opened, Nothing )
+
+                        Nothing ->
+                            Expect.fail "the purge was not sent"
+            , test "an answer to an earlier act is not taken for the one on its way" <|
                 \_ ->
-                    -- A probe of the first build: a batch confirmed, the page left and come back
-                    -- to, a purge confirmed, and the batch's failure shown as the purge's.
+                    -- A probe of the first build: an act confirmed, the page left and come back
+                    -- to, another confirmed, and the first one's answer shown as the second's.
+                    -- Each act is numbered, the numbers outlast leaving the page, and the same
+                    -- purge asked twice is two acts.
                     let
-                        purging =
+                        ( first, firstCall ) =
                             scoped failedInProcessTorrent
                                 |> QueueAdmin.askPurge
-                                |> QueueAdmin.confirm 2
+                                |> QueueAdmin.confirm
+
+                        purgingAgain =
+                            ( first, firstCall )
+                                |> answer onPage (Ok ())
+                                |> Tuple.first
+                                |> move onPage elsewhere
+                                |> move elsewhere onPage
+                                |> choose failedInProcessTorrent
+                                |> Tuple.first
+                                |> QueueAdmin.counted failedInProcessTorrent (Ok { tally | statuses = [ ( Failed, 2 ) ] })
+                                |> QueueAdmin.askPurge
+                                |> QueueAdmin.confirm
                                 |> Tuple.first
                     in
-                    QueueAdmin.answered 1 (Err refusedByBitmagnet) purging
-                        |> Expect.equal ( purging, Nothing )
-            , test "an act on its way outlasts leaving the page, and nothing else is asked about until it is answered" <|
-                \_ ->
-                    let
-                        backAgain =
-                            opened
-                                |> QueueAdmin.askReprocess
-                                |> QueueAdmin.confirm 1
-                                |> Tuple.first
-                                |> QueueAdmin.leave
-                                |> QueueAdmin.counted QueueAdmin.emptyScope (Ok tally)
-                    in
-                    backAgain
-                        |> Expect.all
-                            [ QueueAdmin.askPurge >> QueueAdmin.confirm 2 >> Tuple.second >> Expect.equal Nothing
-                            , rendered >> Query.has [ Selector.text "Queueing the batch…" ]
-                            , QueueAdmin.answered 1 (Ok ())
-                                >> Tuple.first
-                                >> rendered
-                                >> Query.has [ Selector.text "bitmagnet queued the batch." ]
-                            ]
+                    case firstCall of
+                        Just call ->
+                            QueueAdmin.answered onPage call (Err refusedByBitmagnet) purgingAgain
+                                |> Expect.equal ( purgingAgain, Nothing )
+
+                        Nothing ->
+                            Expect.fail "the first purge was not sent"
             , test "while an act is on its way, nothing else is asked about" <|
                 \_ ->
                     opened
                         |> QueueAdmin.askPurge
-                        |> QueueAdmin.confirm 1
+                        |> QueueAdmin.confirm
                         |> Tuple.first
                         |> QueueAdmin.askReprocess
-                        |> QueueAdmin.confirm 2
+                        |> QueueAdmin.confirm
                         |> Tuple.second
                         |> Expect.equal Nothing
+            ]
+        , describe "where the person is"
+            -- What happens to the page as the person moves, or their Identity changes, is
+            -- decided here, from plain values `Main` hands over after every update.
+            [ test "leaving the page drops what was asked and chosen" <|
+                \_ ->
+                    scoped failedInProcessTorrent
+                        |> edits [ QueueAdmin.RematchSet True ]
+                        |> QueueAdmin.askPurge
+                        |> move onPage elsewhere
+                        |> move elsewhere onPage
+                        |> QueueAdmin.counted QueueAdmin.emptyScope (Ok tally)
+                        |> Expect.all
+                            [ QueueAdmin.confirm >> Tuple.second >> Expect.equal Nothing
+                            , rendered >> Query.has [ Selector.text "16 jobs match." ]
+                            , rendered >> Query.find [ Selector.id "reprocess-rematch" ] >> Query.has [ Selector.checked False ]
+                            ]
+            , test "staying on the page, with the same Identity, leaves it as it was" <|
+                \_ ->
+                    let
+                        asked =
+                            scoped failedInProcessTorrent |> QueueAdmin.askPurge
+                    in
+                    move onPage onPage asked
+                        |> QueueAdmin.confirm
+                        |> Tuple.second
+                        |> Maybe.map QueueAdmin.document
+                        |> Expect.equal (Just (purgeDocument failedInProcessTorrent))
+            , test "an act on its way outlasts leaving the page, and nothing else is asked about until it is answered" <|
+                \_ ->
+                    let
+                        ( reprocessing, call ) =
+                            opened
+                                |> QueueAdmin.askReprocess
+                                |> QueueAdmin.confirm
+
+                        backAgain =
+                            reprocessing
+                                |> move onPage elsewhere
+                                |> move elsewhere onPage
+                                |> QueueAdmin.counted QueueAdmin.emptyScope (Ok tally)
+                    in
+                    backAgain
+                        |> Expect.all
+                            [ QueueAdmin.askPurge >> QueueAdmin.confirm >> Tuple.second >> Expect.equal Nothing
+                            , rendered >> Query.has [ Selector.text "Queueing the batch…" ]
+                            , \state ->
+                                answer onPage (Ok ()) ( state, call )
+                                    |> Tuple.first
+                                    |> rendered
+                                    |> Query.has [ Selector.text "bitmagnet queued the batch." ]
+                            ]
+            , test "an act on its way outlasts a change of Identity too" <|
+                \_ ->
+                    opened
+                        |> QueueAdmin.askPurge
+                        |> QueueAdmin.confirm
+                        |> Tuple.first
+                        |> move onPage resolving
+                        |> move resolving onPage
+                        |> QueueAdmin.counted QueueAdmin.emptyScope (Ok tally)
+                        |> Expect.all
+                            [ QueueAdmin.askReprocess >> QueueAdmin.confirm >> Tuple.second >> Expect.equal Nothing
+                            , rendered >> Query.has [ Selector.text "Purging every job in bitmagnet's queue, in every queue and status…" ]
+                            ]
+            , test "an answer that lands while another page is showing asks for no count" <|
+                \_ ->
+                    opened
+                        |> QueueAdmin.askPurge
+                        |> QueueAdmin.confirm
+                        |> Tuple.mapFirst (move onPage elsewhere)
+                        |> answer elsewhere (Ok ())
+                        |> Tuple.second
+                        |> Expect.equal Nothing
+            , test "an answer that lands while the page is refused asks for no count" <|
+                \_ ->
+                    -- The Identity was refetched mid-act and lost queue::mutate: the page shows
+                    -- the refusal, and a count would only be refused too.
+                    opened
+                        |> QueueAdmin.askPurge
+                        |> QueueAdmin.confirm
+                        |> Tuple.mapFirst (move onPage refusedHere)
+                        |> answer refusedHere (Ok ())
+                        |> Tuple.second
+                        |> Expect.equal Nothing
+            , test "what became of an act answered while the page was not showing is shown on coming back, once" <|
+                \_ ->
+                    let
+                        cameBack =
+                            scoped failedInProcessTorrent
+                                |> QueueAdmin.askPurge
+                                |> QueueAdmin.confirm
+                                |> Tuple.mapFirst (move onPage elsewhere)
+                                |> answer elsewhere (Err (Graphql.Http.HttpError Graphql.Http.NetworkError))
+                                |> Tuple.first
+                                |> move elsewhere elsewhere
+                                |> move elsewhere onPage
+                    in
+                    cameBack
+                        |> Expect.all
+                            [ rendered >> Query.has [ Selector.text "Whether bitmagnet purged them is not known." ]
+                            , move onPage elsewhere >> move elsewhere onPage >> rendered >> Query.hasNot [ Selector.text "Whether bitmagnet purged them is not known." ]
+                            ]
+            , test "an act refused because the Identity had gone stale is told once the Identity is resolved" <|
+                \_ ->
+                    -- `Main` refetches the Identity on the refusal, which leaves the page; the
+                    -- refusal is still the answer to the person's act.
+                    scoped failedInProcessTorrent
+                        |> QueueAdmin.askPurge
+                        |> QueueAdmin.confirm
+                        |> answer onPage (Err refusedAsStale)
+                        |> Tuple.first
+                        |> move onPage resolving
+                        |> move resolving onPage
+                        |> rendered
+                        |> Query.has [ Selector.text "bitmagnet did not purge the jobs: ", Selector.text "You are not allowed to mutate queue." ]
+            , test "what was shown on the page is not shown again on coming back" <|
+                \_ ->
+                    scoped failedInProcessTorrent
+                        |> QueueAdmin.askPurge
+                        |> QueueAdmin.confirm
+                        |> answer onPage (Ok ())
+                        |> Tuple.first
+                        |> move onPage onPage
+                        |> move onPage elsewhere
+                        |> move elsewhere onPage
+                        |> rendered
+                        |> Query.hasNot [ Selector.text "bitmagnet purged" ]
+            ]
+        , describe "counting again"
+            [ test "a count that failed can be asked for again" <|
+                \_ ->
+                    opened
+                        |> choose failedInProcessTorrent
+                        |> Tuple.first
+                        |> QueueAdmin.counted failedInProcessTorrent (Err (ApiError.BadStatus 504))
+                        |> Expect.all
+                            [ rendered >> Query.has [ Selector.tag "button", Selector.text "Count again" ]
+                            , QueueAdmin.recount >> Tuple.second >> QueueAdmin.document >> Expect.equal (countDocument failedInProcessTorrent)
+                            , QueueAdmin.recount >> Tuple.first >> rendered >> Query.has [ Selector.text "Counting the jobs that match…" ]
+                            , viewSending
+                                >> Query.find [ Selector.tag "button", Selector.containing [ Selector.text "Count again" ] ]
+                                >> Event.simulate Event.click
+                                >> Event.expect RecountSent
+                            ]
+            , test "is not offered while a count is on its way or in hand" <|
+                \_ ->
+                    Expect.all
+                        [ rendered >> Query.hasNot [ Selector.text "Count again" ]
+                        , choose failedInProcessTorrent >> Tuple.first >> rendered >> Query.hasNot [ Selector.text "Count again" ]
+                        ]
+                        opened
             ]
         , describe "the reprocessing batch sent"
             [ test "as the form opens: every torrent, bitmagnet's own sizes, nothing looked up, the queue kept" <|
@@ -776,6 +964,7 @@ messages =
     { queueToggled = always ()
     , statusToggled = always ()
     , edited = always ()
+    , recountAsked = ()
     , purgeAsked = ()
     , reprocessAsked = ()
     , cancelled = ()
@@ -822,6 +1011,7 @@ type Sent
     = QueueSent String
     | StatusSent QueueJobStatus
     | EditSent QueueAdmin.Edit
+    | RecountSent
     | SomethingElse
 
 
@@ -860,6 +1050,7 @@ sending =
     { queueToggled = QueueSent
     , statusToggled = StatusSent
     , edited = EditSent
+    , recountAsked = RecountSent
     , purgeAsked = SomethingElse
     , reprocessAsked = SomethingElse
     , cancelled = SomethingElse
@@ -883,3 +1074,98 @@ chipOf : String -> QueueAdmin.State -> Query.Single Sent
 chipOf label state =
     viewSending state
         |> Query.find [ Selector.class "chip", Selector.containing [ Selector.text label ] ]
+
+
+{-| The batch the form makes as it opens.
+-}
+defaultBatch : QueueAdmin.Batch
+defaultBatch =
+    { torrents = QueueAdmin.AllTorrents
+    , options = { rematch = False, localSearch = False, apis = False, purge = False }
+    , sizes = { batchSize = 100, chunkSize = 10000 }
+    }
+
+
+{-| bitmagnet's answer to an act, if one was sent.
+-}
+answer : QueueAdmin.Whereabouts -> Result (Graphql.Http.Error ()) () -> ( QueueAdmin.State, Maybe QueueAdmin.Call ) -> ( QueueAdmin.State, Maybe QueueAdmin.Call )
+answer whereabouts result ( state, call ) =
+    case call of
+        Just sent_ ->
+            QueueAdmin.answered whereabouts sent_ result state
+
+        Nothing ->
+            ( state, Nothing )
+
+
+{-| The person moved, or their Identity changed, from `before` to `after`.
+-}
+move : QueueAdmin.Whereabouts -> QueueAdmin.Whereabouts -> QueueAdmin.State -> QueueAdmin.State
+move before after =
+    QueueAdmin.settle { before = before, after = after }
+
+
+administrator : Identity.Identity
+administrator =
+    Identity.UserAuthenticated user [ Identity.graphql "queue" "query", Identity.graphql "queue" "mutate" ]
+
+
+reader : Identity.Identity
+reader =
+    Identity.UserAuthenticated user [ Identity.graphql "queue" "query" ]
+
+
+user : Identity.User
+user =
+    { id = 1
+    , username = "ada"
+    , role = "admin"
+    , email = Nothing
+    , lastLoginAt = Nothing
+    , createdAt = Time.millisToPosix 0
+    , updatedAt = Time.millisToPosix 0
+    }
+
+
+onPage : QueueAdmin.Whereabouts
+onPage =
+    { route = Route.AdminQueue, identity = administrator, access = Route.Allowed }
+
+
+elsewhere : QueueAdmin.Whereabouts
+elsewhere =
+    { route = Route.Status, identity = administrator, access = Route.Allowed }
+
+
+refusedHere : QueueAdmin.Whereabouts
+refusedHere =
+    { route = Route.AdminQueue, identity = reader, access = Route.Refused "Your Identity does not permit changing bitmagnet's queue." }
+
+
+{-| The Identity being fetched again, as `Main` does on a refusal that says it has gone stale.
+-}
+resolving : QueueAdmin.Whereabouts
+resolving =
+    { route = Route.AdminQueue, identity = Identity.Unknown, access = Route.PendingIdentity }
+
+
+{-| bitmagnet refusing an act to an Identity that has lost queue::mutate.
+-}
+refusedAsStale : Graphql.Http.Error ()
+refusedAsStale =
+    Graphql.Http.GraphqlError (GraphqlError.UnparsedData Encode.null)
+        [ { message = "unauthorized"
+          , locations = Nothing
+          , details =
+                Dict.fromList
+                    [ ( "extensions"
+                      , Encode.object
+                            [ ( "code", Encode.string "UNAUTHORIZED" )
+                            , ( "namespace", Encode.string "graphql" )
+                            , ( "object", Encode.string "queue" )
+                            , ( "action", Encode.string "mutate" )
+                            ]
+                      )
+                    ]
+          }
+        ]

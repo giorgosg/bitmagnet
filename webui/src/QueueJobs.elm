@@ -227,11 +227,13 @@ facetCounts =
         (Aggregations.status (SelectionSet.map2 Tuple.pair StatusAgg.value StatusAgg.count))
 
 
-{-| Every status, in the order of a job's life, which is the schema's order.
+{-| Every status, in the order of a job's life, which is the order the schema lists them in.
+It is the generated enum's own list, so a status the schema gains is offered and counted here,
+never dropped: `inLifeOrder` keeps only what is in it.
 -}
 statuses : List QueueJobStatus
 statuses =
-    [ QueueJobStatus.Pending, QueueJobStatus.Retry, QueueJobStatus.Failed, QueueJobStatus.Processed ]
+    QueueJobStatus.list
 
 
 inLifeOrder : List ( QueueJobStatus, Int ) -> List ( QueueJobStatus, Int )

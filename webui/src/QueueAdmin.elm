@@ -12,6 +12,7 @@ module QueueAdmin exposing
     , State
     , Tally
     , Torrents(..)
+    , Whereabouts
     , answered
     , askPurge
     , askReprocess
@@ -25,13 +26,14 @@ module QueueAdmin exposing
     , edit
     , empty
     , emptyScope
-    , leave
     , opening
     , purgeInput
     , purgeMutation
+    , recount
     , reprocessInput
     , reprocessMutation
     , send
+    , settle
     , toggleQueue
     , toggleStatus
     , view
@@ -48,10 +50,13 @@ only for an act that has been asked about: neither act is sent without a questio
 what it will do. Every act's answer asks for the counts again, so what the page shows
 afterwards is bitmagnet's count, not a guess at it.
 
-An act carries a number `Main` gives it, which its answer carries back, so the answer to one
-act is never taken for another's. An act on its way outlasts leaving the page (`leave`), and
-nothing else is asked about until it is answered; the mutation is given up on after five
-minutes, so it is answered one way or another.
+Each act is numbered, and its answer carries its `Call` back, so the answer to one act is never
+taken for another's. What becomes of the page as the person moves, or as their Identity
+changes, is decided here too (`settle`), from plain values `Main` hands over after every update:
+an act on its way outlasts both, and nothing else is asked about until it is answered (the
+mutation is given up on after five minutes, so it is answered one way or another); what became
+of an act is kept until it has been on screen; and an answer asks for a recount only while the
+page is showing and allowed.
 
 Every control sends what it changed — a queue toggled, a box ticked, a size typed — and never
 a copy of the scope or the form as it was drawn. Elm draws on the next animation frame, so a
@@ -72,6 +77,7 @@ import Graphql.SelectionSet as SelectionSet exposing (SelectionSet)
 import Html exposing (Html, a, button, div, fieldset, h1, h2, input, label, legend, li, p, section, span, text, ul)
 import Html.Attributes exposing (attribute, checked, class, disabled, for, href, id, name, type_, value)
 import Html.Events exposing (onCheck, onClick, onInput)
+import Identity
 import Magnes.Api.Enum.QueueJobStatus as QueueJobStatus exposing (QueueJobStatus)
 import Magnes.Api.InputObject as InputObject
 import Magnes.Api.Mutation as Mutation
@@ -123,13 +129,14 @@ type Count
 
 
 {-| An act, as it was asked about: the purge with the number of jobs that matched, and the
-batch with the number of jobs the queue held, which purging first deletes. The numbers are
-kept so the question, and what is said once bitmagnet has answered, are about the act that was
-confirmed, whatever has been counted since.
+batch with the number of jobs the queue held, if it had been counted: a batch that purges first
+is asked about only with that number, since it deletes them all, and one that does not can do
+without. The numbers are kept so the question, and what is said once bitmagnet has answered,
+are about the act that was confirmed, whatever has been counted since.
 -}
 type Act
     = Purging Scope Int
-    | Reprocessing Batch Int
+    | Reprocessing Batch (Maybe Int)
 
 
 {-| One act at a time, on the whole page: a question is answered or taken back before another
@@ -153,12 +160,24 @@ type Outcome
     | Unknown Act ApiError.Failure
 
 
+{-| An outcome, and whether the page has been on screen since it came: one that has not is kept
+until it has, however the person moves, because it is the answer to something destructive they
+asked for.
+-}
+type Report
+    = Untold Outcome
+    | Told Outcome
+
+
+{-| `acts` is how many acts have been confirmed, which numbers the next.
+-}
 type alias State =
     { scope : Scope
     , form : Form
     , count : Count
     , step : Step
-    , outcome : Maybe Outcome
+    , acts : Int
+    , report : Maybe Report
     }
 
 
@@ -168,25 +187,89 @@ empty =
     , form = defaultForm
     , count = Counting Nothing
     , step = Choosing
-    , outcome = Nothing
+    , acts = 0
+    , report = Nothing
     }
 
 
+{-| Where the person is: the route they are on, the Identity they hold, and what `Route.guard`
+says of the one for the other. `Main` hands it over after every update.
+-}
+type alias Whereabouts =
+    { route : Route.Route
+    , identity : Identity.Identity
+    , access : Route.Access
+    }
+
+
+{-| The page is on screen.
+-}
+showing : Whereabouts -> Bool
+showing whereabouts =
+    whereabouts.route == Route.AdminQueue && whereabouts.access == Route.Allowed
+
+
+{-| What an update that moved the person from `before` to `after` does to the page. Moving to
+another route, or holding another Identity, leaves the page (`leave`); and once it is on
+screen, what became of the last act has been told.
+-}
+settle : { before : Whereabouts, after : Whereabouts } -> State -> State
+settle { before, after } state =
+    let
+        moved =
+            if before == after then
+                state
+
+            else
+                leave state
+    in
+    if showing after then
+        { moved | report = Maybe.map (Told << reported) moved.report }
+
+    else
+        moved
+
+
 {-| The page left, or its Identity changed: everything on it goes but an act still on its way,
-whose answer is still to come. Until it comes nothing else is asked about, so two acts are
-never on their way at once.
+whose answer is still to come, the count of acts that numbers the next, and an outcome not yet
+told. Until the act is answered nothing else is asked about, so two are never on their way at
+once.
 -}
 leave : State -> State
 leave state =
-    case state.step of
-        Sending number act ->
-            { empty | step = Sending number act }
+    { empty
+        | step =
+            case state.step of
+                Sending number act ->
+                    Sending number act
 
-        Choosing ->
-            empty
+                Choosing ->
+                    Choosing
 
-        Asking _ ->
-            empty
+                Asking _ ->
+                    Choosing
+        , acts = state.acts
+        , report =
+            case state.report of
+                Just (Untold outcome) ->
+                    Just (Untold outcome)
+
+                Just (Told _) ->
+                    Nothing
+
+                Nothing ->
+                    Nothing
+    }
+
+
+reported : Report -> Outcome
+reported report =
+    case report of
+        Untold outcome ->
+            outcome
+
+        Told outcome ->
+            outcome
 
 
 {-| A queue chosen, or unchosen, for the purge.
@@ -209,6 +292,13 @@ toggleStatus status state =
             state.scope
     in
     withScope { scope | statuses = Chip.toggle status scope.statuses } state
+
+
+{-| The scope chosen now counted again, as after a count that failed.
+-}
+recount : State -> ( State, Call )
+recount state =
+    withScope state.scope state
 
 
 {-| A purge is about one scope, so choosing another asks for it to be counted afresh, and takes
@@ -521,23 +611,30 @@ purgeAskable state =
                 Nothing
 
 
-{-| The batch that may be asked about now: the one the form makes, if it makes one, once the
-queue has been counted, so the question can say how many jobs purging first would delete, or
-how many the batch joins; and while no act is on its way.
+{-| The batch that may be asked about now: the one the form makes, if it makes one, while no
+act is on its way. One that purges first waits for a current count of the queue, so the
+question can say how many jobs it deletes; one that does not needs none, and is not held up by a
+count on its way or one that failed.
 -}
 reprocessAskable : State -> Maybe Act
 reprocessAskable state =
     case ( onItsWay state.step, batch state.form ) of
         ( False, Ok chosen ) ->
-            case state.count of
-                Counted tally ->
-                    Just (Reprocessing chosen tally.everything)
+            case ( chosen.options.purge, state.count ) of
+                ( _, Counted tally ) ->
+                    Just (Reprocessing chosen (Just tally.everything))
 
-                Counting _ ->
+                ( True, Counting _ ) ->
                     Nothing
 
-                CountFailed _ _ ->
+                ( True, CountFailed _ _ ) ->
                     Nothing
+
+                ( False, Counting _ ) ->
+                    Just (Reprocessing chosen Nothing)
+
+                ( False, CountFailed _ _ ) ->
+                    Just (Reprocessing chosen Nothing)
 
         ( False, Err _ ) ->
             Nothing
@@ -573,7 +670,7 @@ ask : Maybe Act -> State -> State
 ask askable state =
     case askable of
         Just act ->
-            { state | step = Asking act, outcome = Nothing }
+            { state | step = Asking act, report = Nothing }
 
         Nothing ->
             state
@@ -586,13 +683,17 @@ cancel state =
     { state | step = settled state.step }
 
 
-{-| The act asked about, confirmed, numbered `number`: the only way either act is sent.
+{-| The act asked about, confirmed and numbered: the only way either act is sent.
 -}
-confirm : Int -> State -> ( State, Maybe Call )
-confirm number state =
+confirm : State -> ( State, Maybe Call )
+confirm state =
+    let
+        number =
+            state.acts + 1
+    in
     case state.step of
         Asking act ->
-            ( { state | step = Sending number act }
+            ( { state | step = Sending number act, acts = number }
             , Just
                 (case act of
                     Purging scope _ ->
@@ -610,25 +711,31 @@ confirm number state =
             ( state, Nothing )
 
 
-{-| bitmagnet's answer to act `number`. An answer to any act but the one on its way is dropped.
-Whatever it says, the counts are asked for again: after a success they are what the act left,
-and after a failure the act may have happened anyway, so the count from before it is not shown
-as current.
+{-| bitmagnet's answer to `call`, which lands while the person is `there`. An answer to any act
+but the one on its way is dropped. Whatever it says, the counts are asked for again, if the page
+is showing to draw them: after a success they are what the act left, and after a failure the act
+may have happened anyway, so the count from before it is not shown as current. A page that is
+not showing counts afresh when it is opened, and one that is refused would only be refused the
+count too.
 -}
-answered : Int -> Result (Graphql.Http.Error ()) () -> State -> ( State, Maybe Call )
-answered number answer state =
+answered : Whereabouts -> Call -> Result (Graphql.Http.Error ()) () -> State -> ( State, Maybe Call )
+answered there call answer state =
     case state.step of
         Sending sent act ->
-            if sent /= number then
+            if actNumber call /= Just sent then
                 ( state, Nothing )
 
             else
                 ( { state
                     | step = Choosing
                     , count = Counting (lastTally state.count)
-                    , outcome = Just (outcomeOf act answer)
+                    , report = Just (Untold (outcomeOf act answer))
                   }
-                , Just (CountCall state.scope)
+                , if showing there then
+                    Just (CountCall state.scope)
+
+                  else
+                    Nothing
                 )
 
         Choosing ->
@@ -663,6 +770,19 @@ type Call
     | ReprocessCall Int Batch
 
 
+actNumber : Call -> Maybe Int
+actNumber call =
+    case call of
+        CountCall _ ->
+            Nothing
+
+        PurgeCall number _ ->
+            Just number
+
+        ReprocessCall number _ ->
+            Just number
+
+
 {-| What the page asks for as it opens: a count of every job.
 -}
 opening : Call
@@ -672,11 +792,11 @@ opening =
 
 {-| A call, sent: the count as a query, and either act as a mutation through
 `Bitmagnet.slowMutationRequest`, with the timeout that keeps an act from being on its way for
-good. `counted` is told which scope it was asked about, and `acted` which act.
+good. `counted` is told which scope it was asked about, and `acted` which call it answers.
 -}
 send :
     String
-    -> { counted : Scope -> Result (Graphql.Http.Error Tally) Tally -> msg, acted : Int -> Result (Graphql.Http.Error ()) () -> msg }
+    -> { counted : Scope -> Result (Graphql.Http.Error Tally) Tally -> msg, acted : Call -> Result (Graphql.Http.Error ()) () -> msg }
     -> Call
     -> Cmd msg
 send apiUrl messages call =
@@ -686,15 +806,15 @@ send apiUrl messages call =
                 |> Bitmagnet.queryRequest apiUrl
                 |> Graphql.Http.send (messages.counted scope)
 
-        PurgeCall number scope ->
+        PurgeCall _ scope ->
             purgeMutation scope
                 |> Bitmagnet.slowMutationRequest apiUrl
-                |> Graphql.Http.send (messages.acted number)
+                |> Graphql.Http.send (messages.acted call)
 
-        ReprocessCall number chosen ->
+        ReprocessCall _ chosen ->
             reprocessMutation chosen
                 |> Bitmagnet.slowMutationRequest apiUrl
-                |> Graphql.Http.send (messages.acted number)
+                |> Graphql.Http.send (messages.acted call)
 
 
 {-| The GraphQL document a call sends.
@@ -810,6 +930,7 @@ type alias Messages msg =
     { queueToggled : String -> msg
     , statusToggled : QueueJobStatus -> msg
     , edited : Edit -> msg
+    , recountAsked : msg
     , purgeAsked : msg
     , reprocessAsked : msg
     , cancelled : msg
@@ -857,7 +978,7 @@ purgePanel mount messages state =
         , p [ class "queue-admin-intro" ]
             [ text "Delete jobs from bitmagnet's queue for good. Choose queues and statuses to narrow it; choosing none of either means all of them." ]
         , scopeChips messages state
-        , matchLine state
+        , matchLine messages state
         , a [ class "queue-admin-review", href (Route.toHref mount (jobsOf state.scope)) ] [ text "See them in the jobs table" ]
         , case state.step of
             Asking (Purging scope n) ->
@@ -874,7 +995,7 @@ purgePanel mount messages state =
 
             Choosing ->
                 purgeButton messages state
-        , case state.outcome of
+        , case Maybe.map reported state.report of
             Just (Done (Purging scope _)) ->
                 p [ class "queue-admin-outcome", attribute "role" "status" ]
                     [ text ("bitmagnet purged " ++ scopeSaid scope ++ ".")
@@ -895,7 +1016,7 @@ purgePanel mount messages state =
 
             Just (Unknown (Purging scope _) failure) ->
                 p [ class "notice error", attribute "role" "alert" ]
-                    [ text ("No answer to the purge came back: " ++ ApiError.toMessage failure ++ " Whether bitmagnet purged them is not known. ")
+                    [ text ("No usable answer to the purge came back. " ++ ApiError.toMessage failure ++ " Whether bitmagnet purged them is not known. ")
                     , a [ href (Route.toHref mount (jobsOf scope)) ] [ text "Check the jobs table" ]
                     , text " before purging again."
                     ]
@@ -1044,11 +1165,14 @@ scopeChips messages state =
         ]
 
 
-matchLine : State -> Html msg
-matchLine state =
+matchLine : Messages msg -> State -> Html msg
+matchLine messages state =
     case state.count of
         CountFailed failure _ ->
-            p [ class "notice error", attribute "role" "alert" ] [ text (ApiError.toMessage failure) ]
+            div [ class "queue-admin-count-failed" ]
+                [ p [ class "notice error", attribute "role" "alert" ] [ text (ApiError.toMessage failure) ]
+                , button [ type_ "button", onClick messages.recountAsked ] [ text "Count again" ]
+                ]
 
         Counted tally ->
             let
@@ -1193,7 +1317,7 @@ reprocessPanel mount messages state =
 
             Choosing ->
                 reprocessButton messages state
-        , case state.outcome of
+        , case Maybe.map reported state.report of
             Just (Done (Reprocessing chosen _)) ->
                 p [ class "queue-admin-outcome", attribute "role" "status" ]
                     [ text
@@ -1213,7 +1337,7 @@ reprocessPanel mount messages state =
 
             Just (Unknown (Reprocessing _ _) failure) ->
                 p [ class "notice error", attribute "role" "alert" ]
-                    [ text ("No answer to the batch came back: " ++ ApiError.toMessage failure ++ " Whether bitmagnet queued it is not known. ")
+                    [ text ("No usable answer to the batch came back. " ++ ApiError.toMessage failure ++ " Whether bitmagnet queued it is not known. ")
                     , a [ href (Route.toHref mount (Route.QueueJobs Route.emptyJobs)) ] [ text "Check the queue's jobs, newest first," ]
                     , text " before queueing another."
                     ]
@@ -1322,7 +1446,7 @@ bitmagnet's batch handler (`processor/batch/queue`): it walks torrents last upda
 batch was queued, in info-hash order, `batchSize` at a time, and queues a successor at the
 first whole processing job past `chunkSize` (`handOn`).
 -}
-reprocessQuestion : Batch -> Int -> Question
+reprocessQuestion : Batch -> Maybe Int -> Question
 reprocessQuestion chosen held =
     let
         options =
@@ -1344,13 +1468,20 @@ reprocessQuestion chosen held =
         else
             "Queue a batch that reprocesses " ++ torrentsSaid chosen.torrents ++ "?"
     , facts =
-        [ if options.purge then
-            Format.count held
-                ++ Format.forCount held { one = " job was", many = " jobs were" }
-                ++ " in the queue when last counted, in every queue and status. Jobs still waiting to run will never run, and the deletion cannot be undone."
+        [ case ( options.purge, held ) of
+            ( True, Just n ) ->
+                Format.count n
+                    ++ Format.forCount n { one = " job was", many = " jobs were" }
+                    ++ " in the queue when last counted, in every queue and status. Jobs still waiting to run will never run, and the deletion cannot be undone."
 
-          else
-            "It adds one job to the queue, which held " ++ Format.count held ++ " when last counted."
+            ( True, Nothing ) ->
+                "Every job in the queue is deleted first, in every queue and status. Jobs still waiting to run will never run, and the deletion cannot be undone."
+
+            ( False, Just n ) ->
+                "It adds one job to the queue, which held " ++ Format.count n ++ " when last counted."
+
+            ( False, Nothing ) ->
+                "It adds one job to the queue."
         , "bitmagnet queues one process_torrent_batch job, which walks the torrents last updated before it was queued and queues a process_torrent job "
             ++ perJob
             ++ "; after "

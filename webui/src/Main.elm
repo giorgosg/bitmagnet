@@ -183,16 +183,13 @@ type alias Model =
     -- chooses. Answers carry `epoch`, as the torrent timeline's do.
     , queueStats : QueueStats.State
 
-    -- The queue's administration: what a purge would delete, the reprocessing form, and
-    -- which act has been asked about but not yet confirmed, or is on its way. A count carries
-    -- `epoch`, which drops an answer a newer request has replaced, and the scope it was asked
-    -- about, by which `QueueAdmin.counted` drops one about a scope no longer chosen.
+    -- The queue's administration: what a purge would delete, the reprocessing form, which
+    -- act has been asked about but not yet confirmed or is on its way, and what became of the
+    -- last. A count carries `epoch`, which drops an answer a newer request has replaced, and
+    -- the scope it was asked about, by which `QueueAdmin.counted` drops one about a scope no
+    -- longer chosen. What the page keeps as the person moves, or as their Identity changes, is
+    -- `QueueAdmin.settle`'s to decide, after every update (see `update`).
     , queueAdmin : QueueAdmin.State
-
-    -- How many of the queue's acts have been confirmed. Never reset: each act is numbered by
-    -- it, its answer carries the number back, and `QueueAdmin.answered` drops an answer to
-    -- any act but the one on its way.
-    , queueAdminActs : Int
     }
 
 
@@ -374,7 +371,6 @@ init flags url key =
       , torrentStats = StatsLook.empty
       , queueStats = StatsLook.empty
       , queueAdmin = QueueAdmin.empty
-      , queueAdminActs = 0
       , users = Users.empty
       , usersEpoch = 0
       , userTyping = 0
@@ -606,12 +602,44 @@ type Msg
     | QueueAdminActCancelled
     | QueueAdminActConfirmed
     | GotQueueAdminCount Int QueueAdmin.Scope (Result (Graphql.Http.Error QueueAdmin.Tally) QueueAdmin.Tally)
-    | GotQueueAdminAct Int (Result (Graphql.Http.Error ()) ())
+    | QueueAdminRecountAsked
+    | GotQueueAdminAct QueueAdmin.Call (Result (Graphql.Http.Error ()) ())
     | Ignored
 
 
+{-| Every message, and then what it did to where the person is, for the one page that keeps
+something across that: the queue's administration (`QueueAdmin.settle`). Deciding it once,
+from where the person was and is, rather than at each place a route or an Identity changes,
+keeps a new such place from forgetting it.
+-}
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
+    let
+        ( updated, cmd ) =
+            updateModel msg model
+    in
+    ( { updated
+        | queueAdmin =
+            QueueAdmin.settle
+                { before = queueAdminWhereabouts model, after = queueAdminWhereabouts updated }
+                updated.queueAdmin
+      }
+    , cmd
+    )
+
+
+{-| Where the person is, as the queue's administration needs to know it.
+-}
+queueAdminWhereabouts : Model -> QueueAdmin.Whereabouts
+queueAdminWhereabouts model =
+    { route = model.route
+    , identity = model.identity
+    , access = Route.guard model.basePath model.identity model.route
+    }
+
+
+updateModel : Msg -> Model -> ( Model, Cmd Msg )
+updateModel msg model =
     case msg of
         Ignored ->
             ( model, Cmd.none )
@@ -649,7 +677,7 @@ update msg model =
                 -- server say what the new Identity may do — so it goes through the same
                 -- branch rather than a second copy of it that could drift.
                 ( refreshed, refresh ) =
-                    update (AuthenticationChangedHere Resolving) { model | login = Login.empty }
+                    updateModel (AuthenticationChangedHere Resolving) { model | login = Login.empty }
             in
             ( refreshed
             , Cmd.batch
@@ -1618,11 +1646,6 @@ update msg model =
                             -- withdrawal, a refusal, and the page that was being read.
                             , invitations = Invitations.empty
 
-                            -- The same for the queue's administration: an act asked about
-                            -- is not carried to another visit. One on its way is, until it
-                            -- is answered, so that no second act is confirmed beside it.
-                            , queueAdmin = QueueAdmin.leave model.queueAdmin
-
                             -- And abandons any measurement of that password. Without
                             -- this, one still in flight when the page was left comes
                             -- back to a form nobody has typed into and scores it.
@@ -1816,16 +1839,19 @@ update msg model =
             ( { model | queueAdmin = QueueAdmin.cancel model.queueAdmin }, Cmd.none )
 
         QueueAdminActConfirmed ->
-            let
-                number =
-                    model.queueAdminActs + 1
-            in
-            case QueueAdmin.confirm number model.queueAdmin of
+            case QueueAdmin.confirm model.queueAdmin of
                 ( queueAdmin, Just call ) ->
-                    callQueue call { model | queueAdmin = queueAdmin, queueAdminActs = number }
+                    callQueue call { model | queueAdmin = queueAdmin }
 
                 ( _, Nothing ) ->
                     ( model, Cmd.none )
+
+        QueueAdminRecountAsked ->
+            let
+                ( queueAdmin, call ) =
+                    QueueAdmin.recount model.queueAdmin
+            in
+            callQueue call { model | queueAdmin = queueAdmin }
 
         GotQueueAdminCount epoch scope result ->
             if epoch /= model.epoch then
@@ -1845,26 +1871,22 @@ update msg model =
                                 )
                             )
 
-        GotQueueAdminAct number result ->
+        GotQueueAdminAct call result ->
             -- The answer is the act's first, whatever else it says: it ends the act on its way,
             -- which outlasts leaving the page and a refetched Identity alike. Then a refusal
-            -- that says the Identity is stale refetches it, and anything else asks for the
-            -- recount the answer wants, if the page is still showing to draw it.
+            -- that says the Identity is stale refetches it, and anything else sends the recount
+            -- the page asks for, which it does only while it is showing and allowed.
             let
                 ( queueAdmin, recount ) =
-                    QueueAdmin.answered number result model.queueAdmin
+                    QueueAdmin.answered (queueAdminWhereabouts model) call result model.queueAdmin
 
                 answered =
                     { model | queueAdmin = queueAdmin }
 
                 counting current =
                     case recount of
-                        Just call ->
-                            if current.route == Route.AdminQueue then
-                                callQueue call current
-
-                            else
-                                ( current, Cmd.none )
+                        Just countCall ->
+                            callQueue countCall current
 
                         Nothing ->
                             ( current, Cmd.none )
@@ -2044,7 +2066,7 @@ queueAdminCalls :
     Int
     ->
         { counted : QueueAdmin.Scope -> Result (Graphql.Http.Error QueueAdmin.Tally) QueueAdmin.Tally -> Msg
-        , acted : Int -> Result (Graphql.Http.Error ()) () -> Msg
+        , acted : QueueAdmin.Call -> Result (Graphql.Http.Error ()) () -> Msg
         }
 queueAdminCalls epoch =
     { counted = GotQueueAdminCount epoch
@@ -2057,6 +2079,7 @@ queueAdminMessages =
     { queueToggled = QueueAdminQueueToggled
     , statusToggled = QueueAdminStatusToggled
     , edited = QueueAdminFormEdited
+    , recountAsked = QueueAdminRecountAsked
     , purgeAsked = QueueAdminPurgeAsked
     , reprocessAsked = QueueAdminReprocessAsked
     , cancelled = QueueAdminActCancelled
@@ -2162,7 +2185,7 @@ signedOut : Model -> ( Model, Cmd Msg )
 signedOut model =
     let
         ( refreshed, refresh ) =
-            update (AuthenticationChangedHere AfterSignOut)
+            updateModel (AuthenticationChangedHere AfterSignOut)
                 { model | signOut = UserOverview.Ready }
     in
     ( refreshed
@@ -2739,7 +2762,6 @@ beginIdentityRefresh reason model =
         , jobs = QueueJobs.empty
         , torrentStats = StatsLook.empty
         , queueStats = StatsLook.empty
-        , queueAdmin = QueueAdmin.leave model.queueAdmin
 
         -- And a pending search-debounce is spent: the timer it would fire belongs to a
         -- screen that no longer holds the search it was typed into.
@@ -2807,9 +2829,7 @@ identityApplied identity model =
                     ( results, cmd ) =
                         guardedLoad model identity epoch model.route
 
-                    -- A different Identity may read different fields: workers, for one. And an
-                    -- act asked about under the old one is not confirmed under this one: the
-                    -- queue's administration starts again, counting what it opens on.
+                    -- A different Identity may read different fields: workers, for one.
                     ( refreshed, healthCmd ) =
                         refreshHealth
                             { model
@@ -2818,7 +2838,6 @@ identityApplied identity model =
                                 , results = results
                                 , epoch = epoch
                                 , infiniteList = InfiniteList.init
-                                , queueAdmin = QueueAdmin.leave model.queueAdmin
                             }
                 in
                 ( refreshed

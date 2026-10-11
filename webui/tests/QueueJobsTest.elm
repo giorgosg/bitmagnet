@@ -5,7 +5,7 @@ import Expect
 import Graphql.Document
 import Html.Attributes
 import Json.Decode as Decode
-import Magnes.Api.Enum.QueueJobStatus exposing (QueueJobStatus(..))
+import Magnes.Api.Enum.QueueJobStatus as QueueJobStatus exposing (QueueJobStatus(..))
 import Magnes.Api.Enum.QueueJobsOrderByField exposing (QueueJobsOrderByField(..))
 import QueueJobs
 import Route
@@ -19,7 +19,15 @@ import Time
 suite : Test
 suite =
     describe "QueueJobs"
-        [ describe "query"
+        [ describe "statuses"
+            [ test "are every status the schema has, in the order of a job's life" <|
+                \_ ->
+                    -- Read off the generated enum, so a status the schema gains is offered and
+                    -- counted rather than dropped. The schema lists them as a job lives them.
+                    ( QueueJobs.statuses, QueueJobs.statuses == QueueJobStatus.list )
+                        |> Expect.equal ( [ Pending, Retry, Failed, Processed ], True )
+            ]
+        , describe "query"
             [ test "filters through the facets, so each facet's counts ignore its own filter" <|
                 \_ ->
                     Graphql.Document.serializeQuery (QueueJobs.query failedPriority)

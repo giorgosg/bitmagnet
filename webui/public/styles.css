@@ -822,9 +822,9 @@ main {
 }
 
 /* A danger button that cannot be pressed — an act that cannot be asked about yet, or one
-   waiting while another is on its way — looks like any other disabled button. Written after
-   both rules above, which it ties on specificity: without it a disabled danger button kept the
-   accent, and its hover filled it. */
+   waiting while another is on its way — looks like any other disabled button. It outranks
+   `.page button.danger` (0,3,1 against 0,2,1), and ties `.page button.danger:hover`, which it
+   comes after: without it a disabled danger button kept the accent, and its hover filled it. */
 .page button.danger:disabled {
   border-color: var(--faint);
   background: transparent;
@@ -1801,6 +1801,19 @@ main {
 
 .queue-admin-match.notice {
   padding: 0;
+}
+
+/* A count that failed, and the way to ask for it again, on one line where they fit. */
+.queue-admin-count-failed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.375rem 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.queue-admin-count-failed .notice {
+  margin: 0;
 }
 
 .queue-admin-review,
