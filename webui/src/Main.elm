@@ -1116,7 +1116,26 @@ updateModel msg model =
             actAccepted model
 
         RoleNameChanged name ->
-            ( { model | roles = Roles.withDraft (Roles.withName name model.roles.draft) model.roles }
+            let
+                typed =
+                    Roles.withName name model.roles.draft
+
+                draft =
+                    case model.roles.listing of
+                        Roles.Loaded loadedPage ->
+                            if String.trim name == "anon" then
+                                -- anon already exists. Load its whole stored set even
+                                -- when its name was typed into the create form, so this
+                                -- path cannot discard Permissions no checkbox expresses.
+                                Roles.draftNamed "anon" loadedPage |> Maybe.withDefault typed
+
+                            else
+                                typed
+
+                        _ ->
+                            typed
+            in
+            ( { model | roles = Roles.withDraft draft model.roles }
             , Cmd.none
             )
 
@@ -1141,25 +1160,20 @@ updateModel msg model =
                     if String.isEmpty name || not (Roles.writable draft) then
                         ( model, Cmd.none )
 
-                    else if Roles.ownRole model.identity == Just name then
-                        -- Writing the Role you are holding this screen with can take the
-                        -- administration Permission out from under you, and bitmagnet
-                        -- does not prevent it. The spec asks for a warning first, so the
-                        -- save is armed rather than sent.
-                        ( { model
-                            | roles =
-                                Roles.withConfirming (Just (Roles.SavingOwn name)) model.roles
-                          }
-                        , Cmd.none
-                        )
-
                     else
-                        ( { model | roles = Roles.withSubmission Roles.Saving model.roles }
-                        , Roles.put model.apiUrl
-                            name
-                            (Roles.desiredActions loadedPage.actions draft)
-                            GotRoleSaved
-                        )
+                        case Roles.confirmationFor loadedPage.actions (Roles.ownRole model.identity) draft of
+                            Just confirmation ->
+                                ( { model | roles = Roles.withConfirming (Just confirmation) model.roles }
+                                , Cmd.none
+                                )
+
+                            Nothing ->
+                                ( { model | roles = Roles.withSubmission Roles.Saving model.roles }
+                                , Roles.put model.apiUrl
+                                    name
+                                    (Roles.desiredActions loadedPage.actions draft)
+                                    GotRoleSaved
+                                )
 
                 _ ->
                     ( model, Cmd.none )
@@ -1206,6 +1220,14 @@ updateModel msg model =
                 ( Just (Roles.Deleting name), _ ) ->
                     ( { model | roles = armed model.roles }
                     , Roles.delete model.apiUrl name (GotRoleDeleted name)
+                    )
+
+                ( Just Roles.SavingAnonymous, Roles.Loaded loadedPage ) ->
+                    ( { model | roles = armed model.roles }
+                    , Roles.put model.apiUrl
+                        "anon"
+                        (Roles.desiredActions loadedPage.actions model.roles.draft)
+                        GotRoleSaved
                     )
 
                 ( Just (Roles.SavingOwn name), Roles.Loaded loadedPage ) ->

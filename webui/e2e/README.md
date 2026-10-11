@@ -165,6 +165,22 @@ skips it, which is only safe when nothing else is running), and if anything in t
 fails, these are skipped rather than run. A new spec that changes the queue belongs in
 `queueChangingSpecs` in the config.
 
+### Specs that change Anonymous access
+
+`anonymous-role.spec.js` edits the shared `anon` Role, which determines what every
+Anonymous browser may do. Its `credentialed-anonymous-changes` project depends on the
+queue-changing project, so all other credentialed tests have finished before it runs.
+Its tests run one at a time and restore the exact previous stored grants in `finally`,
+through the administrator's cookie even if the UI assertion failed. Selecting that
+project alone still runs its dependencies; `--no-deps` is only safe when no other tests
+are using the fixture.
+
+The specs grant and revoke a read action and see Anonymous lose its statistics page,
+confirm a delete grant only after the cross-origin warning (including cancellation and
+repeated Enter), and preserve pre-existing auth and wildcard grants without offering
+checkboxes for auth, including when its existing name is typed into Create. Those carried
+grants also require the write confirmation.
+
 ### What it needs present
 
 If the database is not up, the harness says so and stops before building anything —
