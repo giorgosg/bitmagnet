@@ -82,11 +82,12 @@ What survives of the plan is the tab synchronization, minus the credential. A
 `BroadcastChannel` message says only "authentication changed"; each tab then asks
 `self.identity` what it may now do. `public/index.html` carries that pair of ports.
 
-One port does carry a password, in one direction, once: after a successful registration or
-sign-in, Magnes offers the username and the password just typed to
-`navigator.credentials.store`, because Elm's `onSubmit` prevents the default and no
-password manager would otherwise see a submission to offer saving on. That is the person's
-own password on its way out of the model, not bitmagnet's credential. See ticket 17.
+One port does carry a password, in one direction, once: after a successful registration,
+sign-in or password change, Magnes offers the username and the password just typed (the new
+one, for a change) to `navigator.credentials.store`, because Elm's `onSubmit` prevents the
+default and no password manager would otherwise see a submission to offer saving on. That is
+the person's own password on its way out of the model, not bitmagnet's credential. See
+tickets 17 and 20.
 
 ### 4. One place that builds a request
 
@@ -170,7 +171,12 @@ In dependency order, each usable before the next exists:
 1. **Login** — username, password, error line. Honour `returnUrl`, navigate with
    `replaceUrl`. Handle `too many login requests` as its own state: it is a wait, not a
    wrong password.
-2. **Account** — who you are, your role, when you last signed in, sign out.
+2. **Account** — who you are, your role, when you last signed in, sign out, and a password
+   change (ticket 20). The change ends every sign-in the User has, this one included, so the
+   form says so before it is sent, and afterwards the browser lands on the login form, asked
+   to return to the account, with a sentence saying why. The new password is offered to the
+   password manager on success only. API keys are untouched by it, and the form says that
+   too.
 3. **API keys** — list, create, **delete**. The secret is shown once, at creation, and is
    never retrievable; the UI has to be emphatic about that. Scoping a key means the object
    action list from `listObjectActions`.
@@ -219,13 +225,15 @@ in this repository. One has since been closed:
 
 1. **No password-change mutation** — **closed** by bitmagnet `77f3fd9e3` (2026-09-14),
    which adds `self.updatePassword` and ends every session for the account when it
-   succeeds. The account screen's password section is ticket 20
-   (`.scratch/identity-and-permissions/issues/20-build-password-change.md`).
+   succeeds. The account screen's password section is built (ticket 20,
+   `.scratch/identity-and-permissions/issues/20-build-password-change.md`).
 2. **`User` has no `enabled` field.** Still true on trunk on 2026-10-05. `setUserEnabled` exists, the column exists, and the
    type does not expose it — so a users table cannot show who is disabled, or reflect the
    result of disabling someone.
 3. **`auth.email_verification` is inert.** Documented as such in bitmagnet's own
    `docs/auth.md`. Do not build UI that implies an address was verified.
 
-Until ticket 20 is built, the account screen has no password section. Do not draw a
-disabled one.
+There is still no password reset, and no mutation an administrator could set one with:
+changing a password needs the current one. A User who loses theirs can only be deleted and
+invited again, which is why the new password is offered to the password manager the moment a
+change succeeds.

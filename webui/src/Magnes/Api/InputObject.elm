@@ -1177,6 +1177,35 @@ encodeTorrentTagFacetInput input____ =
         [ ( "aggregate", Encode.bool |> Encode.optional input____.aggregate ), ( "logic", Encode.enum Magnes.Api.Enum.FacetLogic.toString |> Encode.optional input____.logic ), ( "filter", (Encode.string |> Encode.list) |> Encode.optional input____.filter ) ]
 
 
+buildUpdatePasswordInput :
+    UpdatePasswordInputRequiredFields
+    -> UpdatePasswordInput
+buildUpdatePasswordInput required____ =
+    { currentPassword = required____.currentPassword, newPassword = required____.newPassword }
+
+
+type alias UpdatePasswordInputRequiredFields =
+    { currentPassword : String
+    , newPassword : String
+    }
+
+
+{-| Type for the UpdatePasswordInput input object.
+-}
+type alias UpdatePasswordInput =
+    { currentPassword : String
+    , newPassword : String
+    }
+
+
+{-| Encode a UpdatePasswordInput into a value that can be used as an argument.
+-}
+encodeUpdatePasswordInput : UpdatePasswordInput -> Value
+encodeUpdatePasswordInput input____ =
+    Encode.maybeObject
+        [ ( "currentPassword", Encode.string input____.currentPassword |> Just ), ( "newPassword", Encode.string input____.newPassword |> Just ) ]
+
+
 buildVideoResolutionFacetInput :
     (VideoResolutionFacetInputOptionalFields -> VideoResolutionFacetInputOptionalFields)
     -> VideoResolutionFacetInput

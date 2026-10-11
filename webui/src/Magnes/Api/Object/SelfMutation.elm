@@ -84,3 +84,17 @@ deleteAPIKey :
     -> SelectionSet (Maybe Magnes.Api.ScalarCodecs.Void) Magnes.Api.Object.SelfMutation
 deleteAPIKey requiredArgs____ =
     Object.selectionForField "(Maybe ScalarCodecs.Void)" "deleteAPIKey" [ Argument.required "id" requiredArgs____.id Encode.int ] (Magnes.Api.ScalarCodecs.codecs |> Magnes.Api.Scalar.unwrapCodecs |> .codecVoid |> .decoder |> Decode.nullable)
+
+
+type alias UpdatePasswordRequiredArguments =
+    { input : Magnes.Api.InputObject.UpdatePasswordInput }
+
+
+{-| Change the calling account's own password. Every session for that account
+ends, including the one that called this, so the client has to log in again.
+-}
+updatePassword :
+    UpdatePasswordRequiredArguments
+    -> SelectionSet (Maybe Magnes.Api.ScalarCodecs.Void) Magnes.Api.Object.SelfMutation
+updatePassword requiredArgs____ =
+    Object.selectionForField "(Maybe ScalarCodecs.Void)" "updatePassword" [ Argument.required "input" requiredArgs____.input Magnes.Api.InputObject.encodeUpdatePasswordInput ] (Magnes.Api.ScalarCodecs.codecs |> Magnes.Api.Scalar.unwrapCodecs |> .codecVoid |> .decoder |> Decode.nullable)

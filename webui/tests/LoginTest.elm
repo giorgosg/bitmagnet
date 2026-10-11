@@ -87,7 +87,7 @@ suite =
                     typed "ada" "correct horse"
                         |> Login.withPassword "changed"
                         |> Expect.equal
-                            { username = "ada", password = "changed", state = Login.Ready }
+                            { username = "ada", password = "changed", state = Login.Ready, reason = Nothing }
             ]
         , describe "view"
             [ test "invalid credentials are announced beside the fields" <|
@@ -123,6 +123,42 @@ suite =
                         |> Query.fromHtml
                         |> Query.find [ Selector.tag "button" ]
                         |> Query.has [ Selector.disabled True ]
+            ]
+        , describe "after a password change"
+            [ test "opens on the User's own name, with no password" <|
+                \_ ->
+                    Login.afterPasswordChange "ada"
+                        |> Expect.all
+                            [ .username >> Expect.equal "ada"
+                            , .password >> Expect.equal ""
+                            ]
+            , test "says why the person is here, so the change does not look as though it failed" <|
+                \_ ->
+                    Login.afterPasswordChange "ada"
+                        |> Login.view messages
+                        |> Query.fromHtml
+                        |> Query.find [ Selector.attribute (Html.Attributes.attribute "role" "status") ]
+                        |> Query.has
+                            [ Selector.text "Your password was changed, and that signed you out everywhere, this browser included. Sign in with the new password." ]
+            , test "keeps saying so while the person types" <|
+                \_ ->
+                    Login.afterPasswordChange "ada"
+                        |> Login.withPassword "new horse"
+                        |> .reason
+                        |> Expect.equal (Just Login.PasswordChanged)
+            , test "keeps saying so beside a refused attempt" <|
+                \_ ->
+                    -- The old password being refused is exactly when the reason is worth reading.
+                    Login.afterPasswordChange "ada"
+                        |> Login.withState (Login.Rejected ApiError.InvalidCredentials)
+                        |> .reason
+                        |> Expect.equal (Just Login.PasswordChanged)
+            , test "is forgotten once the form is left" <|
+                \_ ->
+                    Login.afterPasswordChange "ada"
+                        |> Login.left
+                        |> .reason
+                        |> Expect.equal Nothing
             ]
         , describe "the outcomes the form must tell apart"
             [ test "invalid credentials, a disabled User, and throttling stay distinct" <|

@@ -1,4 +1,4 @@
-module Register exposing (Entropy(..), Form, Messages, Strength, Submission(..), canSubmit, credentials, empty, entropy, invitationCode, measure, passwordOf, prefilled, state, submit, usernameFieldId, view, withEntropy, withInvitationCode, withPassword, withState, withUsername)
+module Register exposing (Form, Messages, Submission(..), canSubmit, credentials, empty, entropy, invitationCode, passwordOf, prefilled, state, submit, usernameFieldId, view, withEntropy, withInvitationCode, withPassword, withState, withUsername)
 
 {-| Registering a User.
 
@@ -17,20 +17,18 @@ rather than refusing without explanation.
 import ApiError
 import Bitmagnet
 import Graphql.Http
-import Graphql.Operation exposing (RootMutation, RootQuery)
+import Graphql.Operation exposing (RootMutation)
 import Graphql.OptionalArgument as Opt
-import Graphql.SelectionSet as SelectionSet exposing (SelectionSet)
-import Html exposing (Html, button, div, h1, input, label, p, text)
+import Graphql.SelectionSet exposing (SelectionSet)
+import Html exposing (Html, button, h1, input, label, p, text)
 import Html.Attributes exposing (attribute, class, disabled, for, id, spellcheck, type_, value)
 import Html.Events exposing (onInput, onSubmit)
 import Magnes.Api.InputObject as InputObject
 import Magnes.Api.Mutation as Mutation
-import Magnes.Api.Object.PasswordEntropyResult as PasswordEntropyResult
 import Magnes.Api.Object.RegisterResult as RegisterResult
 import Magnes.Api.Object.SelfMutation as SelfMutation
-import Magnes.Api.Object.SelfQuery as SelfQuery
 import Magnes.Api.Object.User as ApiUser
-import Magnes.Api.Query as Query
+import PasswordEntropy
 
 
 {-| What is typed, what the server last said about the password, and how the last attempt
@@ -41,7 +39,7 @@ type alias Form =
     { username : String
     , password : String
     , invitation : String
-    , entropy : Entropy
+    , entropy : PasswordEntropy.Entropy
     , state : Submission
     }
 
@@ -52,39 +50,12 @@ type Submission
     | Rejected ApiError.Failure
 
 
-{-| What the server last said about the password being typed.
-
-`Unmeasurable` is not "weak". A meter drawn from a query that never answered would read as
-zero against the minimum, which is a statement about the password rather than about the
-request — so a failed measurement draws no meter at all. Nothing here gates submission:
-bitmagnet decides, and this is advice on the way.
-
--}
-type Entropy
-    = Unmeasured
-    | Measuring
-    | Measured Strength
-    | Unmeasurable
-
-
-{-| `minEntropy` comes from the server rather than being a constant here, because it is a
-configurable instance setting. The server also returns its own `valid` verdict on the
-pair, which is deliberately not selected: nothing here may act on it — submission is not
-gated on the measurement — so carrying it would be storing an answer to a question this
-form does not ask.
--}
-type alias Strength =
-    { entropy : Float
-    , minEntropy : Float
-    }
-
-
 empty : Form
 empty =
     { username = ""
     , password = ""
     , invitation = ""
-    , entropy = Unmeasured
+    , entropy = PasswordEntropy.Unmeasured
     , state = Ready
     }
 
@@ -107,21 +78,14 @@ withUsername username form =
     withState Ready { form | username = username }
 
 
-{-| A new password abandons the old measurement rather than leaving it on screen, where it
-would describe a password that is no longer typed. An empty field has nothing to measure
-and nothing to say.
+{-| A new password abandons the old measurement: see `PasswordEntropy.forPassword`.
 -}
 withPassword : String -> Form -> Form
 withPassword password form =
     withState Ready
         { form
             | password = password
-            , entropy =
-                if String.isEmpty password then
-                    Unmeasured
-
-                else
-                    Measuring
+            , entropy = PasswordEntropy.forPassword password
         }
 
 
@@ -130,7 +94,7 @@ withInvitationCode code form =
     withState Ready { form | invitation = code }
 
 
-withEntropy : Entropy -> Form -> Form
+withEntropy : PasswordEntropy.Entropy -> Form -> Form
 withEntropy measurement form =
     { form | entropy = measurement }
 
@@ -145,7 +109,7 @@ state form =
     form.state
 
 
-entropy : Form -> Entropy
+entropy : Form -> PasswordEntropy.Entropy
 entropy form =
     form.entropy
 
@@ -224,28 +188,6 @@ registration offered =
         )
 
 
-{-| The password is sent to bitmagnet to be scored. That is what the query is for and what
-bitmagnet's own UI does; the caller's job is to ask rarely, since the Angular UI asks once
-per keystroke. It answers anonymously, so the meter works before anyone has signed in.
--}
-measure : String -> String -> (Result (Graphql.Http.Error Strength) Strength -> msg) -> Cmd msg
-measure apiUrl password toMsg =
-    strength password
-        |> Bitmagnet.queryRequest apiUrl
-        |> Graphql.Http.send toMsg
-
-
-strength : String -> SelectionSet Strength RootQuery
-strength password =
-    Query.self
-        (SelfQuery.passwordEntropy { password = password }
-            (SelectionSet.map2 Strength
-                PasswordEntropyResult.entropy
-                PasswordEntropyResult.minEntropy
-            )
-        )
-
-
 {-| The form reports interactions; it holds no state of its own and runs no update.
 -}
 type alias Messages msg =
@@ -292,7 +234,7 @@ view messages form =
             , describedByRejection form.state Password
             ]
             []
-        , meter form.entropy
+        , PasswordEntropy.meter form.entropy
         , label [ for "register-invitation" ] [ text "Invitation code" ]
         , input
             [ id "register-invitation"
@@ -320,56 +262,6 @@ view messages form =
                 )
             ]
         ]
-
-
-{-| A real `progress` element, so the platform draws it and assistive technology reads it
-without any of it being reimplemented here. The numbers are shown as well as the bar: "42
-of 70" is the actionable form, and the bar alone cannot say how far short it falls.
--}
-meter : Entropy -> Html msg
-meter measurement =
-    case measurement of
-        Measured strengthOf ->
-            div [ class "entropy" ]
-                [ Html.progress
-                    [ attribute "max" (String.fromFloat strengthOf.minEntropy)
-                    , value (String.fromFloat (min strengthOf.entropy strengthOf.minEntropy))
-                    , attribute "aria-label" "Password strength"
-                    ]
-                    []
-                , p [ class "entropy-reading" ]
-                    [ text
-                        (bits strengthOf.entropy
-                            ++ " of "
-                            ++ bits strengthOf.minEntropy
-                            ++ " bits needed"
-                        )
-                    ]
-                ]
-
-        -- A `progress` with no value is the platform's indeterminate bar, which is
-        -- exactly what is true here. The alternatives are both worse: an empty bar reads
-        -- as a weak password, and the previous score describes a password that is no
-        -- longer typed. Keeping the element also stops the meter appearing and vanishing
-        -- on every pause in typing.
-        Measuring ->
-            div [ class "entropy" ]
-                [ Html.progress [ attribute "aria-label" "Password strength" ] []
-                , p [ class "entropy-reading" ] [ text "Measuring…" ]
-                ]
-
-        Unmeasured ->
-            text ""
-
-        Unmeasurable ->
-            text ""
-
-
-{-| bitmagnet returns these as floats. They are bit counts, so the decimals are noise.
--}
-bits : Float -> String
-bits value =
-    String.fromInt (round value)
 
 
 rejection : Submission -> Html msg

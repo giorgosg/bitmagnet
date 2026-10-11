@@ -13,11 +13,13 @@ Runs. Search, sort, facet filters, infinite scroll, row expansion down to a file
 
 Identity and permissions are in, against
 [the bitmagnet fork](https://github.com/giorgosg/bitmagnet)'s browser-cookie contract. That
-covers registration through an Invitation, sign-in, a User overview with sign-out, API-key
-management, and administration of Users, Invitations and Roles. The header menu offers
-only the pages the current Identity may reach. A credentialed end-to-end suite drives the
-signed-in half in a real browser, against a disposable bitmagnet it starts itself, so no
-real password is involved.
+covers registration through an Invitation, sign-in, a User overview with sign-out and a
+password change, API-key management, and administration of Users, Invitations and Roles.
+Changing a password signs the User out everywhere, this browser included, which the form says
+before it is sent and the login form says again afterwards; the new password is offered to the
+browser's password manager on the way. The header menu offers only the pages the current
+Identity may reach. A credentialed end-to-end suite drives the signed-in half in a real
+browser, against a disposable bitmagnet it starts itself, so no real password is involved.
 
 `/status` shows bitmagnet's health checks, and its workers to an Identity that may see them.
 A dot in the header gives the same answer at a glance, polled every 30 seconds while the tab
@@ -44,8 +46,6 @@ Neither is sent until a question that says what it will do has been answered, in
 reprocessing can delete a torrent the classifier now judges unwanted, and the counts are asked
 for again afterwards. An answer that does not come back leaves the act unknown, and the page
 says so rather than inviting it twice. The page points to `/queue/jobs` to watch a batch run.
-
-Still to do: password change, which the fork has offered since 2026-09-14.
 
 See [docs/plan.md](docs/plan.md) for the completed first milestone and
 [docs/accounts-plan.md](docs/accounts-plan.md) for the current phase; the working notes

@@ -100,6 +100,12 @@ suite =
                             , ApiError.PasswordInsufficientEntropy
                             , ApiError.UsernameInvalid
                             ]
+            , test "a wrong current password is its own outcome, not a failed sign-in" <|
+                \_ ->
+                    -- updatePassword's refusal. It says the password offered as the current one
+                    -- is wrong; it says nothing about the username, which was never asked for.
+                    from [ coded "PASSWORD_INCORRECT" [] ]
+                        |> Expect.equal ApiError.PasswordIncorrect
             , test "an instance that requires an email says so rather than refusing barely" <|
                 \_ ->
                     from [ coded "EMAIL_REQUIRED" [] ]
@@ -243,6 +249,7 @@ suite =
                     , ApiError.InvitationExpired
                     , ApiError.InvitationClaimed
                     , ApiError.PasswordInsufficientEntropy
+                    , ApiError.PasswordIncorrect
                     , ApiError.Unauthorized unrefused
                     , ApiError.UserAuthenticationRequired
                     , ApiError.AuthenticationRequired unrefused
@@ -279,6 +286,12 @@ suite =
                             { unrefused | objectAction = Just { namespace = "graphql", object = "queue", action = "mutate" } }
                         )
                         |> Expect.equal "Sign in first: Anonymous is not allowed to mutate queue."
+            , test "a wrong current password is not worded as a failed sign-in" <|
+                \_ ->
+                    -- Nobody is signing in: the User is, and stays, signed in. Reading
+                    -- "username and password" here would point at a field that is not there.
+                    ApiError.toMessage ApiError.PasswordIncorrect
+                        |> Expect.notEqual (ApiError.toMessage ApiError.InvalidCredentials)
             , test "an unrecognized error keeps the server's own words" <|
                 \_ ->
                     ApiError.toMessage (ApiError.ServerRejected "user: register failed: nope")

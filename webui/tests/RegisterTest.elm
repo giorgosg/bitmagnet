@@ -3,6 +3,7 @@ module RegisterTest exposing (suite)
 import ApiError
 import Expect
 import Html.Attributes
+import PasswordEntropy
 import Register
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
@@ -30,7 +31,7 @@ rendered form =
     Register.view messages form |> Query.fromHtml
 
 
-measured : Float -> Float -> Register.Strength
+measured : Float -> Float -> PasswordEntropy.Strength
 measured entropy minEntropy =
     { entropy = entropy, minEntropy = minEntropy }
 
@@ -62,7 +63,7 @@ suite =
                     -- failed. Refusing to submit on it would make a broken query look
                     -- like a rejected password.
                     filled
-                        |> Register.withEntropy (Register.Measured (measured 12 70))
+                        |> Register.withEntropy (PasswordEntropy.Measured (measured 12 70))
                         |> Register.canSubmit
                         |> Expect.equal True
             ]
@@ -94,26 +95,26 @@ suite =
             , test "a new password abandons the measurement of the old one" <|
                 \_ ->
                     filled
-                        |> Register.withEntropy (Register.Measured (measured 80 70))
+                        |> Register.withEntropy (PasswordEntropy.Measured (measured 80 70))
                         |> Register.withPassword "something else"
                         |> Register.entropy
-                        |> Expect.equal Register.Measuring
+                        |> Expect.equal PasswordEntropy.Measuring
             , test "clearing the password leaves nothing to measure" <|
                 \_ ->
                     filled
-                        |> Register.withEntropy (Register.Measured (measured 80 70))
+                        |> Register.withEntropy (PasswordEntropy.Measured (measured 80 70))
                         |> Register.withPassword ""
                         |> Register.entropy
-                        |> Expect.equal Register.Unmeasured
+                        |> Expect.equal PasswordEntropy.Unmeasured
             ]
         , describe "the entropy meter"
             [ test "reports the measurement against the minimum the server named" <|
                 \_ ->
-                    rendered (Register.withEntropy (Register.Measured (measured 42 70)) filled)
+                    rendered (Register.withEntropy (PasswordEntropy.Measured (measured 42 70)) filled)
                         |> Query.has [ Selector.text "42 of 70" ]
             , test "draws a progressbar a screen reader can read" <|
                 \_ ->
-                    rendered (Register.withEntropy (Register.Measured (measured 42 70)) filled)
+                    rendered (Register.withEntropy (PasswordEntropy.Measured (measured 42 70)) filled)
                         |> Query.has [ Selector.tag "progress" ]
             , test "says nothing at all before a password is typed" <|
                 \_ ->
@@ -123,17 +124,17 @@ suite =
                 \_ ->
                     -- Zero of seventy is what an unanswered query would look like on a
                     -- meter, and it is a lie about the password.
-                    rendered (Register.withEntropy Register.Unmeasurable filled)
+                    rendered (Register.withEntropy PasswordEntropy.Unmeasurable filled)
                         |> Query.hasNot [ Selector.tag "progress" ]
             , test "a measurement in flight says so rather than reading as weak" <|
                 \_ ->
-                    rendered (Register.withEntropy Register.Measuring filled)
+                    rendered (Register.withEntropy PasswordEntropy.Measuring filled)
                         |> Query.has [ Selector.text "Measuring…" ]
             , test "a measurement in flight claims no reading of its own" <|
                 \_ ->
                     -- An indeterminate progress element carries no value attribute; one
                     -- that did would be a number nobody measured.
-                    rendered (Register.withEntropy Register.Measuring filled)
+                    rendered (Register.withEntropy PasswordEntropy.Measuring filled)
                         |> Query.find [ Selector.tag "progress" ]
                         |> Query.hasNot [ Selector.attribute (Html.Attributes.value "0") ]
             ]

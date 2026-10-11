@@ -229,18 +229,28 @@ instance changes what every other client of that instance can do. See `e2e/READM
 
 The simplest way needs no running instance and no introspection. Read the fork's committed
 SDL directly, taking it from `trunk` rather than from whatever branch `../bitmagnet` has
-checked out:
+checked out, generate into a scratch directory, and copy in everything but
+`ScalarCodecs.elm`:
 
 ```bash
 (cd ../bitmagnet && for f in $(git ls-tree --name-only trunk graphql/schema/ | grep '\.graphqls$'); do git show "trunk:$f"; echo; done) > /tmp/bitmagnet.graphql
-npx elm-graphql --schema-file /tmp/bitmagnet.graphql --base Magnes.Api --output src
-npm run format
+rm -rf /tmp/magnes-api && npx elm-graphql --schema-file /tmp/bitmagnet.graphql --base Magnes.Api --output /tmp/magnes-api
+diff -rq /tmp/magnes-api/Magnes/Api src/Magnes/Api
+rsync -a --exclude ScalarCodecs.elm /tmp/magnes-api/Magnes/Api/ src/Magnes/Api/
 ```
 
-Ticket 11 regenerated the committed client this way. It was re-run on 2026-10-05 into a
-scratch directory, and the only difference from the committed client was
-`self.updatePassword`, which is ticket 20. `ScalarCodecs.elm` is preserved when it already
-exists, so the custom scalar mappings survive.
+Generating straight into `src` does not work. The committed `ScalarCodecs.elm` is hand
+edited and no longer carries elm-graphql's "do not edit" header, so elm-graphql refuses to
+write beside a file it did not generate ("found some files that it did not generate") and
+writes nothing. `npm run codegen` below writes to `src` the same way, so it should meet the
+same refusal; that was reasoned, not run, on 2026-10-11. The scratch copy holds a fresh,
+unmapped `ScalarCodecs.elm`, which is why it is left out of the copy. `diff -rq` names what
+changed; on a schema that did not touch the scalars, it should list `ScalarCodecs.elm` and
+nothing unexpected beside it. Generated files are not run through `npm run format`.
+
+Ticket 11 regenerated the committed client from the SDL. Ticket 20 regenerated it on
+2026-10-11 the way shown, against `trunk` at `e76818643`: the only files that changed were
+`InputObject.elm` and `Object/SelfMutation.elm`, both for `self.updatePassword`.
 
 Against a live instance instead:
 

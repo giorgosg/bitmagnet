@@ -11,9 +11,10 @@ JavaScript or Elm to clear. See
 Success is the absence of an error, exactly as in `Login`. What the Identity has become is
 not in the answer and is never guessed at: `Identity.fetch` asks the server.
 
-There is deliberately no password section. bitmagnet exposes no password-change mutation
-(`docs/auth-api.md`, "Mutations"), and a disabled control would advertise an affordance
-that does not exist.
+The page also carries the password change (`PasswordChange`), which bitmagnet has offered
+since `77f3fd9e3`. It is drawn only here, and only a User-authenticated Identity reaches
+this page: `Route.guard` sends Anonymous and an API-key Identity to sign in, and bitmagnet
+refuses both a password change anyway.
 
 -}
 
@@ -29,6 +30,7 @@ import Html.Events exposing (onClick)
 import Identity
 import Magnes.Api.Mutation as Mutation
 import Magnes.Api.Object.SelfMutation as SelfMutation
+import PasswordChange
 import Time
 
 
@@ -60,34 +62,39 @@ selection =
 {-| The page reports interactions; it holds no state of its own and runs no update.
 -}
 type alias Messages msg =
-    { signOutRequested : msg }
+    { signOutRequested : msg
+    , passwordChange : PasswordChange.Messages msg
+    }
 
 
-view : Time.Zone -> Messages msg -> SignOut -> Identity.User -> Html msg
-view zone messages state user =
-    div [ class "panel" ]
-        [ h1 [] [ text "Your User" ]
-        , dl [ class "facts" ]
-            [ fact "Username" user.username
-            , fact "Role" user.role
-            , fact "Last signed in" (lastSignIn zone user)
-            , fact "User since" (Format.date zone user.createdAt)
-            ]
-        , refusal state
-        , button
-            [ type_ "button"
-            , class "submit"
-            , disabled (state == SigningOut)
-            , onClick messages.signOutRequested
-            ]
-            [ text
-                (if state == SigningOut then
-                    "Signing out…"
+view : Time.Zone -> Messages msg -> SignOut -> PasswordChange.Form -> Identity.User -> Html msg
+view zone messages state passwordForm user =
+    div [ class "page" ]
+        [ div [ class "panel" ]
+            [ h1 [] [ text "Your User" ]
+            , dl [ class "facts" ]
+                [ fact "Username" user.username
+                , fact "Role" user.role
+                , fact "Last signed in" (lastSignIn zone user)
+                , fact "User since" (Format.date zone user.createdAt)
+                ]
+            , refusal state
+            , button
+                [ type_ "button"
+                , class "submit sign-out"
+                , disabled (state == SigningOut)
+                , onClick messages.signOutRequested
+                ]
+                [ text
+                    (if state == SigningOut then
+                        "Signing out…"
 
-                 else
-                    "Sign out"
-                )
+                     else
+                        "Sign out"
+                    )
+                ]
             ]
+        , PasswordChange.view messages.passwordChange passwordForm
         ]
 
 

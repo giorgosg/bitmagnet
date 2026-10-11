@@ -1,4 +1,4 @@
-module Login exposing (Form, Messages, Submission(..), canSubmit, credentials, empty, submit, usernameFieldId, view, withPassword, withState, withUsername)
+module Login exposing (Form, Messages, Reason(..), Submission(..), afterPasswordChange, canSubmit, credentials, empty, left, submit, usernameFieldId, view, withPassword, withState, withUsername)
 
 {-| Establishing a User-backed Identity in a browser.
 
@@ -24,7 +24,8 @@ import Magnes.Api.Mutation as Mutation
 import Magnes.Api.Object.SelfMutation as SelfMutation
 
 
-{-| What is typed, and how the last attempt ended.
+{-| What is typed, how the last attempt ended, and why the form was opened when that is
+worth saying.
 
 A rejection keeps its `Failure` rather than a sentence, because the form treats the
 outcomes differently: invalid credentials belong beside the fields, and throttling does
@@ -36,7 +37,17 @@ type alias Form =
     { username : String
     , password : String
     , state : Submission
+    , reason : Maybe Reason
     }
+
+
+{-| Why the form is on screen, when that is something other than a person choosing to sign
+in. Only one thing sends someone here who was signed in a moment ago and did not ask to be
+signed out: changing their password, which bitmagnet answers by ending every sign-in the
+User has.
+-}
+type Reason
+    = PasswordChanged
 
 
 type Submission
@@ -47,7 +58,24 @@ type Submission
 
 empty : Form
 empty =
-    { username = "", password = "", state = Ready }
+    { username = "", password = "", state = Ready, reason = Nothing }
+
+
+{-| The form as a password change leaves it: on the User's own name, which is the one that
+signs in, and saying why the person is here. The new password is not carried across; it
+was offered to the browser's credential store on the way out (see `Main.storeCredential`).
+-}
+afterPasswordChange : String -> Form
+afterPasswordChange username =
+    { empty | username = username, reason = Just PasswordChanged }
+
+
+{-| The reason describes an arrival, so leaving the form ends it. Coming back later is not
+the moment the password changed.
+-}
+left : Form -> Form
+left form =
+    { form | reason = Nothing }
 
 
 {-| Typing is also how a rejection is dismissed: the message described the credentials
@@ -143,6 +171,7 @@ view messages form =
     in
     Html.form [ class "panel", onSubmit messages.submitted ]
         [ h1 [] [ text "Sign in" ]
+        , because form.reason
         , wait
         , label [ for usernameFieldId ] [ text "Username" ]
         , input
@@ -183,6 +212,20 @@ view messages form =
                 )
             ]
         ]
+
+
+{-| Above the fields, in the neutral colour of a status rather than the accent of an error:
+nothing has gone wrong, and this has to read as the change having worked.
+-}
+because : Maybe Reason -> Html msg
+because reason =
+    case reason of
+        Just PasswordChanged ->
+            p [ class "notice because", attribute "role" "status" ]
+                [ text "Your password was changed, and that signed you out everywhere, this browser included. Sign in with the new password." ]
+
+        Nothing ->
+            text ""
 
 
 {-| One decision, two slots, so the two cannot drift into being shown together.

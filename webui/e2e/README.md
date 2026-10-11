@@ -83,6 +83,15 @@ through each screen, check what bitmagnet did, and check the effect on the User 
 a browser of its own; `administration-access.spec.js` checks what an Identity without
 `auth::query`, or with it but without `auth::mutate`, is offered.
 
+`password-change.spec.js` (ticket 20) changes a password from `/account` and checks what
+follows: the browser is Anonymous on the login form, which says why and opens on the User's
+name; another device and another tab are signed out too; the new password was offered to the
+password manager; and bitmagnet refuses the old password and accepts the new one. It checks
+that a wrong current password and a weak new password are each refused on their own field,
+offer nothing and leave the User signed in, and it drops bitmagnet's answer to a change
+bitmagnet made, to check that the page says the outcome is unknown rather than that it failed.
+Every test registers a User of its own: see "Each worker has its own User" below.
+
 `queue-jobs.spec.js` (ticket 04 in `.scratch/dashboard`) reaches the queue's jobs from the
 status page, filters them by status and checks the facet counts against what is listed,
 opens a job, follows ordering and paging through the URL, and checks that an ordinary User
@@ -208,8 +217,14 @@ session in the other.
 
 A test that changes a password, disables, deletes or demotes a User, or needs an ordinary
 one, still registers a User of its own with `registerUser`. Changing the worker's
-administrator's password would leave its later tests signing in with the old one, and the
-rest would take away what they sign in as.
+administrator's password would leave that worker's later tests signing in with the old one,
+and changing the issuer's would leave every worker unable to mint an Invitation, since the
+issuer signs in afresh for each. The rest would take away what they sign in as.
+
+`password-change.spec.js` keeps to this. Verified 2026-10-11 against bitmagnet `trunk` at
+`e76818643`: three consecutive runs of the whole suite at the default worker count, 71 of 71
+each time with its five tests among them, after three earlier runs at 70 of 70 before the
+fifth was added.
 
 ## Conventions
 

@@ -1,4 +1,4 @@
-module Route exposing (Access(..), BasePath, JobsParams, LoginParams, QueueStatsParams, RegisterParams, Route(..), SearchParams, TorrentStatsParams, basePath, emptyJobs, emptyQueueStats, emptySearch, emptyTorrentStats, fromUrl, guard, refreshInterval, returnDestination, sameQuestion, toHref)
+module Route exposing (Access(..), BasePath, JobsParams, LoginParams, QueueStatsParams, RegisterParams, Route(..), SearchParams, TorrentStatsParams, basePath, emptyJobs, emptyQueueStats, emptySearch, emptyTorrentStats, fromUrl, guard, loginReturningTo, refreshInterval, returnDestination, sameQuestion, toHref)
 
 {-| Routes are real paths, not fragments — see the README.
 
@@ -671,7 +671,16 @@ anonymousAccess mount identity route =
 
 loginRedirect : BasePath -> Route -> Access
 loginRedirect mount route =
-    RedirectTo (Login { returnUrl = Just (toHref mount route) })
+    RedirectTo (loginReturningTo mount route)
+
+
+{-| The login form, asked to come back to `route` once it succeeds. The guard sends a route
+that needs a User here, and so does a password change, which signs the User out of the
+page it was made on.
+-}
+loginReturningTo : BasePath -> Route -> Route
+loginReturningTo mount route =
+    Login { returnUrl = Just (toHref mount route) }
 
 
 userAccess : Identity.Identity -> Route -> Access

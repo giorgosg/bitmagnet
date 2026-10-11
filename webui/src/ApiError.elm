@@ -62,6 +62,7 @@ type Failure
     | InvitationExpired
     | InvitationClaimed
     | PasswordInsufficientEntropy
+    | PasswordIncorrect
     | EmailRequired
     | Unauthorized Refusal
     | AuthenticationRequired Refusal
@@ -200,6 +201,10 @@ fromCode code refused =
         "PASSWORD_INSUFFICIENT_ENTROPY" ->
             Just PasswordInsufficientEntropy
 
+        -- `updatePassword`'s refusal of the current password (bitmagnet `77f3fd9e3`).
+        "PASSWORD_INCORRECT" ->
+            Just PasswordIncorrect
+
         "EMAIL_REQUIRED" ->
             Just EmailRequired
 
@@ -284,6 +289,9 @@ toMessage failure =
 
         PasswordInsufficientEntropy ->
             "That password is too easy to guess. Make it longer or less predictable."
+
+        PasswordIncorrect ->
+            "That is not your current password."
 
         -- Magnes neither shows nor collects an email address in this phase, because
         -- bitmagnet's verification of one is inert; see the spec's cross-repository

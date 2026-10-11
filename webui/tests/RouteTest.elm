@@ -25,6 +25,38 @@ suite =
                         (Route.RedirectTo
                             (Route.Login { returnUrl = Just "/magnes/account/api-keys" })
                         )
+        , describe "the User overview, where a password is changed"
+            [ test "is a User-authenticated Identity's own" <|
+                \_ ->
+                    Route.guard mount userIdentity Route.UserOverview
+                        |> Expect.equal Route.Allowed
+            , test "sends an API-key Identity to sign in, as it does Anonymous" <|
+                \_ ->
+                    -- An API-key Identity reports its owning User, but bitmagnet refuses it a
+                    -- password change, as it refuses it key management: the page and its form
+                    -- are for the person, signed in as themselves.
+                    ( Route.guard mount (Identity.APIKeyAuthenticated user "a key" [ adminAction ]) Route.UserOverview
+                    , Route.guard mount (Identity.Anonymous [ adminAction ]) Route.UserOverview
+                    )
+                        |> Expect.equal
+                            ( Route.RedirectTo (Route.Login { returnUrl = Just "/magnes/account" })
+                            , Route.RedirectTo (Route.Login { returnUrl = Just "/magnes/account" })
+                            )
+            ]
+        , describe "signing in again after a password change"
+            [ test "is asked for on the login form, returning to the User overview" <|
+                \_ ->
+                    Route.toHref mount (Route.loginReturningTo mount Route.UserOverview)
+                        |> Expect.equal "/magnes/login?returnUrl=%2Fmagnes%2Faccount"
+            , test "returns to the User overview once it succeeds" <|
+                \_ ->
+                    Route.returnDestination mount (Route.loginReturningTo mount Route.UserOverview)
+                        |> Expect.equal Route.UserOverview
+            , test "is the same request the guard makes of a route that needs a User" <|
+                \_ ->
+                    Route.guard mount (Identity.Anonymous []) Route.UserOverview
+                        |> Expect.equal (Route.RedirectTo (Route.loginReturningTo mount Route.UserOverview))
+            ]
         , test "a User-authenticated Identity is sent away from login" <|
             \_ ->
                 Route.guard mount userIdentity (Route.Login { returnUrl = Nothing })
@@ -419,6 +451,11 @@ adminIdentity : Identity.Identity
 adminIdentity =
     Identity.UserAuthenticated user
         [ { namespace = "**", object = "**", action = "**" } ]
+
+
+adminAction : Identity.ObjectAction
+adminAction =
+    { namespace = "**", object = "**", action = "**" }
 
 
 user : Identity.User

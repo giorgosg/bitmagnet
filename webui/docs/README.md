@@ -36,9 +36,8 @@ Write one if it is missing. What it needs to answer:
 the three ways to serve, what each requires, and the failure modes worth recognising.
 
 `src/Magnes/Api/` is committed, so a checkout builds without a live schema. It was last
-regenerated on 2026-09-03, for ticket 11, from the fork's SDL. As of 2026-10-05 it matches
-bitmagnet `trunk` except for `self.updatePassword`, which ticket 20 adds. Regenerate it
-only when the fork's schema changes; see
+regenerated on 2026-10-11, for ticket 20, from the fork's SDL at `trunk` `e76818643`, which
+it matches. Regenerate it only when the fork's schema changes; see
 [serving-and-testing.md](serving-and-testing.md#regenerating-the-client).
 
 ## Where the truth lives
