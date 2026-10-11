@@ -78,6 +78,13 @@ type alias Model =
     , route : Route
     , identity : Identity.Identity
     , identityEpoch : Int
+
+    -- How many times bitmagnet has been asked who this is, which numbers each ask. The epoch
+    -- above drops an answer from before an authentication change, but two looks under one
+    -- epoch, such as a tab coming back to the front, can still answer out of order; the number
+    -- lets the password change tell the newer answer from the older (see
+    -- `PasswordChange.identityAnswered`).
+    , identityAsks : Int
     , field : String
     , results : Results
     , infiniteList : InfiniteList.Model
@@ -379,6 +386,7 @@ init flags url key =
       , route = route
       , identity = Identity.Unknown
       , identityEpoch = 0
+      , identityAsks = 1
       , field = fieldFor route
       , results = results
       , infiniteList = InfiniteList.init
@@ -411,7 +419,7 @@ init flags url key =
       , visible = not flags.hidden
       }
     , Cmd.batch
-        [ Identity.fetch flags.apiUrl (GotIdentity 0)
+        [ Identity.fetch flags.apiUrl (GotIdentity 0 1)
         , Task.perform (\vp -> Resized (round vp.viewport.height)) Browser.Dom.getViewport
         , Task.perform GotZone Time.here
         ]
@@ -546,12 +554,12 @@ type Msg
     | ToggleFolder String String
     | GotFiles String (Result (Graphql.Http.Error Bitmagnet.FileList) Bitmagnet.FileList)
     | GotResults Int (Result (Graphql.Http.Error Page) Page)
-    | GotIdentity Int (Result (Graphql.Http.Error Identity.Identity) Identity.Identity)
+    | GotIdentity Int Int (Result (Graphql.Http.Error Identity.Identity) Identity.Identity)
     | VisibilityChanged Browser.Events.Visibility
     | LoginUsernameChanged String
     | LoginPasswordChanged String
     | LoginSubmitted
-    | GotLogin (Result (Graphql.Http.Error ()) ())
+    | GotLogin Credential (Result (Graphql.Http.Error ()) ())
     | RegisterUsernameChanged String
     | RegisterPasswordChanged String
     | RegisterInvitationCodeChanged String
@@ -687,33 +695,42 @@ updateModel msg model =
                 ( model, Cmd.none )
 
             else
+                -- The credential travels with the request and comes back with its answer, so
+                -- what is offered to the credential store is what bitmagnet accepted, whatever
+                -- the form holds by then.
+                let
+                    credential =
+                        Login.credentials model.login
+                in
                 ( { model | login = Login.withState Login.Submitting model.login }
-                , Login.submit model.apiUrl (Login.credentials model.login) GotLogin
+                , Login.submit model.apiUrl credential (GotLogin credential)
                 )
 
-        GotLogin (Err error) ->
+        GotLogin _ (Err error) ->
             ( { model | login = Login.withState (Login.Rejected (ApiError.fromError error)) model.login }
             , Cmd.none
             )
 
-        GotLogin (Ok ()) ->
+        GotLogin credential (Ok ()) ->
             let
-                offered =
-                    Login.credentials model.login
-
                 destination =
                     Route.returnDestination model.basePath model.route
 
                 -- Dropping the form takes the password with it. The rest is exactly what
                 -- any other authentication change does — tell the other tabs, and let the
                 -- server say what the new Identity may do — so it goes through the same
-                -- branch rather than a second copy of it that could drift.
+                -- branch rather than a second copy of it that could drift. A password change
+                -- left unsettled is settled by it.
                 ( refreshed, refresh ) =
-                    updateModel (AuthenticationChangedHere Resolving) { model | login = Login.empty }
+                    updateModel (AuthenticationChangedHere Resolving)
+                        { model
+                            | login = Login.empty
+                            , passwordChange = PasswordChange.signedIn model.passwordChange
+                        }
             in
             ( refreshed
             , Cmd.batch
-                [ storeCredential { id = offered.username, password = offered.password }
+                [ storeCredential credential
                 , Nav.replaceUrl model.key (Route.toHref model.basePath destination)
                 , refresh
                 ]
@@ -1456,66 +1473,19 @@ updateModel msg model =
                 { model | passwordChange = PasswordChange.withNew new model.passwordChange }
 
         PasswordChangeSubmitted ->
-            case model.identity of
-                -- The credential the change leaves behind is this User's. No other Identity
-                -- is shown the form, and bitmagnet refuses every other one a change.
-                Identity.UserAuthenticated user _ ->
-                    case PasswordChange.sending user.username model.passwordChange of
-                        Just ( sending, sent ) ->
-                            ( { model | passwordChange = sending }
-                            , PasswordChange.submit model.apiUrl sending (GotPasswordChange sent)
-                            )
+            case PasswordChange.sending model.identity model.passwordChange of
+                Just ( sending, sent ) ->
+                    ( { model | passwordChange = sending }
+                    , PasswordChange.submit model.apiUrl sending (GotPasswordChange sent)
+                    )
 
-                        Nothing ->
-                            ( model, Cmd.none )
-
-                Identity.Anonymous _ ->
-                    ( model, Cmd.none )
-
-                Identity.APIKeyAuthenticated _ _ _ ->
-                    ( model, Cmd.none )
-
-                Identity.Unknown ->
-                    ( model, Cmd.none )
-
-                Identity.Failed _ ->
+                Nothing ->
                     ( model, Cmd.none )
 
         GotPasswordChange sent result ->
-            let
-                ( passwordChange, settlement ) =
-                    PasswordChange.answer sent result model.passwordChange
-
-                answered =
-                    { model | passwordChange = passwordChange }
-            in
-            case settlement of
-                PasswordChange.Made credential ->
-                    passwordChanged credential answered
-
-                PasswordChange.NotMade { identityStale, offerWithdrawn } ->
-                    let
-                        -- The login form was offering this change's new password as the one
-                        -- to try first. Refused, it was never made, and is no longer offered.
-                        withdrawn =
-                            if offerWithdrawn then
-                                { answered | login = Login.withoutReason answered.login }
-
-                            else
-                                answered
-                    in
-                    if identityStale then
-                        -- Signed out elsewhere before the change arrived, so nothing was
-                        -- changed and the Identity in hand is not the one bitmagnet sees. As
-                        -- for any other request: ask again, and let the guard decide where
-                        -- that leaves this page.
-                        beginIdentityRefresh Resolving withdrawn
-
-                    else
-                        ( withdrawn, Cmd.none )
-
-                PasswordChange.NotSettled ->
-                    ( answered, Cmd.none )
+            passwordChangeAnswered
+                (PasswordChange.answered model.basePath sent result model.passwordChange model.login)
+                model
 
         AuthenticationChanged ->
             beginIdentityRefresh Resolving model
@@ -1545,8 +1515,12 @@ updateModel msg model =
                     else
                         ( refreshed, Cmd.none )
             in
-            ( looked
-            , Cmd.batch [ Identity.fetch model.apiUrl (GotIdentity model.identityEpoch), healthCmd, statsCmd ]
+            ( { looked | identityAsks = looked.identityAsks + 1 }
+            , Cmd.batch
+                [ Identity.fetch model.apiUrl (GotIdentity model.identityEpoch (looked.identityAsks + 1))
+                , healthCmd
+                , statsCmd
+                ]
             )
 
         VisibilityChanged Browser.Events.Hidden ->
@@ -1587,7 +1561,7 @@ updateModel msg model =
                                         )
                                     )
 
-        GotIdentity identityEpoch result ->
+        GotIdentity identityEpoch ask result ->
             if identityEpoch /= model.identityEpoch then
                 ( model, Cmd.none )
 
@@ -1610,32 +1584,18 @@ updateModel msg model =
 
                     Ok identity ->
                         let
-                            ( passwordChange, offer ) =
-                                PasswordChange.identified identity model.passwordChange
+                            answered =
+                                PasswordChange.identityAnswered model.basePath
+                                    ask
+                                    identity
+                                    model.passwordChange
+                                    model.login
 
-                            identified =
-                                { model | passwordChange = passwordChange }
+                            ( resolved, cmd ) =
+                                identityResolved identity
+                                    { model | passwordChange = answered.change, login = answered.login }
                         in
-                        case offer of
-                            -- Signed out with a password change unsettled, which may be why:
-                            -- whatever asked, and wherever the person is, the login form
-                            -- tries the change's new password first and says so. Its arrival
-                            -- there is what fills it in (see `arrivingAtLogin`).
-                            Just _ ->
-                                let
-                                    ( resolved, cmd ) =
-                                        identityResolved identity identified
-                                in
-                                ( resolved
-                                , Cmd.batch
-                                    [ cmd
-                                    , Nav.replaceUrl model.key
-                                        (Route.toHref model.basePath (Route.loginReturningTo model.basePath Route.UserOverview))
-                                    ]
-                                )
-
-                            Nothing ->
-                                identityResolved identity identified
+                        ( resolved, Cmd.batch [ cmd, goTo model answered.goTo ] )
 
         LinkClicked (Browser.Internal url) ->
             case ( Route.fromUrl model.basePath url, model.route ) of
@@ -1753,7 +1713,11 @@ updateModel msg model =
                             , login =
                                 case route of
                                     Route.Login _ ->
-                                        arrivingAtLogin model
+                                        PasswordChange.loginOnArrival model.basePath
+                                            model.identity
+                                            model.route
+                                            model.passwordChange
+                                            model.login
 
                                     _ ->
                                         Login.withoutReason model.login
@@ -2300,55 +2264,49 @@ userOverviewMessages =
     }
 
 
-{-| bitmagnet accepted the password change, and with it ended every sign-in the User had,
-this one included: no credential is re-issued. So it is an authentication change like
-sign-out, with three differences.
+{-| Carry out what `PasswordChange.answered` decided about an answer to a password change.
 
-The new password is offered to the browser's credential store, because this is the one
-moment it is known to be accepted. `PasswordChange.answer` has already dropped the form and
-settled the change.
-
-The destination is the login form, asked to return to the User overview, rather than the
-search: someone who changed their password is about to sign in with it.
-
-And the login form says why the person is there, so that being signed out does not look as
-though the change failed. Other tabs are told only that authentication changed, which is all
-the notification ever carries; they find themselves signed out without the reason.
-
-This happens wherever the person now is. A change accepted after they left the page has
-still signed them out, and the login form is the only place that says so.
+An accepted change ended every sign-in the User had, this one included, so it is an
+authentication change like sign-out: the other tabs are told, and the Identity is asked for
+again. A refusal saying the Identity is stale asks for it again without telling anyone, as for
+any other request. The new password is offered to the credential store only when bitmagnet
+accepted it.
 
 -}
-passwordChanged : Credential -> Model -> ( Model, Cmd Msg )
-passwordChanged credential model =
+passwordChangeAnswered : PasswordChange.Answered -> Model -> ( Model, Cmd Msg )
+passwordChangeAnswered answered model =
     let
+        settled =
+            { model | passwordChange = answered.change, login = answered.login }
+
         ( refreshed, refresh ) =
-            updateModel (AuthenticationChangedHere AfterPasswordChange)
-                { model | login = Login.afterPasswordChange credential.id }
+            case answered.signIn of
+                PasswordChange.Ended ->
+                    updateModel (AuthenticationChangedHere AfterPasswordChange) settled
+
+                PasswordChange.Stale ->
+                    beginIdentityRefresh Resolving settled
+
+                PasswordChange.Unaffected ->
+                    ( settled, Cmd.none )
     in
     ( refreshed
     , Cmd.batch
-        [ storeCredential credential
-        , Nav.replaceUrl model.key
-            (Route.toHref model.basePath (Route.loginReturningTo model.basePath Route.UserOverview))
+        [ answered.offer |> Maybe.map storeCredential |> Maybe.withDefault Cmd.none
+        , goTo model answered.goTo
         , refresh
         ]
     )
 
 
-{-| The login form as it should be on arriving there. While a password change found signed
-out is unsettled, it is opened on that change's new password, to be tried first, every time
-the person arrives, until a sign-in or bitmagnet's answer settles it. Otherwise it is as it
-was left.
+{-| Replace the address with `destination`, if there is one. `replaceUrl`, so that going back
+does not return to a page the browser has just been signed out of.
 -}
-arrivingAtLogin : Model -> Login.Form
-arrivingAtLogin model =
-    case PasswordChange.offered model.passwordChange of
-        Just credential ->
-            Login.afterLostChange credential
-
-        Nothing ->
-            model.login
+goTo : Model -> Maybe Route -> Cmd Msg
+goTo model destination =
+    destination
+        |> Maybe.map (\route -> Nav.replaceUrl model.key (Route.toHref model.basePath route))
+        |> Maybe.withDefault Cmd.none
 
 
 {-| bitmagnet has cleared the cookie, so this is an authentication change like any other:
@@ -2966,10 +2924,14 @@ beginIdentityRefresh reason model =
 
         identityEpoch =
             model.identityEpoch + 1
+
+        ask =
+            model.identityAsks + 1
     in
     ( { model
         | identity = Identity.Unknown
         , identityEpoch = identityEpoch
+        , identityAsks = ask
         , identityRefresh = reason
 
         -- Whatever the Identity turns out to be, it is no longer the one any sign-out in
@@ -3004,7 +2966,7 @@ beginIdentityRefresh reason model =
         , infiniteList = InfiniteList.init
       }
     , Cmd.batch
-        [ Identity.fetch model.apiUrl (GotIdentity identityEpoch)
+        [ Identity.fetch model.apiUrl (GotIdentity identityEpoch ask)
         , scrollListToTop
         ]
     )

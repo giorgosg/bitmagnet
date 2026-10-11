@@ -66,7 +66,7 @@ suite =
             [ test "a trailing space in the username is a typo, not a username" <|
                 \_ ->
                     Login.credentials (typed "  ada " "correct horse")
-                        |> .username
+                        |> .id
                         |> Expect.equal "ada"
             , test "a space in the password is a character the User chose" <|
                 \_ ->
@@ -87,7 +87,7 @@ suite =
                     typed "ada" "correct horse"
                         |> Login.withPassword "changed"
                         |> Expect.equal
-                            { username = "ada", password = "changed", state = Login.Ready, reason = Nothing }
+                            { username = "ada", password = "changed", state = Login.Ready, reason = Nothing, filled = False }
             ]
         , describe "view"
             [ test "invalid credentials are announced beside the fields" <|
@@ -211,6 +211,40 @@ suite =
                 \_ ->
                     Login.canSubmit (Login.afterLostChange { id = "ada", password = "new horse" })
                         |> Expect.equal True
+            , test "what is sent, and offered once accepted, is the password filled in" <|
+                \_ ->
+                    -- The credential travels with the request and comes back with its answer,
+                    -- so what the credential store is offered is what bitmagnet accepted.
+                    Login.credentials (Login.afterLostChange { id = "ada", password = "new horse" })
+                        |> Expect.equal { id = "ada", password = "new horse" }
+            , test "keeps a password the person typed over the one it filled in, when the form is left" <|
+                \_ ->
+                    Login.afterLostChange { id = "ada", password = "new horse" }
+                        |> Login.withPassword "old horse"
+                        |> Login.withoutReason
+                        |> .password
+                        |> Expect.equal "old horse"
+            , test "a change confirmed while the form is open keeps what is in it, and says so" <|
+                \_ ->
+                    -- The confirmation is the moment the filled-in password is known to work;
+                    -- wiping it then would lose Magnes's only copy where the browser has no
+                    -- credential store.
+                    Login.afterLostChange { id = "ada", password = "new horse" }
+                        |> Login.withState Login.Submitting
+                        |> Login.changeConfirmed
+                        |> Expect.all
+                            [ .username >> Expect.equal "ada"
+                            , .password >> Expect.equal "new horse"
+                            , .reason >> Expect.equal (Just Login.PasswordChanged)
+                            , .state >> Expect.equal Login.Submitting
+                            ]
+            , test "a confirmed password Magnes filled in still goes when the form is left" <|
+                \_ ->
+                    Login.afterLostChange { id = "ada", password = "new horse" }
+                        |> Login.changeConfirmed
+                        |> Login.withoutReason
+                        |> .password
+                        |> Expect.equal ""
             , test "forgets the password it filled in once the form is left" <|
                 \_ ->
                     -- Magnes put it there for that reason; without the reason it is a password

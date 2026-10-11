@@ -1,4 +1,4 @@
-module Login exposing (Form, Messages, Reason(..), Submission(..), afterLostChange, afterPasswordChange, canSubmit, credentials, empty, focusFieldId, submit, usernameFieldId, view, withPassword, withState, withUsername, withoutReason)
+module Login exposing (Form, Messages, Reason(..), Submission(..), afterLostChange, afterPasswordChange, canSubmit, changeConfirmed, credentials, empty, focusFieldId, submit, usernameFieldId, view, withPassword, withState, withUsername, withoutReason)
 
 {-| Establishing a User-backed Identity in a browser.
 
@@ -25,8 +25,9 @@ import Magnes.Api.Mutation as Mutation
 import Magnes.Api.Object.SelfMutation as SelfMutation
 
 
-{-| What is typed, how the last attempt ended, and why the form was opened when that is
-worth saying.
+{-| What is typed, how the last attempt ended, why the form was opened when that is worth
+saying, and whether the password is still one Magnes filled in rather than one the person
+typed.
 
 A rejection keeps its `Failure` rather than a sentence, because the form treats the
 outcomes differently: invalid credentials belong beside the fields, and throttling does
@@ -39,6 +40,7 @@ type alias Form =
     , password : String
     , state : Submission
     , reason : Maybe Reason
+    , filled : Bool
     }
 
 
@@ -61,7 +63,7 @@ type Submission
 
 empty : Form
 empty =
-    { username = "", password = "", state = Ready, reason = Nothing }
+    { username = "", password = "", state = Ready, reason = Nothing, filled = False }
 
 
 {-| The form as a password change leaves it: on the User's own name, which is the one that
@@ -81,25 +83,35 @@ The password exists here only in memory, as it did in the password change's form
 -}
 afterLostChange : Credential -> Form
 afterLostChange credential =
-    { empty | username = credential.id, password = credential.password, reason = Just PasswordMayHaveChanged }
+    { empty
+        | username = credential.id
+        , password = credential.password
+        , reason = Just PasswordMayHaveChanged
+        , filled = True
+    }
+
+
+{-| The change has been confirmed while the form is open, so the reason says it was made. What
+is in the form stays: the password filled in is now known to work, and it may be the only copy
+Magnes has, since a browser without a credential store keeps none. A sign-in already on its way
+stays on its way.
+-}
+changeConfirmed : Form -> Form
+changeConfirmed form =
+    { form | reason = Just PasswordChanged }
 
 
 {-| The reason describes an arrival, so leaving the form ends it. Coming back later is not
-the moment the password changed. A password Magnes filled in for that reason goes with it:
-without the reason, it is a password nobody typed. One the person typed stays, as it always
-has.
+the moment the password changed. A password Magnes filled in goes with it: without the reason,
+it is a password nobody typed. One the person typed stays, as it always has.
 -}
 withoutReason : Form -> Form
 withoutReason form =
-    case form.reason of
-        Just PasswordMayHaveChanged ->
-            { form | reason = Nothing, password = "" }
+    if form.filled then
+        { form | reason = Nothing, password = "", filled = False }
 
-        Just PasswordChanged ->
-            { form | reason = Nothing }
-
-        Nothing ->
-            form
+    else
+        { form | reason = Nothing }
 
 
 {-| Typing is also how a rejection is dismissed: the message described the credentials
@@ -116,7 +128,7 @@ withUsername username form =
 
 withPassword : String -> Form -> Form
 withPassword password form =
-    withState Ready { form | password = password }
+    withState Ready { form | password = password, filled = False }
 
 
 withState : Submission -> Form -> Form
@@ -138,29 +150,27 @@ canSubmit form =
         && not (String.isEmpty form.password)
 
 
-type alias Credentials =
-    { username : String
-    , password : String
-    }
-
-
-credentials : Form -> Credentials
+{-| What is sent, in the shape the credential store takes, so that the answer can carry back
+exactly the credential bitmagnet accepted and that is what is offered: never the form as it
+is by the time the answer arrives, which may have been emptied or refilled meanwhile.
+-}
+credentials : Form -> Credential
 credentials form =
-    { username = String.trim form.username, password = form.password }
+    { id = String.trim form.username, password = form.password }
 
 
-submit : String -> Credentials -> (Result (Graphql.Http.Error ()) () -> msg) -> Cmd msg
+submit : String -> Credential -> (Result (Graphql.Http.Error ()) () -> msg) -> Cmd msg
 submit apiUrl offered toMsg =
     selection offered
         |> Bitmagnet.mutationRequest apiUrl
         |> Graphql.Http.send toMsg
 
 
-selection : Credentials -> SelectionSet () RootMutation
+selection : Credential -> SelectionSet () RootMutation
 selection offered =
     Mutation.self
         (SelfMutation.loginBrowser
-            { username = offered.username
+            { username = offered.id
             , password = offered.password
             }
             |> SelectionSet.map (always ())

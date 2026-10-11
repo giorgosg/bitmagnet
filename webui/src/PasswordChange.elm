@@ -1,4 +1,4 @@
-module PasswordChange exposing (Form, Messages, Sent, Settlement(..), State, Unsettled(..), answer, canSubmit, identified, initial, left, measured, mutation, newPassword, offered, sending, submit, view, withCurrent, withNew)
+module PasswordChange exposing (Answered, Form, Messages, Sent, Settlement(..), SignIn(..), State, Unsettled(..), answer, answered, canSubmit, identified, identityAnswered, initial, left, loginOnArrival, measured, mutation, newPassword, offered, sending, signedIn, submit, view, withCurrent, withNew)
 
 {-| A signed-in User changing their own password, on the User overview.
 
@@ -29,6 +29,12 @@ why. The login form is then opened on the User's name and the new password, sayi
 signing in settles it: with the new password, it was made, and the sign-in offers it to the
 credential store as any sign-in does; refused, it was not, and the old password still works.
 
+Every decision `Main` makes about a change is a function here, taking plain values, so that
+each is tested: what to send (`sending`), what an answer to it means (`answered`), what an
+answer to the Identity means (`identityAnswered`), what the login form becomes on arriving at
+it (`loginOnArrival`), and what a sign-in settles (`signedIn`). `Main` makes one call per
+decision and carries out what comes back.
+
 -}
 
 import ApiError
@@ -41,19 +47,23 @@ import Html exposing (Html, button, h2, input, label, p, text)
 import Html.Attributes exposing (attribute, class, disabled, for, id, type_, value)
 import Html.Events exposing (onInput, onSubmit)
 import Identity
+import Login
 import Magnes.Api.InputObject as InputObject
 import Magnes.Api.Mutation as Mutation
 import Magnes.Api.Object.SelfMutation as SelfMutation
 import PasswordEntropy
+import Route
 
 
-{-| The form, the change not yet settled if there is one, and how many changes have been sent,
-which numbers the next.
+{-| The form, the change not yet settled if there is one, how many changes have been sent,
+which numbers the next, and the newest ask for the Identity whose answer has been heard, so
+that an older one landing late is not taken for news.
 -}
 type alias State =
     { form : Form
     , unsettled : Maybe Unsettled
     , sent : Int
+    , identityHeard : Int
     }
 
 
@@ -100,7 +110,7 @@ type Settlement
 
 initial : State
 initial =
-    { form = emptyForm, unsettled = Nothing, sent = 0 }
+    { form = emptyForm, unsettled = Nothing, sent = 0, identityHeard = 0 }
 
 
 emptyForm : Form
@@ -169,11 +179,32 @@ canSubmit state =
         && not (String.isEmpty state.form.new)
 
 
-{-| The change the form asks for, made as the User `username`, numbered, and unsettled until
-it is answered. Nothing when the form is not ready to send.
+{-| The change the form asks for, made as the signed-in User, numbered, and unsettled until it
+is answered. Nothing when the form is not ready to send, and nothing for any other Identity:
+the credential a change leaves behind is that User's, and bitmagnet refuses every other
+Identity a change anyway.
 -}
-sending : String -> State -> Maybe ( State, Sent )
-sending username state =
+sending : Identity.Identity -> State -> Maybe ( State, Sent )
+sending identity state =
+    case identity of
+        Identity.UserAuthenticated user _ ->
+            sendingAs user.username state
+
+        Identity.Anonymous _ ->
+            Nothing
+
+        Identity.APIKeyAuthenticated _ _ _ ->
+            Nothing
+
+        Identity.Unknown ->
+            Nothing
+
+        Identity.Failed _ ->
+            Nothing
+
+
+sendingAs : String -> State -> Maybe ( State, Sent )
+sendingAs username state =
     if canSubmit state then
         let
             change =
@@ -193,12 +224,15 @@ sending username state =
         Nothing
 
 
-{-| Success is the absence of an error, as for `Login`: `updatePassword` answers `Void`.
+{-| Success is the absence of an error, as for `Login`: `updatePassword` answers `Void`. The
+request is given up on after five minutes (`Bitmagnet.slowMutationRequest`), so that a change
+never answered does not hold the form for good; given up on, it is unsettled like any other
+whose answer was lost.
 -}
 submit : String -> State -> (Result (Graphql.Http.Error ()) () -> msg) -> Cmd msg
 submit apiUrl state toMsg =
     mutation state
-        |> Bitmagnet.mutationRequest apiUrl
+        |> Bitmagnet.slowMutationRequest apiUrl
         |> Graphql.Http.send toMsg
 
 
@@ -222,7 +256,15 @@ answer : Sent -> Result (Graphql.Http.Error ()) () -> State -> ( State, Settleme
 answer change result state =
     case result of
         Ok () ->
-            ( { state | form = emptyForm, unsettled = Nothing }, Made change.credential )
+            case Maybe.andThen (answering change) state.unsettled of
+                Just _ ->
+                    ( { state | form = emptyForm, unsettled = Nothing }, Made change.credential )
+
+                -- An older change, already dropped, whose acceptance arrives late. It changed
+                -- the password, so it is acted on, but a newer change still waiting for its own
+                -- answer is not this one's to settle, nor is a form the person is typing into.
+                Nothing ->
+                    ( state, Made change.credential )
 
         Err error ->
             let
@@ -314,17 +356,35 @@ offers unsettled =
             False
 
 
-{-| What the Identity bitmagnet now reports means for an unsettled change.
+{-| What the Identity bitmagnet now reports, in answer to the `ask`th look, means for an
+unsettled change.
+
+An answer older than one already heard says nothing: two looks can answer out of order, and
+one asked before the change committed would otherwise undo what a later one found.
 
 Signed out, Anonymous or by an API key, the change may be why. The first time, its credential
 is returned for the login form to offer. Signed in as the User who sent it, nothing is known
 yet: still signed in says only that it had not committed when bitmagnet was asked. Signed in
-again after being found signed out, a sign-in has settled it. Signed in as anyone else, it is
-not this Identity's to settle, and is dropped.
+again after being found signed out, a sign-in has settled it.
+
+Signed in as anyone else, the change is dropped, and with it Magnes's copy of its new password.
+That is a deliberate trade. Kept, the password would stay in memory while someone else uses
+the tab, and could be offered on a login form to them or to whoever comes next. The cost falls
+on the person who made the change: if it went through, the only copy may be the one their
+password manager kept from the field.
 
 -}
-identified : Identity.Identity -> State -> ( State, Maybe Credential )
-identified identity state =
+identified : Int -> Identity.Identity -> State -> ( State, Maybe Credential )
+identified ask identity heard =
+    if ask <= heard.identityHeard then
+        ( heard, Nothing )
+
+    else
+        identifiedNewer identity { heard | identityHeard = ask }
+
+
+identifiedNewer : Identity.Identity -> State -> ( State, Maybe Credential )
+identifiedNewer identity state =
     case ( identity, state.unsettled ) of
         ( _, Nothing ) ->
             ( state, Nothing )
@@ -374,6 +434,160 @@ offered state =
                 else
                     Nothing
             )
+
+
+{-| A sign-in that succeeded in this tab settles any unsettled change: whichever password it
+used, one now works, and the person knows which.
+-}
+signedIn : State -> State
+signedIn state =
+    { state | unsettled = Nothing }
+
+
+{-| What `Main` is to do about an answer to the Identity: keep the change and the login form as
+they come back, and go where `goTo` says, if anywhere.
+-}
+identityAnswered : Route.BasePath -> Int -> Identity.Identity -> State -> Login.Form -> { change : State, login : Login.Form, goTo : Maybe Route.Route }
+identityAnswered mount ask identity state login =
+    let
+        ( change, offer ) =
+            identified ask identity state
+    in
+    case offer of
+        -- Signed out with a change unsettled, which may be why: whatever asked, and wherever
+        -- the person is, the login form tries the change's new password first and says so.
+        Just credential ->
+            { change = change
+            , login = filledWith credential login
+            , goTo = Just (Route.loginReturningTo mount Route.UserOverview)
+            }
+
+        Nothing ->
+            { change = change, login = login, goTo = Nothing }
+
+
+{-| The login form on arriving at it, from the page `cameFrom`. It is opened on a change's new
+password only when a page that needs a User sent the person there, which is where a change
+found signed out leaves them; not when they came of their own accord, by the header's link
+that is open to whoever is at the keyboard, nor from registering someone else.
+-}
+loginOnArrival : Route.BasePath -> Identity.Identity -> Route.Route -> State -> Login.Form -> Login.Form
+loginOnArrival mount identity cameFrom state login =
+    case Route.guard mount identity cameFrom of
+        Route.RedirectTo (Route.Login _) ->
+            offered state
+                |> Maybe.map (\credential -> filledWith credential login)
+                |> Maybe.withDefault login
+
+        Route.RedirectTo _ ->
+            login
+
+        Route.Allowed ->
+            login
+
+        Route.PendingIdentity ->
+            login
+
+        Route.Refused _ ->
+            login
+
+
+{-| The login form opened on `credential`, unless it already names another User: filled in
+over someone else's name, Enter would sign the wrong person in.
+-}
+filledWith : Credential -> Login.Form -> Login.Form
+filledWith credential login =
+    if namesAnother credential login then
+        login
+
+    else
+        Login.afterLostChange credential
+
+
+namesAnother : Credential -> Login.Form -> Bool
+namesAnother credential login =
+    let
+        name =
+            String.trim login.username
+    in
+    not (String.isEmpty name) && name /= credential.id
+
+
+{-| What `Main` is to do about an answer to a change: keep the change and the login form as
+they come back, offer `offer` to the credential store, go where `goTo` says, and treat the
+browser's sign-in as `signIn` says.
+-}
+type alias Answered =
+    { change : State
+    , login : Login.Form
+    , offer : Maybe Credential
+    , goTo : Maybe Route.Route
+    , signIn : SignIn
+    }
+
+
+{-| What became of the browser's sign-in. `Stale`: a refusal said the Identity in hand is not
+the one bitmagnet sees, so it is asked for again. `Ended`: the change ended every sign-in the
+User had, so the other tabs are told and it is asked for again.
+-}
+type SignIn
+    = Unaffected
+    | Stale
+    | Ended
+
+
+answered : Route.BasePath -> Sent -> Result (Graphql.Http.Error ()) () -> State -> Login.Form -> Answered
+answered mount change result state login =
+    let
+        ( next, settlement ) =
+            answer change result state
+    in
+    case settlement of
+        Made credential ->
+            { change = next
+            , login = confirmedOn credential login
+            , offer = Just credential
+            , goTo = Just (Route.loginReturningTo mount Route.UserOverview)
+            , signIn = Ended
+            }
+
+        NotMade { identityStale, offerWithdrawn } ->
+            { change = next
+            , login =
+                -- The login form was offering this change's new password as the one to try
+                -- first. Refused, it was never made, and is no longer offered; a password the
+                -- person typed over it, and a sign-in on its way, stay.
+                if offerWithdrawn then
+                    Login.withoutReason login
+
+                else
+                    login
+            , offer = Nothing
+            , goTo = Nothing
+            , signIn =
+                if identityStale then
+                    Stale
+
+                else
+                    Unaffected
+            }
+
+        NotSettled ->
+            { change = next, login = login, offer = Nothing, goTo = Nothing, signIn = Unaffected }
+
+
+{-| The login form once a change is accepted. If it is already trying that change's new
+password, it keeps what is in it and says the change was made: the password is now known to
+work, and may be Magnes's only copy where the browser has no credential store. Otherwise it is
+opened on the User's name, saying why.
+-}
+confirmedOn : Credential -> Login.Form -> Login.Form
+confirmedOn credential login =
+    if login.reason == Just Login.PasswordMayHaveChanged && String.trim login.username == credential.id then
+        Login.changeConfirmed login
+
+    else
+        Login.afterPasswordChange credential.id
 
 
 {-| The form reports interactions; it holds no state of its own and runs no update.
@@ -605,7 +819,7 @@ formError form =
 
 
 {-| A change whose outcome is not known, said for as long as it is not, coming back to the page
-included. A change on its way says so on the button.
+included, and a change on its way, which says how it will be settled.
 -}
 unsettledNotice : Maybe Unsettled -> Html msg
 unsettledNotice unsettled =
@@ -627,7 +841,8 @@ unsettledNotice unsettled =
                 ]
 
         Just (Awaiting _) ->
-            text ""
+            p [ class "notice password-change-warning", attribute "role" "status" ]
+                [ text "Waiting for bitmagnet's answer to the change. Another cannot be sent until it comes; if none has come within five minutes, Magnes stops waiting and says what it knows." ]
 
         Nothing ->
             text ""

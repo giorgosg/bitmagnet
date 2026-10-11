@@ -10,8 +10,10 @@ import Html.Attributes
 import Identity
 import Json.Decode as Decode
 import Json.Encode as Encode
+import Login
 import PasswordChange
 import PasswordEntropy
+import Route
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
@@ -45,7 +47,7 @@ send stands in as nothing sent, numbered 0, which no test here expects.
 -}
 waiting : ( PasswordChange.State, PasswordChange.Sent )
 waiting =
-    PasswordChange.sending "ada" (typed "old horse" "new horse")
+    PasswordChange.sending (signedInAs "ada") (typed "old horse" "new horse")
         |> Maybe.withDefault ( PasswordChange.initial, { attempt = 0, credential = { id = "", password = "" } } )
 
 
@@ -96,6 +98,24 @@ unknown =
     Tuple.first (answered (Err lost))
 
 
+signedInAs : String -> Identity.Identity
+signedInAs username =
+    Identity.UserAuthenticated { ada | username = username } []
+
+
+mount : Route.BasePath
+mount =
+    Route.basePath "/magnes"
+
+
+{-| Where an unsettled change found signed out sends the browser: the login form, returning to
+the User overview the change was made on.
+-}
+backToAccount : Route.Route
+backToAccount =
+    Route.Login { returnUrl = Just "/magnes/account" }
+
+
 ada : Identity.User
 ada =
     { id = 1
@@ -117,7 +137,7 @@ anonymous =
 -}
 signedOut : PasswordChange.State
 signedOut =
-    Tuple.first (PasswordChange.identified anonymous unknown)
+    Tuple.first (PasswordChange.identified 1 anonymous unknown)
 
 
 notMade : PasswordChange.Settlement
@@ -170,23 +190,34 @@ suite =
             , test "numbers the next change after it" <|
                 \_ ->
                     unknown
-                        |> PasswordChange.identified (Identity.UserAuthenticated { ada | username = "grace" } [])
+                        |> PasswordChange.identified 1 (Identity.UserAuthenticated { ada | username = "grace" } [])
                         |> Tuple.first
                         |> PasswordChange.withCurrent "old horse"
                         |> PasswordChange.withNew "newer horse"
-                        |> PasswordChange.sending "grace"
+                        |> PasswordChange.sending (signedInAs "grace")
                         |> Maybe.map (Tuple.second >> .attempt)
                         |> Expect.equal (Just 2)
             , test "sends nothing from a form that is not ready" <|
                 \_ ->
                     typed "old horse" ""
-                        |> PasswordChange.sending "ada"
+                        |> PasswordChange.sending (signedInAs "ada")
                         |> Expect.equal Nothing
+            , test "sends nothing for an Identity that is not a signed-in User" <|
+                \_ ->
+                    -- The credential a change leaves behind is the signed-in User's, and
+                    -- bitmagnet refuses a change to every other Identity anyway.
+                    [ anonymous
+                    , Identity.APIKeyAuthenticated ada "a key" []
+                    , Identity.Unknown
+                    , Identity.Failed "offline"
+                    ]
+                        |> List.map (\identity -> PasswordChange.sending identity (typed "old horse" "new horse"))
+                        |> Expect.equal [ Nothing, Nothing, Nothing, Nothing ]
             , test "sends no second change while the first is on its way" <|
                 \_ ->
                     Tuple.first waiting
                         |> PasswordChange.withNew "newer horse"
-                        |> PasswordChange.sending "ada"
+                        |> PasswordChange.sending (signedInAs "ada")
                         |> Expect.equal Nothing
             , test "sends no second change while the first is unsettled" <|
                 \_ ->
@@ -195,13 +226,18 @@ suite =
                     unknown
                         |> PasswordChange.withCurrent "old horse"
                         |> PasswordChange.withNew "newer horse"
-                        |> PasswordChange.sending "ada"
+                        |> PasswordChange.sending (signedInAs "ada")
                         |> Expect.equal Nothing
             , test "a change on its way says so, and offers no second one" <|
                 \_ ->
                     rendered (Tuple.first waiting)
                         |> submitButton
                         |> Query.has [ Selector.text "Changing…", Selector.disabled True ]
+            , test "a change on its way says how it will be settled, coming back to the page included" <|
+                \_ ->
+                    rendered (PasswordChange.left (Tuple.first waiting))
+                        |> Query.has
+                            [ Selector.text "Waiting for bitmagnet's answer to the change. Another cannot be sent until it comes; if none has come within five minutes, Magnes stops waiting and says what it knows." ]
             , test "an unsettled change says why no other can be sent, and how it is settled" <|
                 \_ ->
                     rendered (PasswordChange.withNew "newer horse" (PasswordChange.withCurrent "x" unknown))
@@ -496,24 +532,24 @@ suite =
         , describe "the Identity found signed out"
             [ test "while a change is unsettled, offers its new password at sign-in" <|
                 \_ ->
-                    PasswordChange.identified anonymous unknown
+                    PasswordChange.identified 1 anonymous unknown
                         |> Expect.all
                             [ Tuple.second >> Expect.equal (Just { id = "ada", password = "new horse" })
                             , Tuple.first >> .unsettled >> Expect.equal (Just (PasswordChange.SignedOut sent))
                             ]
             , test "while a change is still on its way, offers it too" <|
                 \_ ->
-                    PasswordChange.identified anonymous (Tuple.first waiting)
+                    PasswordChange.identified 1 anonymous (Tuple.first waiting)
                         |> Tuple.second
                         |> Expect.equal (Just { id = "ada", password = "new horse" })
             , test "an API-key Identity is not the User who sent it either" <|
                 \_ ->
-                    PasswordChange.identified (Identity.APIKeyAuthenticated ada "a key" []) unknown
+                    PasswordChange.identified 1 (Identity.APIKeyAuthenticated ada "a key" []) unknown
                         |> Tuple.second
                         |> Expect.equal (Just { id = "ada", password = "new horse" })
             , test "offers it once, not at every look that follows" <|
                 \_ ->
-                    PasswordChange.identified anonymous signedOut
+                    PasswordChange.identified 2 anonymous signedOut
                         |> Tuple.second
                         |> Expect.equal Nothing
             , test "keeps offering it to the login form until it is settled" <|
@@ -526,33 +562,61 @@ suite =
                         |> Expect.equal Nothing
             , test "with nothing unsettled, offers nothing" <|
                 \_ ->
-                    PasswordChange.identified anonymous (typed "old horse" "new horse")
+                    PasswordChange.identified 1 anonymous (typed "old horse" "new horse")
                         |> Tuple.second
                         |> Expect.equal Nothing
             , test "an Identity still being asked for says nothing" <|
                 \_ ->
                     [ Identity.Unknown, Identity.Failed "offline" ]
-                        |> List.map (\identity -> PasswordChange.identified identity unknown)
-                        |> Expect.equal [ ( unknown, Nothing ), ( unknown, Nothing ) ]
+                        |> List.map (\identity -> PasswordChange.identified 1 identity unknown |> Tuple.mapFirst .unsettled)
+                        |> Expect.equal [ ( unknown.unsettled, Nothing ), ( unknown.unsettled, Nothing ) ]
             ]
         , describe "the Identity found signed in"
             [ test "as the User who sent it, keeps the change unsettled" <|
                 \_ ->
                     -- Still signed in says only that it had not committed when bitmagnet was
                     -- asked; an answer lost on the way may yet be a change that commits.
-                    PasswordChange.identified (Identity.UserAuthenticated ada []) unknown
-                        |> Expect.equal ( unknown, Nothing )
+                    PasswordChange.identified 1 (Identity.UserAuthenticated ada []) unknown
+                        |> Tuple.mapFirst .unsettled
+                        |> Expect.equal ( unknown.unsettled, Nothing )
             , test "again, after being found signed out, settles it" <|
                 \_ ->
                     -- A sign-in succeeded since, with the new password or the old one, so there
                     -- is a password that works, and the person knows which.
-                    PasswordChange.identified (Identity.UserAuthenticated ada []) signedOut
+                    PasswordChange.identified 2 (Identity.UserAuthenticated ada []) signedOut
                         |> Tuple.first
                         |> .unsettled
                         |> Expect.equal Nothing
+            , test "as the User who sent it, but asked before it was found signed out, says nothing" <|
+                \_ ->
+                    -- Two looks at the Identity can answer out of order. One asked before the
+                    -- change committed says signed in; landing after the look that found it
+                    -- signed out, it must not pass for a sign-in since, which would drop the
+                    -- change and the only copy of its new password.
+                    PasswordChange.identified 1 (Identity.UserAuthenticated ada []) (Tuple.first (PasswordChange.identified 2 anonymous unknown))
+                        |> Tuple.first
+                        |> PasswordChange.offered
+                        |> Expect.equal (Just { id = "ada", password = "new horse" })
+            , test "an older look landing late does not find it signed out either" <|
+                \_ ->
+                    PasswordChange.identified 1 anonymous (Tuple.first (PasswordChange.identified 2 (Identity.UserAuthenticated ada []) unknown))
+                        |> Expect.all
+                            [ Tuple.second >> Expect.equal Nothing
+                            , Tuple.first >> PasswordChange.offered >> Expect.equal Nothing
+                            ]
             , test "as another User, drops it: it is not this Identity's to settle" <|
                 \_ ->
-                    PasswordChange.identified (Identity.UserAuthenticated { ada | username = "grace" } []) unknown
+                    -- A deliberate trade. Kept, its new password would stay in memory while
+                    -- someone else uses the tab, and could be offered to them, or to whoever
+                    -- comes next, on a login form. Dropped, the person who made the change loses
+                    -- Magnes's copy of a password that may now be the only one that works.
+                    PasswordChange.identified 2 (signedInAs "grace") signedOut
+                        |> Tuple.first
+                        |> .unsettled
+                        |> Expect.equal Nothing
+            , test "as another User while still unsettled, drops it too" <|
+                \_ ->
+                    PasswordChange.identified 1 (Identity.UserAuthenticated { ada | username = "grace" } []) unknown
                         |> Tuple.first
                         |> .unsettled
                         |> Expect.equal Nothing
@@ -560,25 +624,45 @@ suite =
         , describe "an answer once signed out"
             [ test "an acceptance still offers the credential" <|
                 \_ ->
-                    PasswordChange.answer sent (Ok ()) (Tuple.first (PasswordChange.identified anonymous (Tuple.first waiting)))
+                    PasswordChange.answer sent (Ok ()) (Tuple.first (PasswordChange.identified 1 anonymous (Tuple.first waiting)))
                         |> Tuple.second
                         |> Expect.equal (PasswordChange.Made { id = "ada", password = "new horse" })
             , test "a refusal withdraws the offer the login form was given" <|
                 \_ ->
-                    PasswordChange.answer sent (Err (refused "USER_SESSION_REQUIRED")) (Tuple.first (PasswordChange.identified anonymous (Tuple.first waiting)))
+                    PasswordChange.answer sent (Err (refused "USER_SESSION_REQUIRED")) (Tuple.first (PasswordChange.identified 1 anonymous (Tuple.first waiting)))
                         |> Expect.all
                             [ Tuple.second >> Expect.equal (PasswordChange.NotMade { identityStale = True, offerWithdrawn = True })
                             , Tuple.first >> PasswordChange.offered >> Expect.equal Nothing
                             ]
             , test "no usable answer keeps offering it" <|
                 \_ ->
-                    PasswordChange.answer sent (Err lost) (Tuple.first (PasswordChange.identified anonymous (Tuple.first waiting)))
+                    PasswordChange.answer sent (Err lost) (Tuple.first (PasswordChange.identified 1 anonymous (Tuple.first waiting)))
                         |> Tuple.first
                         |> PasswordChange.offered
                         |> Expect.equal (Just { id = "ada", password = "new horse" })
             ]
         , describe "an answer to a change already settled"
-            [ test "a refusal changes nothing, though it says what it was" <|
+            [ test "an acceptance of an older change leaves a newer one unsettled" <|
+                \_ ->
+                    -- The older one was dropped by a sign-in, a newer one sent since, and then
+                    -- the older one's acceptance arrives. It changed the password, so it is
+                    -- acted on; the newer one is still waiting for its own answer.
+                    let
+                        newer =
+                            signedOut
+                                |> PasswordChange.signedIn
+                                |> PasswordChange.withCurrent "new horse"
+                                |> PasswordChange.withNew "newer horse"
+                                |> PasswordChange.sending (signedInAs "ada")
+                                |> Maybe.map Tuple.first
+                                |> Maybe.withDefault PasswordChange.initial
+                    in
+                    PasswordChange.answer sent (Ok ()) newer
+                        |> Expect.all
+                            [ Tuple.second >> Expect.equal (PasswordChange.Made { id = "ada", password = "new horse" })
+                            , Tuple.first >> Expect.equal newer
+                            ]
+            , test "a refusal changes nothing, though it says what it was" <|
                 \_ ->
                     PasswordChange.answer sent (Err (refused "PASSWORD_INCORRECT")) (typed "old horse" "typed since")
                         |> Expect.equal ( typed "old horse" "typed since", notMade )
@@ -591,6 +675,162 @@ suite =
                 \_ ->
                     PasswordChange.answer sent (Err lost) (typed "old horse" "typed since")
                         |> Expect.equal ( typed "old horse" "typed since", PasswordChange.NotSettled )
+            ]
+        , describe "a sign-in in this tab"
+            [ test "settles a change found signed out" <|
+                \_ ->
+                    -- Whichever password it used, one now works and the person knows which.
+                    PasswordChange.signedIn signedOut
+                        |> PasswordChange.offered
+                        |> Expect.equal Nothing
+            , test "keeps the form as it was" <|
+                \_ ->
+                    PasswordChange.signedIn (typed "old horse" "new horse")
+                        |> Expect.equal (typed "old horse" "new horse")
+            ]
+        , describe "what an answer to the Identity means"
+            [ test "found signed out with a change unsettled, the login form tries its new password, returning to the User overview" <|
+                \_ ->
+                    PasswordChange.identityAnswered mount 1 anonymous unknown Login.empty
+                        |> Expect.all
+                            [ .goTo >> Expect.equal (Just backToAccount)
+                            , .login >> Expect.equal (Login.afterLostChange { id = "ada", password = "new horse" })
+                            , .change >> PasswordChange.offered >> Expect.equal (Just { id = "ada", password = "new horse" })
+                            ]
+            , test "an older look landing late changes nothing, and goes nowhere" <|
+                \_ ->
+                    -- The one that found the browser signed out was asked later, and has spoken.
+                    let
+                        found =
+                            PasswordChange.identityAnswered mount 2 anonymous unknown Login.empty
+                    in
+                    PasswordChange.identityAnswered mount 1 (Identity.UserAuthenticated ada []) found.change found.login
+                        |> Expect.equal { change = found.change, login = found.login, goTo = Nothing }
+            , test "found signed out a second time, goes nowhere and leaves the form alone" <|
+                \_ ->
+                    PasswordChange.identityAnswered mount 2 anonymous signedOut (Login.withPassword "typed" Login.empty)
+                        |> Expect.equal { change = Tuple.first (PasswordChange.identified 2 anonymous signedOut), login = Login.withPassword "typed" Login.empty, goTo = Nothing }
+            , test "with nothing unsettled, goes nowhere and leaves the form alone" <|
+                \_ ->
+                    PasswordChange.identityAnswered mount 1 anonymous PasswordChange.initial (Login.withUsername "carol" Login.empty)
+                        |> Expect.all
+                            [ .goTo >> Expect.equal Nothing
+                            , .login >> Expect.equal (Login.withUsername "carol" Login.empty)
+                            ]
+            , test "never fills in a form that names another User" <|
+                \_ ->
+                    PasswordChange.identityAnswered mount 1 anonymous unknown (Login.withUsername "carol" Login.empty)
+                        |> .login
+                        |> Expect.equal (Login.withUsername "carol" Login.empty)
+            ]
+        , describe "the login form on arriving there"
+            [ test "sent there by a page that needs a User, tries the change's new password" <|
+                \_ ->
+                    PasswordChange.loginOnArrival mount anonymous Route.UserOverview signedOut Login.empty
+                        |> Expect.equal (Login.afterLostChange { id = "ada", password = "new horse" })
+            , test "on the change's own User's name, fills the password in too" <|
+                \_ ->
+                    PasswordChange.loginOnArrival mount anonymous Route.APIKeys signedOut (Login.withUsername "ada" Login.empty)
+                        |> Expect.equal (Login.afterLostChange { id = "ada", password = "new horse" })
+            , test "arriving from registration keeps the new User the form was opened on" <|
+                \_ ->
+                    -- Someone registered another User in this tab. The form names them; filling
+                    -- in the change's User would sign the wrong person in on Enter.
+                    PasswordChange.loginOnArrival mount anonymous (Route.Register { code = Nothing }) signedOut (Login.withUsername "carol" Login.empty)
+                        |> Expect.equal (Login.withUsername "carol" Login.empty)
+            , test "sent there by the guard, still never fills in a form that names another User" <|
+                \_ ->
+                    PasswordChange.loginOnArrival mount anonymous Route.UserOverview signedOut (Login.withUsername "carol" Login.empty)
+                        |> Expect.equal (Login.withUsername "carol" Login.empty)
+            , test "arriving of the person's own accord, from a page that needs no User, keeps the form" <|
+                \_ ->
+                    -- The header's "Sign in" link is open to whoever is at the keyboard.
+                    PasswordChange.loginOnArrival mount anonymous (Route.Search Route.emptySearch) signedOut Login.empty
+                        |> Expect.equal Login.empty
+            , test "with no change found signed out, keeps the form" <|
+                \_ ->
+                    PasswordChange.loginOnArrival mount anonymous Route.UserOverview unknown Login.empty
+                        |> Expect.equal Login.empty
+            ]
+        , describe "what an answer to a change means"
+            [ test "accepted on the User overview: the credential is offered, and the login form says why, returning there" <|
+                \_ ->
+                    PasswordChange.answered mount sent (Ok ()) (Tuple.first waiting) Login.empty
+                        |> Expect.all
+                            [ .offer >> Expect.equal (Just { id = "ada", password = "new horse" })
+                            , .goTo >> Expect.equal (Just backToAccount)
+                            , .signIn >> Expect.equal PasswordChange.Ended
+                            , .login >> Expect.equal (Login.afterPasswordChange "ada")
+                            ]
+            , test "accepted while the login form tries its new password: the form keeps it, and says it worked" <|
+                \_ ->
+                    let
+                        trying =
+                            Login.afterLostChange { id = "ada", password = "new horse" }
+                                |> Login.withState Login.Submitting
+                    in
+                    PasswordChange.answered mount sent (Ok ()) (Tuple.first (PasswordChange.identified 1 anonymous (Tuple.first waiting))) trying
+                        |> Expect.all
+                            [ .login >> Expect.equal (Login.changeConfirmed trying)
+                            , .login >> .password >> Expect.equal "new horse"
+                            , .offer >> Expect.equal (Just { id = "ada", password = "new horse" })
+                            ]
+            , test "the offer is never empty, nor any password but the one accepted" <|
+                \_ ->
+                    -- Whatever the login form holds by the time the answer lands.
+                    [ Login.empty
+                    , Login.withPassword "old horse" (Login.afterLostChange { id = "ada", password = "new horse" })
+                    , Login.withPassword "" (Login.afterLostChange { id = "ada", password = "new horse" })
+                    ]
+                        |> List.map (PasswordChange.answered mount sent (Ok ()) (Tuple.first waiting) >> .offer)
+                        |> Expect.equal (List.repeat 3 (Just { id = "ada", password = "new horse" }))
+            , test "refused: nothing offered, nowhere to go, and the sign-in unaffected" <|
+                \_ ->
+                    PasswordChange.answered mount sent (Err (refused "PASSWORD_INCORRECT")) (Tuple.first waiting) Login.empty
+                        |> Expect.all
+                            [ .offer >> Expect.equal Nothing
+                            , .goTo >> Expect.equal Nothing
+                            , .signIn >> Expect.equal PasswordChange.Unaffected
+                            , .change >> .form >> .refusal >> Expect.equal (Just ApiError.PasswordIncorrect)
+                            ]
+            , test "a refusal of the Identity asks for it again" <|
+                \_ ->
+                    PasswordChange.answered mount sent (Err (refused "USER_SESSION_REQUIRED")) (Tuple.first waiting) Login.empty
+                        |> .signIn
+                        |> Expect.equal PasswordChange.Stale
+            , test "refused once the login form was offered its password: the offer is withdrawn" <|
+                \_ ->
+                    PasswordChange.answered mount sent (Err (refused "USER_SESSION_REQUIRED")) (Tuple.first (PasswordChange.identified 1 anonymous (Tuple.first waiting))) (Login.afterLostChange { id = "ada", password = "new horse" })
+                        |> .login
+                        |> Expect.all
+                            [ .reason >> Expect.equal Nothing
+                            , .password >> Expect.equal ""
+                            , .username >> Expect.equal "ada"
+                            ]
+            , test "a withdrawn offer keeps a password the person typed, and a sign-in on its way" <|
+                \_ ->
+                    -- They may be signing in with the old password as the refusal lands.
+                    let
+                        typedOver =
+                            Login.afterLostChange { id = "ada", password = "new horse" }
+                                |> Login.withPassword "old horse"
+                                |> Login.withState Login.Submitting
+                    in
+                    PasswordChange.answered mount sent (Err (refused "USER_SESSION_REQUIRED")) (Tuple.first (PasswordChange.identified 1 anonymous (Tuple.first waiting))) typedOver
+                        |> .login
+                        |> Expect.all
+                            [ .password >> Expect.equal "old horse"
+                            , .state >> Expect.equal Login.Submitting
+                            ]
+            , test "no usable answer: nothing offered, nowhere to go, the form untouched" <|
+                \_ ->
+                    PasswordChange.answered mount sent (Err lost) (Tuple.first waiting) (Login.withUsername "carol" Login.empty)
+                        |> Expect.all
+                            [ .offer >> Expect.equal Nothing
+                            , .goTo >> Expect.equal Nothing
+                            , .signIn >> Expect.equal PasswordChange.Unaffected
+                            , .login >> Expect.equal (Login.withUsername "carol" Login.empty)
+                            ]
             ]
         ]
 

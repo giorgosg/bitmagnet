@@ -149,10 +149,12 @@ type Step
     | Sending Int Act
 
 
-{-| What became of the last act. A GraphQL error is bitmagnet answering that it did not do it;
-anything else — no answer, an answer that was not bitmagnet's, one that could not be read, or
-none within the timeout — leaves it unknown, because the database may have committed before
-the answer was lost.
+{-| What became of the last act. bitmagnet refusing it, whether in a GraphQL error or by turning
+the request away before running it, is bitmagnet saying it did not do it. Anything else leaves
+it unknown, because the database may have committed before the answer was lost: no answer, an
+answer that was not bitmagnet's, one that could not be read, none within the timeout, or a
+fault inside bitmagnet, which is what a connection lost during `COMMIT` gives. Which is which
+is `ApiError.mayHaveActed`'s to say, as it is for a password change.
 -}
 type Outcome
     = Done Act
@@ -751,11 +753,16 @@ outcomeOf act answer =
         Ok () ->
             Done act
 
-        Err ((Graphql.Http.GraphqlError _ _) as error) ->
-            NotDone act (ApiError.fromError error)
+        Err error ->
+            let
+                failure =
+                    ApiError.fromError error
+            in
+            if ApiError.mayHaveActed failure then
+                Unknown act failure
 
-        Err ((Graphql.Http.HttpError _) as error) ->
-            Unknown act (ApiError.fromError error)
+            else
+                NotDone act failure
 
 
 

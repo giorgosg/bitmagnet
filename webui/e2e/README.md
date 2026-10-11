@@ -228,7 +228,7 @@ issuer signs in afresh for each. The rest would take away what they sign in as.
 
 `password-change.spec.js` keeps to this. Verified 2026-10-11 against bitmagnet `trunk` at
 `e76818643`: three consecutive runs of the whole suite at the default worker count, 72 of 72
-each time with its six tests among them, after its review was answered.
+each time with its six tests among them, after each of its two reviews was answered.
 
 ## Conventions
 
