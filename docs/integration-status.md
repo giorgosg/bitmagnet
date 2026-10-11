@@ -103,6 +103,7 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#88](https://github.com/giorgosg/bitmagnet/pull/88) | Bound facet counts and group language and content-type values               | local — fork review finding 13                                       | Pool reached 32; 62 language counts; both observed red         |
 | [#89](https://github.com/giorgosg/bitmagnet/pull/89) | Keep search query values bound                                              | local — review finding 0002                                          | Nonconforming-string exact count failed; observed red          |
 | [#90](https://github.com/giorgosg/bitmagnet/pull/90) | Race metadata requests under shared and per-hash limits                     | lodestone `751a09607`, redesigned; local finding 0008b               | Stalled peer, TCP cancellation and node loops observed red     |
+| [#91](https://github.com/giorgosg/bitmagnet/pull/91) | Record the metadata request integration                                     | local                                                                | Documentation only; #90 CI and regression suite passed         |
 
 ## In flight
 
