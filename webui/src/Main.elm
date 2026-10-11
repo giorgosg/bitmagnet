@@ -1,4 +1,4 @@
-port module Main exposing (main)
+port module Main exposing (Refresh(..), main, refreshFailure)
 
 import ApiError
 import ApiKeys
@@ -215,14 +215,15 @@ type alias Model =
 
 {-| What prompted the Identity currently being fetched.
 
-Only the failure sentence depends on it. After a successful sign-out bitmagnet has already
-cleared the cookie, so a refresh that then fails has not left the User signed in and must
+The failure sentence and its recovery control depend on it. After a successful sign-out
+bitmagnet has already cleared the cookie, so a refresh that then fails has not left the User signed in and must
 not read as though resolving them failed: what is unknown is only what this instance
 allows without a User.
 
 -}
 type Refresh
     = Resolving
+    | AfterSignIn
     | AfterSignOut
     | AfterPasswordChange
 
@@ -555,6 +556,7 @@ type Msg
     | GotFiles String (Result (Graphql.Http.Error Bitmagnet.FileList) Bitmagnet.FileList)
     | GotResults Int (Result (Graphql.Http.Error Page) Page)
     | GotIdentity Int Int (Result (Graphql.Http.Error Identity.Identity) Identity.Identity)
+    | IdentityRetryRequested
     | VisibilityChanged Browser.Events.Visibility
     | LoginUsernameChanged String
     | LoginPasswordChanged String
@@ -722,7 +724,7 @@ updateModel msg model =
                 -- branch rather than a second copy of it that could drift. A password change
                 -- left unsettled is settled by it.
                 ( refreshed, refresh ) =
-                    updateModel (AuthenticationChangedHere Resolving)
+                    updateModel (AuthenticationChangedHere AfterSignIn)
                         { model
                             | login = Login.empty
                             , passwordChange = PasswordChange.signedIn model.passwordChange
@@ -1489,6 +1491,16 @@ updateModel msg model =
 
         AuthenticationChanged ->
             beginIdentityRefresh Resolving model
+
+        IdentityRetryRequested ->
+            case ( model.identity, model.identityRefresh ) of
+                ( Identity.Failed _, AfterSignIn ) ->
+                    -- The cookie is already set. This is another Identity query, not
+                    -- another authentication change to announce to the other tabs.
+                    beginIdentityRefresh AfterSignIn model
+
+                _ ->
+                    ( model, Cmd.none )
 
         AuthenticationChangedHere reason ->
             -- Sign-in, sign-out and an accepted password change dispatch this after bitmagnet
@@ -2905,6 +2917,9 @@ refreshFailure reason message =
         Resolving ->
             message
 
+        AfterSignIn ->
+            "You are signed in. Magnes could not load your Identity: " ++ message
+
         AfterSignOut ->
             "You are signed out. Magnes could not load what this instance allows without a User: "
                 ++ message
@@ -3512,7 +3527,15 @@ viewRoute model =
             p [ class "notice" ] [ text "Resolving Identity…" ]
 
         Route.Refused message ->
-            p [ class "notice error" ] [ text message ]
+            case ( model.identity, model.identityRefresh ) of
+                ( Identity.Failed _, AfterSignIn ) ->
+                    div []
+                        [ p [ class "notice error" ] [ text message ]
+                        , button [ type_ "button", onClick IdentityRetryRequested ] [ text "Try again" ]
+                        ]
+
+                _ ->
+                    p [ class "notice error" ] [ text message ]
 
         Route.RedirectTo _ ->
             p [ class "notice" ] [ text "Redirecting…" ]

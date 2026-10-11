@@ -1,21 +1,36 @@
 module MainTest exposing (suite)
 
-{-| `Main` holds no logic worth a unit test: each decision it makes is a call into a module
-with tests of its own. What it does hold is wiring, and wiring that does not compile must fail
-`npx elm-test` as well as `elm make`. Importing it here is what makes elm-test compile it.
-Nothing is run: running it would need a `Browser.Navigation.Key`, and a `Program` can be
-neither compared nor inspected, so the expectation passes for any value. That it type-checks
-is the test.
+{-| Main's failure wording is tested here; the credentialed browser suite exercises its
+retry wiring, which needs a real Navigation.Key. Importing main also makes elm-test
+compile the application wiring.
 -}
 
 import Expect
 import Main
-import Test exposing (Test, test)
+import Test exposing (Test, describe, test)
 
 
 suite : Test
 suite =
-    test "Main compiles, so the wiring is checked by the test run as well as the build" <|
-        \_ ->
-            Main.main
-                |> Expect.all [ \_ -> Expect.pass ]
+    describe "Identity refresh"
+        [ test "Main compiles, so the wiring is checked by the test run as well as the build" <|
+            \_ ->
+                Main.main
+                    |> Expect.all [ \_ -> Expect.pass ]
+        , test "a failed Identity fetch explains that sign-in succeeded and retains the cause" <|
+            \_ ->
+                Main.refreshFailure Main.AfterSignIn "Could not reach bitmagnet."
+                    |> Expect.equal "You are signed in. Magnes could not load your Identity: Could not reach bitmagnet."
+        , test "startup failure keeps its existing wording" <|
+            \_ ->
+                Main.refreshFailure Main.Resolving "Could not reach bitmagnet."
+                    |> Expect.equal "Could not reach bitmagnet."
+        , test "sign-out failure keeps its existing wording" <|
+            \_ ->
+                Main.refreshFailure Main.AfterSignOut "Could not reach bitmagnet."
+                    |> Expect.equal "You are signed out. Magnes could not load what this instance allows without a User: Could not reach bitmagnet."
+        , test "password-change failure keeps its existing wording" <|
+            \_ ->
+                Main.refreshFailure Main.AfterPasswordChange "Could not reach bitmagnet."
+                    |> Expect.equal "Your password was changed, and that signed you out everywhere. Magnes could not load what this instance allows without a User: Could not reach bitmagnet."
+        ]
