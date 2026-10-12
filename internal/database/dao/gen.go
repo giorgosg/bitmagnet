@@ -26,6 +26,9 @@ var (
 	Invitation               *invitation
 	KeyValue                 *keyValue
 	MetadataSource           *metadataSource
+	ModerationDecision       *moderationDecision
+	ModerationEvidence       *moderationEvidence
+	ModerationHistory        *moderationHistory
 	QueueJob                 *queueJob
 	Role                     *role
 	RolePermission           *rolePermission
@@ -51,6 +54,9 @@ func SetDefault(db *gorm.DB, opts ...gen.DOOption) {
 	Invitation = &Q.Invitation
 	KeyValue = &Q.KeyValue
 	MetadataSource = &Q.MetadataSource
+	ModerationDecision = &Q.ModerationDecision
+	ModerationEvidence = &Q.ModerationEvidence
+	ModerationHistory = &Q.ModerationHistory
 	QueueJob = &Q.QueueJob
 	Role = &Q.Role
 	RolePermission = &Q.RolePermission
@@ -77,6 +83,9 @@ func Use(db *gorm.DB, opts ...gen.DOOption) *Query {
 		Invitation:               newInvitation(db, opts...),
 		KeyValue:                 newKeyValue(db, opts...),
 		MetadataSource:           newMetadataSource(db, opts...),
+		ModerationDecision:       newModerationDecision(db, opts...),
+		ModerationEvidence:       newModerationEvidence(db, opts...),
+		ModerationHistory:        newModerationHistory(db, opts...),
 		QueueJob:                 newQueueJob(db, opts...),
 		Role:                     newRole(db, opts...),
 		RolePermission:           newRolePermission(db, opts...),
@@ -104,6 +113,9 @@ type Query struct {
 	Invitation               invitation
 	KeyValue                 keyValue
 	MetadataSource           metadataSource
+	ModerationDecision       moderationDecision
+	ModerationEvidence       moderationEvidence
+	ModerationHistory        moderationHistory
 	QueueJob                 queueJob
 	Role                     role
 	RolePermission           rolePermission
@@ -134,6 +146,9 @@ func (q *Query) clone(db *gorm.DB) *Query {
 		Invitation:               q.Invitation.clone(db),
 		KeyValue:                 q.KeyValue.clone(db),
 		MetadataSource:           q.MetadataSource.clone(db),
+		ModerationDecision:       q.ModerationDecision.clone(db),
+		ModerationEvidence:       q.ModerationEvidence.clone(db),
+		ModerationHistory:        q.ModerationHistory.clone(db),
 		QueueJob:                 q.QueueJob.clone(db),
 		Role:                     q.Role.clone(db),
 		RolePermission:           q.RolePermission.clone(db),
@@ -169,6 +184,9 @@ func (q *Query) ReplaceDB(db *gorm.DB) *Query {
 		Invitation:               q.Invitation.replaceDB(db),
 		KeyValue:                 q.KeyValue.replaceDB(db),
 		MetadataSource:           q.MetadataSource.replaceDB(db),
+		ModerationDecision:       q.ModerationDecision.replaceDB(db),
+		ModerationEvidence:       q.ModerationEvidence.replaceDB(db),
+		ModerationHistory:        q.ModerationHistory.replaceDB(db),
 		QueueJob:                 q.QueueJob.replaceDB(db),
 		Role:                     q.Role.replaceDB(db),
 		RolePermission:           q.RolePermission.replaceDB(db),
@@ -194,6 +212,9 @@ type queryCtx struct {
 	Invitation               IInvitationDo
 	KeyValue                 IKeyValueDo
 	MetadataSource           IMetadataSourceDo
+	ModerationDecision       IModerationDecisionDo
+	ModerationEvidence       IModerationEvidenceDo
+	ModerationHistory        IModerationHistoryDo
 	QueueJob                 IQueueJobDo
 	Role                     IRoleDo
 	RolePermission           IRolePermissionDo
@@ -219,6 +240,9 @@ func (q *Query) WithContext(ctx context.Context) *queryCtx {
 		Invitation:               q.Invitation.WithContext(ctx),
 		KeyValue:                 q.KeyValue.WithContext(ctx),
 		MetadataSource:           q.MetadataSource.WithContext(ctx),
+		ModerationDecision:       q.ModerationDecision.WithContext(ctx),
+		ModerationEvidence:       q.ModerationEvidence.WithContext(ctx),
+		ModerationHistory:        q.ModerationHistory.WithContext(ctx),
 		QueueJob:                 q.QueueJob.WithContext(ctx),
 		Role:                     q.Role.WithContext(ctx),
 		RolePermission:           q.RolePermission.WithContext(ctx),

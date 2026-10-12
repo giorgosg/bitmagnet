@@ -23,6 +23,7 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/importer/importerfx"
 	"github.com/bitmagnet-io/bitmagnet/internal/logging/loggingfx"
 	"github.com/bitmagnet-io/bitmagnet/internal/metrics/metricsfx"
+	"github.com/bitmagnet-io/bitmagnet/internal/moderation/moderationfx"
 	"github.com/bitmagnet-io/bitmagnet/internal/processor/processorfx"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol/dht/dhtfx"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol/metainfo/metainfofx"
@@ -53,6 +54,7 @@ func New() fx.Option {
 		loggingfx.New(),
 		metainfofx.New(),
 		metricsfx.New(),
+		moderationfx.New(),
 		processorfx.New(),
 		queuefx.New(),
 		telemetryfx.New(),

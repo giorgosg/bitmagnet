@@ -14,6 +14,7 @@ below is one territory on it. **Snapshot:** written against `trunk` at `9dc8862`
 | [data.md](data.md)               | Writing a query, adding a migration, or explaining a slow search                   |
 | [interfaces.md](interfaces.md)   | Adding or changing anything externally reachable: GraphQL, Torznab, HTTP           |
 | [auth.md](auth.md)               | Resolving an identity, adding a permission, or reviewing an auth change            |
+| [moderation.md](moderation.md)   | Working on exact harmful-content decisions and private review evidence             |
 | [conventions.md](conventions.md) | Adding a subsystem, or working out why your edit was reverted by `task gen`        |
 
 The rules for _changing_ code live in [AGENTS.md](../../AGENTS.md). These pages describe
@@ -78,14 +79,14 @@ run as a set of registered workers.
 | `internal/httpserver/`  | gin engine, middleware, option registration                        |
 | `internal/auth/`        | Identity, RBAC, API keys, JWT, users — see [auth.md](auth.md)      |
 | `internal/importer/`    | Bulk import path, used by external importers                       |
-| `internal/moderation/`  | Canonical moderation identifiers; runtime not wired yet            |
+| `internal/moderation/`  | Exact private moderation ledger; ingestion/read activation pending |
 | `internal/blocking/`    | Bloom-filter-backed "is this hash blocked" manager                 |
 | `internal/health/`      | Health checks reported over GraphQL                                |
 | `internal/worker/`      | The registry every long-running thing registers with               |
 | `internal/concurrency/` | Batching channels, buffered concurrent channels, keyed limiters    |
 | `internal/lazy/`        | `lazy.Lazy[T]`, how fx factories defer expensive construction      |
 | `pkg/json_schema/`      | JSON schema types, used by `internal/config/param`                 |
-| `migrations/`           | Goose SQL migrations, `00001`–`00022`                              |
+| `migrations/`           | Goose SQL migrations, `00001`–`00025`                              |
 | `graphql/`              | Schema and operations — the _source_ for `internal/gql`            |
 
 The `static` HTTP component serves the bundled Elm UI by default in release builds,
