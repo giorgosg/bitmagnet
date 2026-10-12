@@ -11,4 +11,4 @@ webui/test-results
 webui/playwright-report
 webui/blob-report
 webui/.scratch
-*.local.md
+**/*.local.md
