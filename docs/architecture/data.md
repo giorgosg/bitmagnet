@@ -23,21 +23,22 @@ in every signature in the tree.
 
 ## Tables
 
-| Table                                                                                  | Holds                                                     |
-| -------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| `torrents`                                                                             | infohash, name, size, private, files_status, files_count  |
-| `torrent_files`                                                                        | one row per stored file, capped by `SaveFilesThreshold`   |
-| `torrent_pieces`                                                                       | piece hashes, only when `SavePieces` is on                |
-| `torrent_sources`                                                                      | the catalogue of sources (`dht`, importer names)          |
-| `torrents_torrent_sources`                                                             | per-source seeders, leechers, published_at, import_id     |
-| `torrent_hints`                                                                        | externally supplied classification hints from importers   |
-| `torrent_tags`                                                                         | free-form tags                                            |
-| `torrent_contents`                                                                     | the search table: classification + `tsv` full-text vector |
-| `content`                                                                              | metadata records (TMDB etc.), with their own `tsv`        |
-| `content_collections`                                                                  | genres, collections, and the join to `content`            |
-| `queue_jobs`                                                                           | the job queue — see [processing.md](processing.md)        |
-| `bloom_filters`                                                                        | the blocklist, stored as a Postgres large object          |
-| `users`, `roles`, `role_permissions`, `api_keys`, `api_key_permissions`, `invitations` | auth — see [auth.md](auth.md)                             |
+| Table                                                                                  | Holds                                                                                        |
+| -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `torrents`                                                                             | infohash, name, size, private, files_status, files_count                                     |
+| `torrent_files`                                                                        | one row per stored file, capped by `SaveFilesThreshold`                                      |
+| `torrent_pieces`                                                                       | piece hashes, only when `SavePieces` is on                                                   |
+| `torrent_sources`                                                                      | the catalogue of sources (`dht`, importer names)                                             |
+| `torrents_torrent_sources`                                                             | per-source seeders, leechers, published_at, import_id                                        |
+| `torrent_hints`                                                                        | externally supplied classification hints from importers                                      |
+| `torrent_tags`                                                                         | free-form tags                                                                               |
+| `torrent_contents`                                                                     | the search table: classification + `tsv` full-text vector                                    |
+| `content`                                                                              | metadata records (TMDB etc.), with their own `tsv`                                           |
+| `content_collections`                                                                  | genres, collections, and the join to `content`                                               |
+| `queue_jobs`                                                                           | the job queue — see [processing.md](processing.md)                                           |
+| `moderation_decisions`, `moderation_evidence`, `moderation_history`                    | Exact decisions and independent private review metadata — see [moderation.md](moderation.md) |
+| `bloom_filters`                                                                        | the blocklist, stored as a Postgres large object                                             |
+| `users`, `roles`, `role_permissions`, `api_keys`, `api_key_permissions`, `invitations` | auth — see [auth.md](auth.md)                                                                |
 
 `torrent_contents.id` is _derived from the content identity_, not a surrogate key
 (`InferID`). Re-classifying a torrent into a different match therefore produces a
@@ -74,7 +75,7 @@ strings, tag criteria and tag facet filters with both counting modes, including 
 
 Goose SQL in [`migrations/`](../../migrations), embedded and run through
 `internal/database/migrations` — an fx decorator, so they apply before anything queries.
-Current high-water mark is `00022_auth.sql`; `ls migrations/` rather than trusting this
+Current high-water mark is `00025_moderation_ledger.sql`; `ls migrations/` rather than trusting this
 sentence.
 
 **Forks number theirs independently and the numbers collide.** Anything cherry-picked gets

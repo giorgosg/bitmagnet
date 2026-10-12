@@ -109,6 +109,7 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#94](https://github.com/giorgosg/magnes/pull/94)    | Show a continuation spinner below torrent results                                | local                                                                | Missing footer observed red in three Elm tests; 835 Elm tests and Chromium pagination checks pass                         |
 | [#95](https://github.com/giorgosg/magnes/pull/95)    | Replace the legacy site with Magnes documentation and automatic Pages deployment | local                                                                | Install volume/proxy/startup failures red; Docker/native HTTPS, restore, schema and site checks passed                    |
 | [#96](https://github.com/giorgosg/magnes/pull/96)    | Canonical versioned moderation identifiers                                       | local                                                                | Independent zero/high-bit vectors and strict parser cases observed red; focused race and PostgreSQL-enabled Go suite pass |
+| PR pending                                           | Exact moderation decisions and private evidence                                  | local                                                                | Flag, allow precedence, reopening, purge, search and evidence identity observed red; PostgreSQL race/rollback regressions |
 
 ## In flight
 

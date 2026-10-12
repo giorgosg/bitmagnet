@@ -74,8 +74,27 @@ usable magnet or private filenames. Different magnet representations of the same
 have the same moderation identifier.
 _Avoid_: Banned magnet, double-hashed magnet, anonymous hash
 
+**Moderation decision**:
+The local pending, allowed or banned state of one torrent, with its decision origin.
+_Avoid_: Tag, category ban
+
+**Local allow**:
+A moderator decision that exempts a torrent from future automatic moderation and imported
+bans until explicitly reopened or banned by a moderator.
+_Avoid_: Temporary exception, rule-specific exemption
+
+**Private evidence**:
+Retained torrent metadata used to review a decision: name, full file paths and matching
+rule evidence. It describes metadata rather than verified file contents.
+_Avoid_: Proof of illegality, confirmed content
+
+**Reviewed ban**:
+A ban made by a local moderator after review. Automatic and imported bans have distinct
+origins and do not become reviewed bans merely by being stored locally.
+_Avoid_: Confirmed illegal content, trusted imported review
+
 ---
 
-The authentication vocabulary and moderation identifier are settled so far. The indexing
+The authentication and moderation vocabulary are settled so far. The indexing
 terms — torrent, torrent source, content, classification — are used loosely across the codebase and docs
 and have not been reconciled; add them here when they are.

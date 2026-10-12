@@ -21,7 +21,7 @@ modules. Every subsystem contributes exactly one line there. As of this snapshot
 ```
 authfx  blockingfx  classifierfx  configfx  databasefx  dhtcrawlerfx  dhtfx
 gqlfx   healthfx    httpserverfx  importerfx  loggingfx  metainfofx   metricsfx
-processorfx  queuefx  telemetryfx  tmdbfx  torznabfx  validationfx  versionfx  workerfx
+moderationfx  processorfx  queuefx  telemetryfx  tmdbfx  torznabfx  validationfx  versionfx  workerfx
 ```
 
 Three fx idioms carry most of the weight, and you will not read the code successfully

@@ -607,7 +607,24 @@ func BuildGenerator(db *gorm.DB) *gen.Generator {
 		createdAtReadOnly,
 	)
 
+	moderationDecisions := g.GenerateModel("moderation_decisions", createdAtReadOnly)
+	moderationEvidence := g.GenerateModelAs(
+		"moderation_evidence",
+		"ModerationEvidence",
+		gen.FieldType("data", "ModerationEvidenceData"),
+		gen.FieldGORMTag(
+			"data",
+			func(tag field.GormTag) field.GormTag { tag.Set("serializer", "json"); return tag },
+		),
+	)
+	moderationHistory := g.GenerateModelAs("moderation_history", "ModerationHistory",
+		gen.FieldType("id", "int64"),
+		gen.FieldGORMTag("id", func(tag field.GormTag) field.GormTag { tag.Set("<-", "false"); return tag }),
+		createdAtReadOnly,
+	)
+
 	g.ApplyBasic(
+		moderationDecisions, moderationEvidence, moderationHistory,
 		torrentSources,
 		torrentFiles,
 		torrentsTorrentSources,
