@@ -1,6 +1,6 @@
 # bitmagnet
 
-A self-hosted BitTorrent indexer, DHT crawler, content classifier and torrent search engine with web UI, GraphQL API and Servarr stack integration.
+A self-hosted BitTorrent indexer, DHT crawler, content classifier and torrent search engine with a GraphQL API and Servarr stack integration. Browser UIs are deployed separately; this fork no longer bundles Angular.
 
 > This is an LLM-assisted integration fork. Its purpose is to evaluate focused changes from
 > downstream repositories, validate them with regression tests and CI, and merge accepted work

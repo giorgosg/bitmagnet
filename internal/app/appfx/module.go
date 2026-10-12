@@ -32,7 +32,6 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/torznab/torznabfx"
 	"github.com/bitmagnet-io/bitmagnet/internal/validation/validationfx"
 	"github.com/bitmagnet-io/bitmagnet/internal/version/versionfx"
-	"github.com/bitmagnet-io/bitmagnet/internal/webui"
 	"github.com/bitmagnet-io/bitmagnet/internal/worker/workerfx"
 	"go.uber.org/fx"
 )
@@ -74,7 +73,6 @@ func New() fx.Option {
 			processcmd.New,
 			workercmd.New,
 		),
-		fx.Provide(webui.New),
 		fx.Decorate(migrations.NewDecorator),
 	)
 }

@@ -11,7 +11,10 @@ dump.rdb
 .sass-cache
 
 # Node
+/node_modules
+# Keep old checkout build caches ignored after frontend removal.
 /webui/node_modules
+/webui/.angular/cache
 npm-debug.log
 yarn-error.log
 
@@ -33,7 +36,6 @@ yarn-error.log
 .history/*
 
 # Miscellaneous
-/webui/.angular/cache
 .sass-cache/
 testem.log
 

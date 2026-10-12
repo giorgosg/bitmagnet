@@ -8,7 +8,7 @@ nav_order: -1
 
 **A self-hosted BitTorrent indexer, DHT crawler, content classifier and torrent search engine with web UI, GraphQL API and Servarr stack integration.**
 
-![WebUI screenshot](/assets/images/webui-1.png)
+This fork provides the backend APIs; browser UIs are deployed separately. The bundled Angular UI has been removed.
 
 {: .warning-title }
 
@@ -34,9 +34,7 @@ This means that **bitmagnet** is not reliant on any external trackers or torrent
 - [x] [An import facility for ingesting torrents from any source, for example the RARBG backup](/guides/import.html)
 - [x] A torrent search engine
 - [x] A GraphQL API: currently this provides a single search query; an embedded GraphQL playground is available at `/graphql` once `graphql.playground` is enabled
-- [x] A responsive, multilingual web user interface implemented in Angular
 - [x] [A Torznab-compatible endpoint for integration with the Serverr stack](/guides/servarr-integration.html)
-- [x] A WebUI dashboard for monitoring and administration
 
 ### High priority features not yet implemented
 

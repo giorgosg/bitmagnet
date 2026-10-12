@@ -13,7 +13,7 @@ redirect_from:
 # The Tech Stack
 
 {: .highlight }
-Are you an experienced developer with knowledge of GoLang, Postgres, TypeScript/Angular and/or BitTorrent protocols? I'm currently a lone developer with a full time job and many other commitments, and have been working on this in spare moments for the past few months. This project is too big for one person! If you're interested in contributing please [review the open issues](https://github.com/bitmagnet-io/bitmagnet/issues) and feel free to open a PR!
+Are you an experienced developer with knowledge of GoLang, Postgres and/or BitTorrent protocols? I'm currently a lone developer with a full time job and many other commitments, and have been working on this in spare moments for the past few months. This project is too big for one person! If you're interested in contributing please [review the open issues](https://github.com/bitmagnet-io/bitmagnet/issues) and feel free to open a PR!
 
 ## Postgres
 
@@ -33,9 +33,9 @@ Some key libraries used include:
 - [urfave/cli](https://cli.urfave.org/) for the command line interface
 - [zap](https://github.com/uber-go/zap) for logging
 
-## TypeScript/Angular Web UI
+## Browser UI
 
-Using [Angular Material components](https://material.angular.io/). The web UI is embedded in the GoLang binary and served by the Gin web framework, and hence the build artifacts are committed into the repository.
+Browser UIs are built and deployed separately. This fork ships no Angular app or embedded frontend assets. A built UI can be served from disk with `http_server.static.dir` or through a reverse proxy sharing the API origin.
 
 ## Nix dev shell
 

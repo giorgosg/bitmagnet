@@ -1,2 +1,4 @@
 data
+node_modules
 webui/node_modules
+webui/.angular

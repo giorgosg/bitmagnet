@@ -72,7 +72,7 @@ func TestServesFilesFromTheConfiguredDirectory(t *testing.T) {
 }
 
 // A single-page app owns its own routing: a deep link must return index.html
-// rather than 404, the same way the bundled web UI's mount does.
+// rather than 404.
 func TestUnknownPathFallsBackToIndex(t *testing.T) {
 	t.Parallel()
 
@@ -129,7 +129,6 @@ func TestRejectsAPathThatWouldCollideOrTakeOverTheRoot(t *testing.T) {
 
 	for name, path := range map[string]string{
 		"root":           "/",
-		"bundled web ui": "/webui",
 		"missing slash":  "ui",
 		"empty with dir": "",
 	} {
@@ -141,4 +140,17 @@ func TestRejectsAPathThatWouldCollideOrTakeOverTheRoot(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+func TestServesExternalUIAtFormerBundledPath(t *testing.T) {
+	t.Parallel()
+	engine, err := engineWith(t, httpserver.StaticConfig{Dir: uiDir(t), Path: "/webui"})
+	require.NoError(t, err)
+	engine.POST("/graphql", func(c *gin.Context) { c.Status(http.StatusOK) })
+	assert.Contains(t, get(t, engine, "/webui/torrent/deadbeef").Body.String(), "magnes")
+	assert.Equal(t, http.StatusNotFound, get(t, engine, "/").Code)
+
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/graphql", nil))
+	assert.Equal(t, http.StatusOK, rec.Code)
 }

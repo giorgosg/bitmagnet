@@ -74,16 +74,8 @@ everything and fails on any resulting diff.
 | `internal/protobuf/bitmagnet.pb.go`        | `internal/protobuf/bitmagnet.proto`                | `task gen-protoc`            |
 | `internal/**/mocks/*.go`                   | interfaces and `.mockery.yml`                      | `task gen-mockery`           |
 | `bitmagnet.io/schemas/classifier-0.1.json` | classifier types                                   | `task gen-classifier-schema` |
-| `webui/src/app/graphql/generated/**`       | the GraphQL schema and web UI operations           | `task gen-webui-graphql`     |
-| `webui/src/app/i18n/translations/*.json`   | `i18n` markup in web UI templates                  | `task i18n-extract`          |
-| `webui/dist/**` — **committed to git**     | `webui/src`                                        | `task build-webui`           |
 
 `task gen` runs every generator in order; use the narrow target while iterating.
-
-`webui/dist` being tracked is the second half of this trap: every web UI change ships a
-rebuilt `dist`, and that rebuild produces a huge, meaningless-looking diff. Exclude it,
-the translations, and the rest of the generated output on a first review pass, then check
-them separately for consistency.
 
 ## Trap 2: Prettier is pinned
 
@@ -91,13 +83,13 @@ them separately for consistency.
 `*.md`, so markdown is linted too. Formatting differs between 3.x releases, so a stray
 version passes locally and fails CI.
 
-Always use the repo's own copy — the web UI's `^3.3.3`, installed by `task install-webui`.
+Always use the repo's own copy — exact version `3.3.3` in the root `package.json`, installed by `task install-tools`.
 `task lint-prettier` calls it by path for exactly this reason, and it is deliberately
 absent from the Nix shell so nothing else can win on `PATH`. `npx prettier@3` resolves to
 a later 3.x and is the specific mistake to avoid.
 
 ```bash
-./webui/node_modules/.bin/prettier --write AGENTS.md 'docs/**/*.md'
+./node_modules/.bin/prettier --write AGENTS.md 'docs/**/*.md'
 ```
 
 ## Trap 3: migration numbers collide across forks
@@ -180,8 +172,8 @@ without fixtures runs everything that does not need them. See
   `internal/app/appfx/module.go`. Copy `internal/tmdb` (external API client),
   `internal/torznab` (HTTP surface), or `internal/worker` (long-running).
 - **A GraphQL change** edits `graphql/schema/*.graphqls`, runs `task gen-gql`, implements
-  the resolver in `internal/gql/resolvers/`, then runs `task gen-webui-graphql` if the web
-  UI consumes it.
+  the resolver in `internal/gql/resolvers/`. External clients regenerate from the schema
+  in their own projects.
 - **A new interface is externally reachable.** Upstream `main` has no authentication and
   allows `*` CORS, so treat any new HTTP, GraphQL, or Torznab surface as open unless the
   deployment supplies its own boundary. See [docs/auth.md](docs/auth.md).
@@ -193,18 +185,15 @@ not tell you.
 
 ```bash
 task test-go          # DB tests skip silently without TEST_POSTGRES_DSN
-task lint             # golangci-lint, web UI ESLint, and Prettier
+task lint             # golangci-lint and Prettier
 task lint-golangci    # just the Go linter; must end in "0 issues."
 task migrate          # needs a running PostgreSQL; docker-compose.yml brings one up
 go build ./... && go vet ./...   # quickest Go sanity check
 ```
 
-The web UI is checked by `task lint-webui` and by the production build in
-`task build-webui`. There is no separate `task test-webui`: the former Karma suite only
-constructed each component and asserted that it existed, duplicating the build without
-checking behavior.
+The fork ships an API backend. Build and test separately served UIs in their own projects.
 
-`flake.nix` supplies Go, go-task, Node 22, golangci-lint, protoc, and Chromium on Linux;
+`flake.nix` supplies Go, go-task, Node 22, golangci-lint, and protoc;
 reach for `nix develop` or `direnv allow` when the host lacks them. PostgreSQL and `goose`
 are separate, and so is Prettier — see Trap 2.
 
@@ -218,7 +207,7 @@ release while being built with a different Go.
 
 Before handing off, run the smallest relevant checks plus everything covering the touched
 area. After running a generator, reproduce CI's clean-tree expectation with `git diff
---exit-code`, excluding only `webui/dist/bitmagnet/3rdpartylicenses.txt` as CI does.
+--exit-code`.
 Report every check that skipped or could not run, and why.
 
 ## Branches

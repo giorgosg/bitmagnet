@@ -1,11 +1,4 @@
-// Package static serves a directory of static files, so that a web UI other than
-// the bundled one can be served by bitmagnet itself.
-//
-// The bundled UI is compiled into the binary with go:embed and mounted at
-// /webui, so replacing it means rebuilding. This option is the seam for an
-// alternative: point it at a built UI on disk and it is served from the same
-// origin as the API, which removes CORS from the picture and lets the browser
-// send credentials the way a same-origin page does.
+// Package static serves a separately built web UI from disk, on the API origin.
 package static
 
 import (
@@ -51,11 +44,10 @@ func (*builder) Key() string {
 	return "static"
 }
 
-// reservedPaths are mounts that already exist. Registering the same route twice
-// makes gin panic during startup, which is a worse diagnostic than this error.
+// reservedPaths are mounts whose wildcard would conflict with the API routes.
+// Refuse them with a diagnostic instead of allowing gin to panic at startup.
 var reservedPaths = map[string]string{
-	"/":      "the root is redirected by the bundled web UI",
-	"/webui": "the bundled web UI is mounted there",
+	"/": "a root wildcard would conflict with the API routes",
 }
 
 func (b *builder) Apply(e *gin.Engine) error {
@@ -112,7 +104,7 @@ func validatePath(path string) error {
 
 // spaFileSystem falls back to index.html for paths that do not exist, because a
 // single-page app owns its own routing and a deep link must reach it rather than
-// 404. This mirrors what the bundled web UI's mount does for the same reason.
+// 404.
 type spaFileSystem struct {
 	http.FileSystem
 }

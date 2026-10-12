@@ -10,7 +10,6 @@ tasks:
       - task gen-protoc
       - task gen-mockery
       - task gen-classifier-schema
-      - task gen-webui-graphql
 
   gen-go:
     cmds:
@@ -40,37 +39,25 @@ tasks:
     cmds:
       - go run . classifier schema --format json > ./bitmagnet.io/schemas/classifier-0.1.json
 
-  gen-webui-graphql:
-    dir: ./webui
-    cmds:
-      - npm run graphql:codegen
-
-  i18n-extract:
-    dir: ./webui
-    cmds:
-      - npm run i18n:extract
-
   lint:
     cmds:
       - task lint-golangci
-      - task lint-webui
       - task lint-prettier
 
   lint-golangci:
     cmds:
       - golangci-lint run --timeout=10m
 
-  lint-webui:
-    dir: ./webui
+  install-tools:
     cmds:
-      - npm run lint
+      - npm ci
 
   lint-prettier:
     cmds:
-      # The web UI's pinned Prettier, not one from PATH: markdown formatting differs
+      # The repository's pinned Prettier, not one from PATH: markdown formatting differs
       # between 3.x releases, so a stray version passes locally and fails CI.
-      # Requires `task install-webui`.
-      - ./webui/node_modules/.bin/prettier --check .
+      # Requires `task install-tools`.
+      - ./node_modules/.bin/prettier --check .
 
   test:
     cmds:
@@ -88,29 +75,11 @@ tasks:
     cmds:
       - go build -ldflags "-X github.com/bitmagnet-io/bitmagnet/internal/version.GitTag=$(git describe --tags --always --dirty)"
 
-  build-webui:
-    dir: ./webui
-    cmds:
-      - npm run build
-
   build-docsite:
     dir: ./bitmagnet.io
     cmds:
       - bundle install
       - bundle exec jekyll build
-
-  install-webui:
-    dir: ./webui
-    cmds:
-      - npm ci
-
-  serve-webui:
-    dir: ./webui
-    cmds:
-      - npm start -- --host {{.HOST}} --port {{.PORT}}
-    vars:
-      HOST: localhost
-      PORT: 3334
 
   serve-docsite:
     dir: ./bitmagnet.io

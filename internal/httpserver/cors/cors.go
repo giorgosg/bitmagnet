@@ -26,9 +26,17 @@ type Result struct {
 func New(p Params) Result {
 	config := p.Config.Cors
 
+	// rs/cors treats an empty AllowedOrigins list as allow-all. Our empty default
+	// must instead withhold CORS permission; same-origin requests need none.
+	var allowOrigin func(string) bool
+	if len(config.AllowedOrigins) == 0 {
+		allowOrigin = func(string) bool { return false }
+	}
+
 	return Result{
 		Option: corsOption{gincors.New(cors.Options{
 			AllowedOrigins:       config.AllowedOrigins,
+			AllowOriginFunc:      allowOrigin,
 			AllowedMethods:       config.AllowedMethods,
 			AllowedHeaders:       config.AllowedHeaders,
 			ExposedHeaders:       config.ExposedHeaders,

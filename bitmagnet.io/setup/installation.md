@@ -10,15 +10,26 @@ nav_order: 1
 
 ## Docker
 
-The quickest way to get up-and-running with **bitmagnet** is with [Docker Compose](https://docs.docker.com/compose/). The following `docker-compose.yml` is a minimal example. For a more full-featured example including VPN routing and observability services see the [docker compose configuration in the GitHub repository](https://github.com/bitmagnet-io/bitmagnet/blob/main/docker-compose.yml).
+Run this fork with [Docker Compose](https://docs.docker.com/compose/). From a checkout of
+this fork at the version you want to run, first build its image:
+
+```sh
+docker build -t bitmagnet-fork:local .
+```
+
+The upstream `ghcr.io/bitmagnet-io/bitmagnet` image installs upstream, including its
+Angular UI; it does not contain this fork's changes. The following `docker-compose.yml`
+uses the local fork image. For VPN routing and observability services, adapt the
+[full compose example](https://github.com/giorgosg/bitmagnet/blob/trunk/docker-compose.yml)
+to use the same image.
 
 ```yml
 services:
   bitmagnet:
-    image: ghcr.io/bitmagnet-io/bitmagnet:latest
+    image: bitmagnet-fork:local
     container_name: bitmagnet
     ports:
-      # API and WebUI port:
+      # API port:
       - "3333:3333"
       # BitTorrent ports:
       - "3334:3334/tcp"
@@ -62,26 +73,42 @@ services:
       interval: 10s
 ```
 
-After running `docker compose up -d` you should be able to access the web interface at `http://localhost:3333`. The DHT crawler should have started and you should see items appear in the web UI within around a minute.
-
-To upgrade your installation you can run:
+Run `docker compose up -d` and check the backend health endpoint:
 
 ```sh
-docker compose down bitmagnet
-docker pull ghcr.io/bitmagnet-io/bitmagnet:latest
-docker compose up -d bitmagnet
+curl --fail http://localhost:3333/status
 ```
 
-## go install
+This fork has no bundled UI or root redirect: `http://localhost:3333/` returns 404.
+Use the GraphQL API at `/graphql` or deploy a browser UI separately. To serve a built UI
+from disk, mount its directory into the container and set `http_server.static.dir` to
+that container path; the default URL is `/ui/`. See [configuration]({% link setup/configuration.md %})
+for static serving and cross-origin settings.
 
-You can also install **bitmagnet** natively with `go install github.com/bitmagnet-io/bitmagnet`. If you choose this method you will need to [configure]({% link setup/configuration.md %}) (at a minimum) a Postgres instance for bitmagnet to connect to.
+To upgrade, update your fork checkout to the desired version, rebuild the image, and recreate the container:
+
+```sh
+docker build -t bitmagnet-fork:local .
+docker compose up -d --force-recreate bitmagnet
+```
+
+## Native Go build
+
+Build the checked-out fork instead of installing the upstream module:
+
+```sh
+go build -o bitmagnet .
+```
+
+You will need to [configure]({% link setup/configuration.md %}) a Postgres instance for
+bitmagnet to connect to.
 
 ## Running the CLI
 
 The **bitmagnet** CLI is the entrypoint into the application. Take note of the command needed to run the CLI, depending on your installation method.
 
 - If you are using the docker-compose example above, you can run the CLI (while the stack is started) with `docker exec -it bitmagnet bitmagnet`.
-- If you installed bitmagnet with `go install`, you can run the CLI with `bitmagnet`.
+- If you built the fork natively, run the CLI with `./bitmagnet` from the checkout.
 
 When referring to CLI commands in the rest of the documentation, for simplicity we will use `bitmagnet`; please substitute this for the correct command. For example, to show the CLI help, run:
 

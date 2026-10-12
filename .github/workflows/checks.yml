@@ -25,9 +25,9 @@ jobs:
       - uses: cachix/install-nix-action@v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Install web UI
+      - name: Install formatting tools
         run: |
-          nix develop --ignore-environment --command task install-webui
+          nix develop --ignore-environment --command task install-tools
       - name: Run linters
         run: |
           nix develop --ignore-environment --keep HOME . --command task lint
@@ -65,7 +65,7 @@ jobs:
         env:
           TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/postgres
 
-  # This job runs all code generations and builds the WebUI, to check that everything is correctly committed
+  # Regenerate Go code and schemas to check that everything is committed.
   generated:
     if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request')
     runs-on: ubuntu-22.04
@@ -93,16 +93,12 @@ jobs:
       - uses: cachix/install-nix-action@v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Install web UI, apply database migrations, generate code, extract translations and build web app
+      - name: Apply database migrations and generate code
         run: |
-          nix develop --ignore-environment --command task install-webui
           nix develop --ignore-environment --keep HOME --keep POSTGRES_PASSWORD . --command task migrate
           nix develop --ignore-environment --keep HOME --keep POSTGRES_PASSWORD . --command task gen
           nix develop --ignore-environment --keep HOME . --command go fmt ./...
-          nix develop --ignore-environment . --command task i18n-extract
-          nix develop --ignore-environment . --command task build-webui
         env:
           POSTGRES_PASSWORD: postgres
       - name: Check nothing changed
-        # excluding the 3rdpartylicenses file in a horrible hack:
-        run: git diff --exit-code -- . ':(exclude)webui/dist/bitmagnet/3rdpartylicenses.txt'
+        run: git diff --exit-code

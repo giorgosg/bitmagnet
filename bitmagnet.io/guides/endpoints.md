@@ -9,11 +9,9 @@ redirect_from:
 
 # **bitmagnet** Endpoints
 
-**bitmagnet** exposes functionality on a number of endpoints:
+**bitmagnet** exposes functionality on a number of endpoints. This fork ships no bundled UI or root redirect. To serve a separately built UI, set `http_server.static.dir`; its default mount is `/ui`, and `/webui` can be configured explicitly:
 
-- `/` - Redirects to `/webui`
-- `/webui` - Main web user interface
-- `/graphql` - GraphQL API including the GraphiQL browser interface
+- `/graphql` - GraphQL API (`POST`); the GraphiQL browser interface (`GET`) requires `graphql.playground: true`
 - `/torznab/*` - Torznab API for integration compatible applications
 - `/import` - Import API for adding new content to the library (see [the importing guide](/guides/import.html))
 - `/metrics` - Prometheus metrics (see [the observability guide](/guides/observability-telemetry.html))

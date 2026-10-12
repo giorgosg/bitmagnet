@@ -35,7 +35,6 @@ A clear and concise description of what you expected to happen.
 
 - Bitmagnet version: `[e.g. 0.7.2]`
 - OS and version: `[e.g. macOS Ventura v13.0]`
-- Browser and version (if issue is with WebUI): `[e.g. Chrome 117.0.5938.149]`
 - Please specify any config values for which you have overridden the defaults: `(e.g. dht_crawler.save_pieces: true)`
 
 ### Additional context
