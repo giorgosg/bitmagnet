@@ -24,6 +24,23 @@ historical design notes remain here.
 | [serving-and-testing.md](serving-and-testing.md) | Running Magnes against a real instance, same-origin or cross-origin                  |
 | `environment.local.md`                           | Which instances exist here, and how to reach them — gitignored, may be absent        |
 
+## Torrent list pagination
+
+Search results use a virtualized list with a continuation footer inside the scroll
+container, after the loaded rows. The spinner stays present whenever the API reports
+`hasNextPage`, including before the next request starts and between batches. Its accessible
+status changes from “More results below” to “Loading more results…” during a request;
+the footer disappears after the final page. Reduced-motion preferences stop the animation.
+The existing near-bottom request guard and automatic viewport filling remain responsible
+for fetching pages; the footer is outside the virtualizer's row-height calculations.
+
+The Elm registry was checked for loading indicators. `perzanko/elm-loading` 2.0.5 supports
+Elm 0.19, but its source uses `Html.Styled` and adds `rtfeldman/elm-css`, which this UI does
+not otherwise use. A small CSS spinner in the existing stylesheet avoids that dependency
+and keeps reduced-motion handling alongside the UI's other motion rules. Pagination does
+not need another scrolling package: `FabienHenon/elm-infinite-list-view` already handles
+the virtualized rows.
+
 ## Which instance to point at
 
 Write one if it is missing. What it needs to answer:

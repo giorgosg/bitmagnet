@@ -504,6 +504,45 @@ main {
   scrollbar-gutter: stable both-edges;
 }
 
+/* Continuation footer lives after the virtualized rows, inside the scrollport. */
+.pagination-indicator {
+  height: 3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pagination-spinner {
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 2px solid var(--accent-soft);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: pagination-spin 800ms linear infinite;
+}
+
+.pagination-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@keyframes pagination-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pagination-spinner {
+    animation: none;
+  }
+}
+
 .row {
   display: flex;
   align-items: center;
