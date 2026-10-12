@@ -12,3 +12,8 @@ webui/playwright-report
 webui/blob-report
 webui/.scratch
 **/*.local.md
+
+# Documentation dependencies and generated previews are not application inputs.
+website/node_modules
+website/dist
+website/.astro

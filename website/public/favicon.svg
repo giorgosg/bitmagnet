@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <!--
+    The same horseshoe magnet the results list draws, as the page icon.
+
+    The path is a copy of `magnetIcon` in src/Main.elm rather than a shared source: one
+    is compiled into the bundle and one is fetched as a file, so there is nowhere for
+    them to meet. If the shape changes, change it in both.
+
+    An SVG favicon can carry its own stylesheet, and browsers honour a
+    prefers-color-scheme query inside it — so this follows the tab strip's own light and
+    dark, the way the accent does in the page. `currentColor` cannot help here: an icon
+    has no text around it to inherit from.
+  -->
+  <style>
+    path { fill: #a8442a; }
+    @media (prefers-color-scheme: dark) {
+      path { fill: #e0785a; }
+    }
+  </style>
+  <path d="M3 20V12a9 9 0 0 1 18 0v8h-5v-8a4 4 0 0 0-8 0v8Z" />
+</svg>

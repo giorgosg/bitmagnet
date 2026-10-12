@@ -17,15 +17,12 @@
       devShells = {
         default = pkgs.mkShell {
           packages = with pkgs; [
-            bundler
             go
             go-task
             golangci-lint
-            jekyll
             nodejs_22
             protobuf
             protoc-gen-go
-            ruby
           ];
         };
       };

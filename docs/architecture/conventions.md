@@ -57,7 +57,7 @@ fails on any diff.
 | `internal/gql/enums/enums.go`                               | Go enum types                                      | `task gen-gql-enums`         |
 | `internal/protobuf/bitmagnet.pb.go`                         | `internal/protobuf/bitmagnet.proto`                | `task gen-protoc`            |
 | `internal/**/mocks/*.go`                                    | interfaces and `.mockery.yml`                      | `task gen-mockery`           |
-| `bitmagnet.io/schemas/classifier-0.1.json`                  | classifier types                                   | `task gen-classifier-schema` |
+| `schemas/classifier-0.1.json`                               | classifier types                                   | `task gen-classifier-schema` |
 
 `task gen` runs them all in order; use the narrow target while iterating.
 

@@ -7,8 +7,8 @@ this covers _how to work on them_.
 
 ## Toolchain
 
-`flake.nix` provides a dev shell — Go, go-task, Node 22, golangci-lint, protoc,
-Ruby/Jekyll for the docsite. Prettier is deliberately not in it;
+`flake.nix` provides a dev shell — Go, go-task, Node 22, golangci-lint and protoc.
+Prettier is deliberately not in it;
 the root package's pinned copy, installed by `task install-tools`, is the one to run. `direnv allow` or `nix develop` gets
 you a working environment. Without Nix you need Go, go-task, Node 22, PostgreSQL, and —
 only if you touch protobufs — `protoc`.
@@ -21,7 +21,7 @@ Everything is driven by [`Taskfile.yml`](../Taskfile.yml) (go-task, not `make`).
 target worth knowing that AGENTS.md doesn't list:
 
 ```bash
-task serve-docsite   # the Jekyll site under bitmagnet.io/
+task serve-website   # the Astro/Starlight site under website/
 ```
 
 ## Building and testing the UI
@@ -80,6 +80,23 @@ The bundled mount defaults to `/ui/` and can be disabled with
 external UI. Cross-origin browser deployments must set
 `http_server.cors.allowed_origins` explicitly.
 
+## Magnes public documentation
+
+The new public site is Astro/Starlight under `website/`. Run `task serve-website` for
+local development or `task build-website` for type checking, static generation, search
+indexing, and local-link validation under the `/magnes/` GitHub Pages prefix. The site
+publishes `schemas/classifier-0.1.json` through an Astro endpoint, so
+`task gen-classifier-schema` remains the single generator and no second copy is edited. It uses its
+own locked npm dependencies; application builds do not install the website toolchain.
+See [the website README](../website/README.md) for publishing and editorial scope.
+
+`docs/` remains contributor and architecture documentation. The legacy Jekyll site,
+its build tasks and deployment workflow have been removed. Public Magnes guides belong
+in `website/`.
+The Magnes Pages workflow checks documentation pull requests and automatically publishes
+changes to the website, shared schemas, or Markdown documentation merged into `trunk`.
+Repository Pages uses GitHub Actions as its source.
+
 ## CI cost controls
 
 The checks workflows cancel an older run when a newer commit arrives on the same ref.
@@ -89,8 +106,7 @@ GitHub merge button skips the duplicate checks; a direct push still runs them.
 Container builds are deliberately separate. They run when a Docker build input changes
 and once a week to catch image or registry drift, rather than spending roughly ten runner
 minutes on every source-only pull request. CodeQL scans Go on pull requests
-and weekly; the docsite's only Ruby source is the 14-line schema-copy plugin and does not
-justify a runner for every scan.
+and weekly.
 
 ## Adding a subsystem
 

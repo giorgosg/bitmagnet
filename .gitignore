@@ -4,11 +4,8 @@
 .idea
 /data
 /bitmagnet
-/bitmagnet.io/_site
 /export.sql
 dump.rdb
-.jekyll-cache
-.sass-cache
 
 # Node
 /node_modules
@@ -36,7 +33,6 @@ yarn-error.log
 .history/*
 
 # Miscellaneous
-.sass-cache/
 testem.log
 
 # System files
@@ -64,3 +60,8 @@ Thumbs.db
 .uv-cache/
 site/
 docs/mkdocs.yml
+
+# Magnes documentation build and dependencies.
+/website/node_modules
+/website/dist
+/website/.astro

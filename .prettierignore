@@ -1,4 +1,4 @@
-bitmagnet.io/schemas/**/*.*
+schemas/**/*.json
 # Legacy local Angular build cache (absent in a fresh checkout).
 webui/.angular
 webui/elm-stuff
@@ -24,3 +24,8 @@ webui/review/suppressed/*.json
 /skills-lock.json
 /docs/agents/
 *.local.md
+
+# Magnes documentation build and dependencies.
+/website/node_modules
+/website/dist
+/website/.astro
