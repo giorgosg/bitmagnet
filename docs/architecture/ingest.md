@@ -61,6 +61,14 @@ most "why was this torrent not indexed" questions:
    [`request_meta_info.go`](../../internal/dhtcrawler/request_meta_info.go). A ban adds
    the hash to the blocklist.
 
+## Moderation identifier boundary
+
+[`internal/moderation`](../../internal/moderation/identifier.go) computes a membership
+identifier from a raw `protocol.ID`. It has no runtime wiring yet; the crawler and
+persisted Bloom-filter blocking paths above continue to behave as described. The format
+and independent compatibility vectors are frozen in
+[ADR 0006](../adr/0006-version-moderation-identifiers.md).
+
 ## Fetching metainfo
 
 `internal/protocol/metainfo/metainforequester` implements BEP 9 over a raw TCP

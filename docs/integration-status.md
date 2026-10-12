@@ -111,7 +111,9 @@ review in [porting.md](porting.md) and a test seen **red**.
 
 ## In flight
 
-None.
+| PR                                                | Change                                                                                | Verification note                                                                                                                                |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [#96](https://github.com/giorgosg/magnes/pull/96) | Add the version-1 digest and strict format parser; runtime moderation remains unwired | Independent zero/high-bit vectors failed against a zero-returning stub; parser regressions rejected the permissive implementation before the fix |
 
 ## The static review findings
 
