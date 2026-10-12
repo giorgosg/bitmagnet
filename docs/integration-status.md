@@ -105,12 +105,11 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#90](https://github.com/giorgosg/bitmagnet/pull/90) | Race metadata requests under shared and per-hash limits                     | lodestone `751a09607`, redesigned; local finding 0008b               | Stalled peer, TCP cancellation and node loops observed red                               |
 | [#91](https://github.com/giorgosg/bitmagnet/pull/91) | Record the metadata request integration                                     | local                                                                | Documentation only; #90 CI and regression suite passed                                   |
 | [#92](https://github.com/giorgosg/bitmagnet/pull/92) | Remove the bundled Angular UI; deny cross-origin browser reads by default   | local                                                                | UI registration/root redirect, empty/default CORS and static `/webui` tests observed red |
+| [#93](https://github.com/giorgosg/magnes/pull/93) | Import Magnes history and bundle the Elm UI by default | magnes-ui `fd5be8f`, 91 commits | Bundled HTTP routes and packaged-browser smoke observed red; 831 Elm and 82 credentialed browser tests pass |
 
 ## In flight
 
-| PR                                                | Change                                                 | Source                          | Validation                                                                                                  |
-| ------------------------------------------------- | ------------------------------------------------------ | ------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| [#93](https://github.com/giorgosg/magnes/pull/93) | Import Magnes history and bundle the Elm UI by default | magnes-ui `fd5be8f`, 91 commits | Bundled HTTP routes and packaged-browser smoke observed red; 831 Elm and 82 credentialed browser tests pass |
+None.
 
 ## The static review findings
 
