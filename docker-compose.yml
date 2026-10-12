@@ -1,5 +1,5 @@
 # This is a full-featured example for running bitmagnet through a gluetun VPN connection with Grafana/Prometheus observability services.
-# See https://bitmagnet.io/setup/installation.html for a minimal docker-compose example.
+# See https://giorgosg.github.io/magnes/getting-started/installation/ for a minimal docker-compose example.
 
 services:
   bitmagnet:

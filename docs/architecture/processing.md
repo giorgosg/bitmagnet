@@ -87,7 +87,7 @@ in the tree and the one most worth reading before changing.
 - **Flags** are typed, declared in the workflow, given values at compile time and
   overridable per job (`flag.go`, `flag_type.go`).
 - **The JSON schema** for the whole configuration is generated from these types into
-  `bitmagnet.io/schemas/classifier-0.1.json` (`task gen-classifier-schema`), which is what
+  `schemas/classifier-0.1.json` (`task gen-classifier-schema`), which is what
   gives operators editor completion.
 
 Two semaphores bound the work: `Concurrency` (default 10) over rule execution and

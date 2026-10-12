@@ -1,0 +1,14 @@
+/* Match the Elm UI's warm accent in both colour schemes. */
+:root {
+  --sl-color-accent-low: #40251e;
+  --sl-color-accent: #e0785a;
+  --sl-color-accent-high: #f4c4b5;
+}
+:root[data-theme="light"] {
+  --sl-color-accent-low: #f8e5de;
+  --sl-color-accent: #a8442a;
+  --sl-color-accent-high: #702d1c;
+}
+.hero .tagline {
+  max-width: 42rem;
+}

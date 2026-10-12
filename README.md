@@ -1,4 +1,4 @@
-# bitmagnet
+# Magnes
 
 A self-hosted BitTorrent indexer, DHT crawler, content classifier and torrent search engine with a GraphQL API and Servarr stack integration. This fork bundles the [Magnes Elm UI](webui/README.md) at `/ui/`, replacing Angular.
 
@@ -6,7 +6,9 @@ A self-hosted BitTorrent indexer, DHT crawler, content classifier and torrent se
 > downstream repositories, validate them with regression tests and CI, and merge accepted work
 > into the `trunk` branch while keeping `main` as a pristine upstream mirror.
 
-Visit the website at [bitmagnet.io](https://bitmagnet.io).
+Read the [Magnes documentation](https://giorgosg.github.io/magnes/documentation/) for
+installation, everyday use, configuration and maintenance. The homepage and docs source
+live in [website/](website/README.md). Run `task serve-website` to preview them locally.
 
 Working on the code: [AGENTS.md](AGENTS.md) for the rules, [docs/](docs/README.md) for the
 notes behind them.

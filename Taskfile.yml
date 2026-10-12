@@ -41,7 +41,7 @@ tasks:
 
   gen-classifier-schema:
     cmds:
-      - go run . classifier schema --format json > ./bitmagnet.io/schemas/classifier-0.1.json
+      - go run . classifier schema --format json > ./schemas/classifier-0.1.json
 
   lint:
     cmds:
@@ -114,19 +114,17 @@ tasks:
       - task build-ui
       - go test -tags webui ./internal/httpserver/static ./internal/app/appfx
 
-  build-docsite:
-    dir: ./bitmagnet.io
+  build-website:
+    dir: ./website
     cmds:
-      - bundle install
-      - bundle exec jekyll build
+      - npm ci
+      - npm run build
 
-  serve-docsite:
-    dir: ./bitmagnet.io
+  serve-website:
+    dir: ./website
     cmds:
-      - bundle exec jekyll serve --host {{.HOST}} --port {{.PORT}} --livereload
-    vars:
-      HOST: localhost
-      PORT: 3335
+      - npm ci
+      - npm run dev
 
   export-data:
     cmds:

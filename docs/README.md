@@ -9,8 +9,8 @@ Upstream development is slow-moving, and a fair amount of real work has accumula
 community forks and unmerged PRs instead. Much of what follows maps that out: where the
 code is, what someone has already fixed, and what is worth picking up.
 
-These are _working notes_. The user documentation lives in `bitmagnet.io/` and at
-[bitmagnet.io](https://bitmagnet.io).
+These are _working notes_. New Magnes user documentation lives in
+[`website/`](../website/README.md), replacing the legacy upstream site.
 
 ## Which page, and when
 
