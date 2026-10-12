@@ -1,6 +1,10 @@
 version: "3"
 
 tasks:
+  default:
+    cmds:
+      - task build
+
   gen:
     cmds:
       - task gen-go
@@ -42,6 +46,7 @@ tasks:
   lint:
     cmds:
       - task lint-golangci
+      - task lint-ui
       - task lint-prettier
 
   lint-golangci:
@@ -51,6 +56,7 @@ tasks:
   install-tools:
     cmds:
       - npm ci
+      - task install-ui
 
   lint-prettier:
     cmds:
@@ -62,10 +68,23 @@ tasks:
   test:
     cmds:
       - task test-go
+      - task test-bundled-ui
+      - task test-ui
 
   test-go:
     cmds:
       - go test ./...
+
+  test-ui:
+    dir: ./webui
+    cmds:
+      - npm test
+
+  lint-ui:
+    dir: ./webui
+    cmds:
+      - ./node_modules/.bin/elm-format --validate src tests review/src
+      - npm run review
 
   migrate:
     cmds:
@@ -73,7 +92,27 @@ tasks:
 
   build:
     cmds:
+      - task build-ui
+      - go build -tags webui -ldflags "-X github.com/bitmagnet-io/bitmagnet/internal/version.GitTag=$(git describe --tags --always --dirty)"
+
+  build-backend:
+    cmds:
       - go build -ldflags "-X github.com/bitmagnet-io/bitmagnet/internal/version.GitTag=$(git describe --tags --always --dirty)"
+
+  install-ui:
+    dir: ./webui
+    cmds:
+      - npm ci
+
+  build-ui:
+    cmds:
+      - task install-ui
+      - cd webui && npm run build:optimize
+
+  test-bundled-ui:
+    cmds:
+      - task build-ui
+      - go test -tags webui ./internal/httpserver/static ./internal/app/appfx
 
   build-docsite:
     dir: ./bitmagnet.io

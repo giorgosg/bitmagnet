@@ -15,15 +15,15 @@ The sort is load-bearing: `"auth"` sorts before `"graphql"`, `"import"` and `"to
 which guarantees the identity middleware is mounted before any handler that reads an
 identity back out.
 
-| Key          | Package                         | Route(s)                                                              |
-| ------------ | ------------------------------- | --------------------------------------------------------------------- |
-| `auth`       | `internal/auth/http_auth`       | middleware only, no route                                             |
-| `graphql`    | `internal/gql/httpserver`       | `POST /graphql`; `GET /graphql` (playground) only when enabled        |
-| `import`     | `internal/importer/httpserver`  | `POST /import`                                                        |
-| `prometheus` | `internal/telemetry/httpserver` | `/metrics`                                                            |
-| `pprof`      | `internal/telemetry/httpserver` | `/debug/pprof/*`                                                      |
-| `static`     | `internal/httpserver/static`    | a configured directory, default `/ui`; off unless `static.dir` is set |
-| `torznab`    | `internal/torznab/httpserver`   | `/torznab/*`                                                          |
+| Key          | Package                         | Route(s)                                                       |
+| ------------ | ------------------------------- | -------------------------------------------------------------- |
+| `auth`       | `internal/auth/http_auth`       | middleware only, no route                                      |
+| `graphql`    | `internal/gql/httpserver`       | `POST /graphql`; `GET /graphql` (playground) only when enabled |
+| `import`     | `internal/importer/httpserver`  | `POST /import`                                                 |
+| `prometheus` | `internal/telemetry/httpserver` | `/metrics`                                                     |
+| `pprof`      | `internal/telemetry/httpserver` | `/debug/pprof/*`                                               |
+| `static`     | `internal/httpserver/static`    | bundled Elm UI or configured directory at `/ui`                |
+| `torznab`    | `internal/torznab/httpserver`   | `/torznab/*`                                                   |
 
 Before the options run, `httpserver.NewEngine` sets `SetTrustedProxies(config.TrustedProxies)`
 — empty by default, meaning `X-Forwarded-For` is not believed and `ClientIP()` is the real
@@ -96,14 +96,21 @@ just itself.
   `health` query, which the baseline permission set grants to everyone so clients
   can check health before login.
 
-## Separately served UI
+## Browser UI
 
-The fork ships no embedded frontend. Set `http_server.static.dir` to a built UI on disk
-and it is served at `http_server.static.path` (default `/ui`), on the API origin. Unknown
-paths fall back to `index.html`. `/webui` is available as a mount path; `/` remains
-refused because its wildcard would conflict with the API routes. No default route
-redirects the root. Remove `webui` from any explicit `http_server.options` list when
-upgrading: it is no longer a registered component.
+Default builds embed Magnes, the Elm UI under `webui/`, with the `webui` build tag.
+The `static` option serves it at `http_server.static.path` (default `/ui`) and redirects
+`/` to that mount. Its HTML base and runtime `config.js` follow the configured mount;
+GraphQL requests go to same-origin `/graphql`. Only the four public application assets
+are embedded, excluding development configuration and example files.
+
+Set `http_server.static.bundled: false` to disable the bundle, or omit `static` from an
+explicit `http_server.options` list. Plain Go builds carry no bundle. A configured
+`http_server.static.dir` takes precedence and serves an external UI, preserving its own
+HTML/runtime configuration and the existing behavior with no root redirect. Unknown
+paths fall back to `index.html` in either mode. `/webui` remains a valid mount;
+`/` is refused because its wildcard would conflict with API routes. The old `webui`
+HTTP option remains unregistered; the option key is `static`.
 
 The mount sends `Cache-Control: no-store`, so a browser observes deployments replacing
 stable filenames on disk. A reverse proxy can instead serve the UI and API together.

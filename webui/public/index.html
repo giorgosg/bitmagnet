@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Repeated from the stylesheet so the browser knows before any CSS arrives, which
+         is what avoids a white flash on a dark system while loading. -->
+    <meta name="color-scheme" content="light dark" />
+    <!-- Set this to the static mount (for example /magnes/) in a deployed copy. -->
+    <base href="/" />
+    <title>magnes</title>
+    <!-- The same magnet the results list draws; see public/favicon.svg. Relative, so it
+         resolves against <base href> and works under a static mount as well as at the
+         origin root. -->
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- Optional, gitignored, and absent by default: see config.example.js. -->
+    <script src="config.js"></script>
+    <script src="main.js"></script>
+    <script>
+      // The API address and mount path are runtime configuration, not build inputs:
+      // the same bundle works at the origin root or beneath bitmagnet's static mount.
+      const app = Elm.Main.init({
+        flags: {
+          apiUrl: window.MAGNES_API_URL || "/graphql",
+          basePath: window.MAGNES_BASE_PATH || "",
+          // Elm hears visibility only when it changes, so a tab opened in the
+          // background would otherwise poll as though it were showing.
+          hidden: document.hidden,
+        },
+      });
+
+      // Let the password manager save what was just chosen.
+      //
+      // Elm cannot let the browser see a form submission: `Html.Events.onSubmit` is
+      // `preventDefaultOn` and always prevents the default, and that submission is the
+      // main cue a password manager takes to offer saving. So Magnes asks explicitly,
+      // at the moment a registration or a sign-in succeeds, or bitmagnet accepts a
+      // password change. A password change whose answer was lost offers nothing: the
+      // login form is opened on its new password instead, and signing in with it offers
+      // it here like any other sign-in, once bitmagnet has accepted it.
+      //
+      // This is the person's own password, not bitmagnet's credential — that stays an
+      // HttpOnly cookie no script can read. It matters because bitmagnet has no password
+      // reset, and changing a password needs the current one: a generated password
+      // nobody saved is a User that has to be deleted and invited again.
+      //
+      // `PasswordCredential` is Chromium-only, and the constructor needs a secure
+      // context. Where any of it is missing, or the browser declines, nothing happens
+      // and nothing is reported — the sign-in flow does not depend on this working.
+      app.ports.storeCredential.subscribe(({ id, password }) => {
+        if (!window.PasswordCredential || !navigator.credentials?.store) {
+          return;
+        }
+
+        try {
+          navigator.credentials
+            .store(new window.PasswordCredential({ id, password }))
+            .catch(() => {});
+        } catch (_) {
+          // A malformed credential or a non-secure context throws synchronously.
+        }
+      });
+
+      // Authentication changes carry no credential. The HttpOnly cookie is owned by
+      // bitmagnet; tabs merely tell one another to refresh their canonical Identity.
+      if ("BroadcastChannel" in window) {
+        const authentication = new BroadcastChannel("magnes-authentication");
+        app.ports.authenticationChanged.subscribe(() => {
+          authentication.postMessage("changed");
+        });
+        authentication.addEventListener("message", () => {
+          app.ports.authenticationChanges.send(null);
+        });
+      }
+    </script>
+  </body>
+</html>

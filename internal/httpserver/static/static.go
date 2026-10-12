@@ -1,15 +1,18 @@
-// Package static serves a separately built web UI from disk, on the API origin.
+// Package static serves bundled or external web UIs on the API origin.
 package static
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io/fs"
 	"net/http"
 	"os"
 	"strings"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/httpserver"
+	"github.com/bitmagnet-io/bitmagnet/webui"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
@@ -52,7 +55,11 @@ var reservedPaths = map[string]string{
 
 func (b *builder) Apply(e *gin.Engine) error {
 	if b.config.Dir == "" {
-		return nil
+		if !b.config.Bundled {
+			return nil
+		}
+
+		return b.mountBundled(e)
 	}
 
 	if err := validatePath(b.config.Path); err != nil {
@@ -77,6 +84,60 @@ func (b *builder) Apply(e *gin.Engine) error {
 		c.Header("Cache-Control", "no-store")
 	})
 	staticRoutes.StaticFS(b.config.Path, spaFileSystem{http.Dir(b.config.Dir)})
+
+	return nil
+}
+
+func (b *builder) mountBundled(e *gin.Engine) error {
+	assets := webui.Files()
+	if assets == nil {
+		return nil
+	}
+
+	assets, err := fs.Sub(assets, "public")
+	if err != nil {
+		return fmt.Errorf("static: bundled assets: %w", err)
+	}
+
+	if err := validatePath(b.config.Path); err != nil {
+		return err
+	}
+
+	index, err := fs.ReadFile(assets, "index.html")
+	if err != nil {
+		return fmt.Errorf("static: bundled index: %w", err)
+	}
+
+	path := strings.TrimSuffix(b.config.Path, "/")
+	index = []byte(strings.Replace(string(index), `<base href="/" />`,
+		`<base href="`+html.EscapeString(path+"/")+`" />`, 1))
+
+	basePath, err := json.Marshal(path)
+	if err != nil {
+		return fmt.Errorf("static: bundled path: %w", err)
+	}
+
+	config := []byte(`window.MAGNES_API_URL = "/graphql"; window.MAGNES_BASE_PATH = ` + string(basePath) + `;`)
+	files := http.StripPrefix(path, http.FileServer(http.FS(assets)))
+	e.Match([]string{http.MethodGet, http.MethodHead}, path+"/*filepath", func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+
+		name := strings.TrimPrefix(c.Param("filepath"), "/")
+		if name == "config.js" {
+			c.Data(http.StatusOK, "text/javascript; charset=utf-8", config)
+			return
+		}
+
+		_, statErr := fs.Stat(assets, name)
+		if name == "" || name == "index.html" || errors.Is(statErr, fs.ErrNotExist) {
+			c.Data(http.StatusOK, "text/html; charset=utf-8", index)
+			return
+		}
+
+		files.ServeHTTP(c.Writer, c.Request)
+	})
+	e.GET("/", func(c *gin.Context) { c.Redirect(http.StatusTemporaryRedirect, path+"/") })
+	b.logger.Infof("serving bundled UI at %s", path)
 
 	return nil
 }

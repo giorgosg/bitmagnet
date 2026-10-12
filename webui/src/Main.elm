@@ -1,0 +1,4045 @@
+port module Main exposing (Refresh(..), main, refreshFailure)
+
+import ApiError
+import ApiKeys
+import Bitmagnet exposing (Page, Row)
+import Browser
+import Browser.Dom
+import Browser.Events
+import Browser.Navigation as Nav
+import Chip
+import Credential exposing (Credential)
+import Facet
+import FileTree
+import Format
+import Graphql.Http
+import Health
+import Html exposing (Attribute, Html, a, button, div, form, h1, header, input, main_, p, span, text)
+import Html.Attributes exposing (attribute, class, classList, href, id, placeholder, spellcheck, type_, value)
+import Html.Events exposing (on, onClick, onInput, onSubmit, stopPropagationOn)
+import Identity
+import IdentityMenu
+import InfiniteList
+import Invitations
+import Json.Decode as Decode exposing (Value)
+import Login
+import Magnes.Api.Enum.ContentType as ContentType
+import Magnes.Api.Enum.FilesStatus exposing (FilesStatus(..))
+import Magnes.Api.Enum.QueueJobStatus exposing (QueueJobStatus)
+import Operations
+import PasswordChange
+import PasswordEntropy
+import Process
+import QueueAdmin
+import QueueJobs
+import QueueStats
+import Register
+import Roles
+import Route exposing (Route)
+import Set exposing (Set)
+import Sort exposing (Sort)
+import StatsLook
+import Svg
+import Svg.Attributes as SvgAttr
+import Task
+import Time
+import TorrentStats
+import Url exposing (Url)
+import UserOverview
+import Users
+
+
+main : Program Flags Model Msg
+main =
+    Browser.application
+        { init = init
+        , view = view
+        , update = update
+        , subscriptions = subscriptions
+        , onUrlRequest = LinkClicked
+        , onUrlChange = UrlChanged
+        }
+
+
+{-| The API address and mount path arrive at runtime from `index.html`, so the same build
+works against any instance and at either the origin root or a static subpath.
+-}
+type alias Flags =
+    { apiUrl : String
+    , basePath : String
+    , hidden : Bool
+    }
+
+
+type alias Model =
+    { key : Nav.Key
+    , apiUrl : String
+    , basePath : Route.BasePath
+    , route : Route
+    , identity : Identity.Identity
+    , identityEpoch : Int
+
+    -- How many times bitmagnet has been asked who this is, which numbers each ask. The epoch
+    -- above drops an answer from before an authentication change, but two looks under one
+    -- epoch, such as a tab coming back to the front, can still answer out of order; the number
+    -- lets the password change tell the newer answer from the older (see
+    -- `PasswordChange.identityAnswered`).
+    , identityAsks : Int
+    , field : String
+    , results : Results
+    , infiniteList : InfiniteList.Model
+    , viewportHeight : Int
+    , zone : Time.Zone
+
+    -- Purely presentational, so it is not in the URL. It opens itself when a link arrives
+    -- with filters already applied, so a shared search shows what is narrowing it.
+    , filtersOpen : Bool
+
+    -- Bumped when the searched-for query actually changes, when a statistics page looks
+    -- again, and whenever the queue's administration asks bitmagnet anything. Responses carry
+    -- the epoch they were asked under, so a page that arrives after the query moved on is
+    -- dropped rather than appended to the wrong list, and a count of the queue that a newer
+    -- one has replaced is dropped rather than drawn.
+    , epoch : Int
+
+    -- The login form. It lives here rather than being rebuilt per render so a keystroke
+    -- does not lose what is typed, and it is cleared on success so a password stops
+    -- existing in the model the moment it stops being needed.
+    , login : Login.Form
+
+    -- How the sign-out request on the User overview is going. It is a request, not a
+    -- local erasure: bitmagnet owns the cookie, so until it answers the User is still
+    -- signed in and the page has to be able to say a refusal out loud.
+    , signOut : UserOverview.SignOut
+
+    -- The password change on the User overview: its form, and a change sent but not yet
+    -- settled, kept beside the form with its new password. Leaving the page and every
+    -- Identity refresh drop the form, so the passwords typed stop existing in the model when
+    -- nothing needs them, but never an unsettled change: those are exactly what follows a
+    -- change that went through, and its new password may be the only one that now signs in.
+    -- It goes once bitmagnet's answer settles it, or a sign-in does. See `PasswordChange`.
+    , passwordChange : PasswordChange.State
+
+    -- The registration form, held for the same reason the login form is: a keystroke
+    -- must not lose what is typed, and it is dropped on success so the password stops
+    -- existing in the model the moment it stops being needed.
+    , register : Register.Form
+
+    -- The Invitation administration screen: what was fetched, what is being created, and
+    -- which withdrawal has been asked about but not yet confirmed.
+    , invitations : Invitations.State
+
+    -- The User administration screen: what was fetched, what is being searched for, and
+    -- which act has been asked about but not yet confirmed.
+    , users : Users.State
+
+    -- Separate counter for the User listing's fetches. A page belongs to the search, the
+    -- visit and the Identity it was asked under; an answer that fails this check is
+    -- dropped rather than rendered.
+    , usersEpoch : Int
+
+    -- Separate counter for the search debounce, because a keystroke is not yet a search.
+    , userTyping : Int
+
+    -- The Role administration screen: the Roles and every Object action, the Role being
+    -- written, and which deletion has been asked about but not yet confirmed.
+    , roles : Roles.State
+
+    -- Separate counter for the Role listing's fetches, on the same reasoning as the
+    -- User listing's: an answer to a question this screen is no longer asking is dropped.
+    , rolesEpoch : Int
+
+    -- The User's own API keys: the listing, the key being made, and which revocation has
+    -- been asked about but not yet confirmed. `registry` inside it is bitmagnet's list of
+    -- Object actions, which only some Identities may read — see `ApiKeys.offerable`.
+    , apiKeys : ApiKeys.State
+
+    -- Separate counter for the API-key listing's fetches, on the same reasoning as the
+    -- Role listing's.
+    , apiKeysEpoch : Int
+
+    -- Whether the header's Identity menu is showing. Presentational, so it is not in the
+    -- URL: it is closed by navigating, and reopening it is one click.
+    , menuOpen : Bool
+
+    -- Why the Identity in flight is being fetched. It is read only to word a failure —
+    -- "could not resolve who you are" is the wrong sentence immediately after someone
+    -- deliberately signed out.
+    , identityRefresh : Refresh
+
+    -- Separate counter for the password-entropy debounce. `self.passwordEntropy` is a
+    -- server round trip, and bitmagnet's own UI spends one per keystroke. One counter serves
+    -- both forms that measure a password, since only one is ever on screen; a measurement
+    -- also says which form asked for it (`ScoredFor`).
+    , scoring : Int
+
+    -- Separate counter for the debounce, because a keystroke is not yet a new query.
+    -- Bumping the epoch here would strand an in-flight page — the reply would be dropped
+    -- while `fetching` stayed true, and infinite scroll would quietly stop.
+    , typing : Int
+
+    -- bitmagnet's health, as the header and the status page both show it: one answer,
+    -- so the two never disagree. Polled while the tab is visible.
+    , health : Health.State
+
+    -- Separate counter for the health report's fetches. A poll that answers after a newer
+    -- one was asked, or after the Identity changed what may be asked, is dropped.
+    , healthEpoch : Int
+
+    -- Whether the tab is showing. Polling stops while it is not; the browser reports only
+    -- changes, so the starting value comes in with the flags.
+    , visible : Bool
+
+    -- The queue's jobs: the page last fetched, and which of its rows are open. What is
+    -- listed comes from the route; answers carry `epoch`, as search pages do.
+    , jobs : QueueJobs.State
+
+    -- The torrent timeline: the last answer, drawn. What is looked at comes from the route;
+    -- answers carry `epoch`, so a look that comes back after the controls moved on, or
+    -- after a newer look was asked for, is dropped.
+    , torrentStats : TorrentStats.State
+
+    -- The queue's statistics: the last answer, drawn with the queues and events the route
+    -- chooses. Answers carry `epoch`, as the torrent timeline's do.
+    , queueStats : QueueStats.State
+
+    -- The queue's administration: what a purge would delete, the reprocessing form, which
+    -- act has been asked about but not yet confirmed or is on its way, and what became of the
+    -- last. A count carries `epoch`, which drops an answer a newer request has replaced, and
+    -- the scope it was asked about, by which `QueueAdmin.counted` drops one about a scope no
+    -- longer chosen. What the page keeps as the person moves, or as their Identity changes, is
+    -- `QueueAdmin.settle`'s to decide, after every update (see `update`).
+    , queueAdmin : QueueAdmin.State
+    }
+
+
+{-| What prompted the Identity currently being fetched.
+
+The failure sentence and its recovery control depend on it. After a successful sign-out
+bitmagnet has already cleared the cookie, so a refresh that then fails has not left the User signed in and must
+not read as though resolving them failed: what is unknown is only what this instance
+allows without a User.
+
+-}
+type Refresh
+    = Resolving
+    | AfterSignIn
+    | AfterSignOut
+    | AfterPasswordChange
+
+
+{-| Which form's password a measurement was asked for, so that its answer can only land in
+that form.
+-}
+type ScoredFor
+    = ForRegistration
+    | ForPasswordChange
+
+
+{-| Hand-rolled rather than `RemoteData`: these are the states Magnes actually has, and
+`Failed` carries a sentence to show rather than an error to interpret.
+-}
+type Results
+    = Blank
+    | Loading
+    | Failed String
+    | Feed FeedState
+
+
+type alias FeedState =
+    { items : List Item
+    , ids : Set String
+    , total : Int
+    , totalIsEstimate : Bool
+    , hasNextPage : Bool
+    , fetching : Bool
+
+    -- Counts for the content-type chips, from the first page only. Later pages leave them
+    -- alone rather than replacing them with the nothing they asked for.
+    , contentTypes : List ( Facet.ContentFilter, Int )
+    }
+
+
+{-| A row plus its own display state.
+
+Expansion lives on the record held in the model rather than being zipped together in the
+view. `InfiniteList` wraps `itemView` in `lazy3`, which compares the item by reference, so
+building wrapper records during render would allocate fresh ones every frame and quietly
+defeat it. The formatted date is precomputed here for the same reason: it keeps `itemView`
+a top-level function instead of a closure over the time zone.
+
+-}
+type alias Item =
+    { row : Row
+    , published : String
+    , expanded : Bool
+    , files : Files
+    }
+
+
+type Files
+    = Unopened
+    | Fetching
+    | FilesFailed String
+    | Open OpenFiles
+
+
+{-| The tree and the omission note are built once, when the files arrive, rather than on
+every render — the same reason the formatted date lives on `Item`.
+-}
+type alias OpenFiles =
+    { root : FileTree.Node
+    , collapsed : Set String
+    , omission : String
+    }
+
+
+pageSize : Int
+pageSize =
+    50
+
+
+{-| These four must match the stylesheet. The virtualizer positions every row from the
+numbers below, so a disagreement with the rendered heights shows up as drift.
+-}
+rowHeight : Int
+rowHeight =
+    34
+
+
+{-| Two lines — the facts and the info hash — plus a third only when the raw torrent name
+says something the title doesn't. Heights vary per item anyway, so an always-drawn empty
+line to keep this constant would just be a visible gap.
+-}
+metaHeight : Item -> Int
+metaHeight item =
+    if showsRawName item then
+        66
+
+    else
+        48
+
+
+showsRawName : Item -> Bool
+showsRawName item =
+    item.row.name /= item.row.title
+
+
+fileHeight : Int
+fileHeight =
+    22
+
+
+noticeHeight : Int
+noticeHeight =
+    26
+
+
+{-| How close to the bottom triggers the next page — roughly a screen of lead time.
+-}
+loadMoreMargin : Float
+loadMoreMargin =
+    600
+
+
+{-| Quiet period before a keystroke becomes a search.
+-}
+debounceMs : Float
+debounceMs =
+    300
+
+
+{-| Quiet period before a typed password is sent to be scored. Longer than the search
+debounce: nothing on screen is waiting for it, and it is a round trip per pause.
+-}
+scoringDebounceMs : Float
+scoringDebounceMs =
+    500
+
+
+{-| How often the health report is asked for while the tab is visible. bitmagnet runs its
+checks on timers of its own — the DHT every 10 seconds, Postgres every 30, TMDB every five
+minutes (their `healthcheck` packages) — and answers `health` from their last results, so a
+poll only ever reads them and never runs one. At thirty seconds the header is as fresh as
+the Postgres check itself, and a DHT result can take up to 30 seconds to reach it rather
+than the 10 its own timer would allow.
+-}
+healthPollMs : Float
+healthPollMs =
+    30000
+
+
+init : Flags -> Url -> Nav.Key -> ( Model, Cmd Msg )
+init flags url key =
+    let
+        basePath =
+            Route.basePath flags.basePath
+
+        route =
+            Route.fromUrl basePath url
+
+        results =
+            pendingResults route
+    in
+    ( { key = key
+      , apiUrl = flags.apiUrl
+      , basePath = basePath
+      , route = route
+      , identity = Identity.Unknown
+      , identityEpoch = 0
+      , identityAsks = 1
+      , field = fieldFor route
+      , results = results
+      , infiniteList = InfiniteList.init
+      , viewportHeight = 800
+      , zone = Time.utc
+      , filtersOpen = not (Facet.isEmpty (filtersFor route))
+      , login = Login.empty
+      , signOut = UserOverview.Ready
+      , passwordChange = PasswordChange.initial
+      , register = Register.prefilled (invitationCodeFor route)
+      , invitations = Invitations.empty
+      , jobs = QueueJobs.empty
+      , torrentStats = StatsLook.empty
+      , queueStats = StatsLook.empty
+      , queueAdmin = QueueAdmin.empty
+      , users = Users.empty
+      , usersEpoch = 0
+      , userTyping = 0
+      , roles = Roles.empty
+      , rolesEpoch = 0
+      , apiKeys = ApiKeys.empty
+      , apiKeysEpoch = 0
+      , menuOpen = False
+      , identityRefresh = Resolving
+      , epoch = 0
+      , scoring = 0
+      , typing = 0
+      , health = Health.Unasked
+      , healthEpoch = 0
+      , visible = not flags.hidden
+      }
+    , Cmd.batch
+        [ Identity.fetch flags.apiUrl (GotIdentity 0 1)
+        , Task.perform (\vp -> Resized (round vp.viewport.height)) Browser.Dom.getViewport
+        , Task.perform GotZone Time.here
+        ]
+    )
+
+
+{-| The Invitation a registration link carries. Registration is the only route that has
+one, and arriving anywhere else empties the form rather than leaving a code from a link
+followed earlier.
+-}
+invitationCodeFor : Route -> Maybe String
+invitationCodeFor route =
+    case route of
+        Route.Register params ->
+            params.code
+
+        _ ->
+            Nothing
+
+
+filtersFor : Route -> Facet.Filters
+filtersFor route =
+    case route of
+        Route.Search params ->
+            params.filters
+
+        _ ->
+            Facet.empty
+
+
+fieldFor : Route -> String
+fieldFor route =
+    case route of
+        Route.Search params ->
+            Maybe.withDefault "" params.q
+
+        _ ->
+            ""
+
+
+subscriptions : Model -> Sub Msg
+subscriptions model =
+    Sub.batch
+        [ Browser.Events.onResize (\_ height -> Resized height)
+        , Browser.Events.onVisibilityChange VisibilityChanged
+        , authenticationChanges (\_ -> AuthenticationChanged)
+        , menuDismissal model
+        , if model.visible then
+            Time.every healthPollMs (\_ -> HealthPollDue)
+
+          else
+            Sub.none
+        , statsTimer model
+        ]
+
+
+{-| Escape closes the open menu. Pressing elsewhere closes it too, but that is the menu's
+own backdrop rather than a listener here — see `IdentityMenu`. Nothing is listened for
+while the menu is closed.
+-}
+menuDismissal : Model -> Sub Msg
+menuDismissal model =
+    if model.menuOpen then
+        Browser.Events.onKeyDown
+            (Decode.field "key" Decode.string
+                |> Decode.andThen
+                    (\key ->
+                        if key == "Escape" then
+                            Decode.succeed MenuClosed
+
+                        else
+                            Decode.fail "not a dismissal"
+                    )
+            )
+
+    else
+        Sub.none
+
+
+{-| Notify the other Magnes tabs after browser login or logout. The value carries no
+credential; bitmagnet's HttpOnly cookie remains unreadable to JavaScript and Elm.
+-}
+port authenticationChanged : () -> Cmd msg
+
+
+{-| A different tab changed browser authentication, so permission-sensitive state must
+be discarded and reloaded under the credential the browser now supplies.
+-}
+port authenticationChanges : (() -> msg) -> Sub msg
+
+
+{-| Offer a username and the password just chosen to the browser's credential store, so
+the person's password manager can save it.
+
+This is the User's own password on its way past, not bitmagnet's credential: the cookie
+remains HttpOnly and unreadable, and nothing here reads or persists it. Magnes already
+holds this password to submit it, and hands it to the browser at the same moment it stops
+needing it.
+
+It exists because Elm cannot let the browser see a form submission. `Html.Events.onSubmit`
+is `preventDefaultOn`, which always prevents the default, and a submission is the main
+signal a password manager uses to offer saving. Without this, a generated password is lost
+the moment the form clears — and bitmagnet has no password reset, and changing a password
+needs the current one, so losing it means deleting the User and inviting them again.
+
+Three successes offer one: a registration, a sign-in, and a password change bitmagnet
+accepted, which is the only moment its new password is known to be accepted. A password
+change whose answer was lost offers nothing; the login form tries its new password instead,
+and the sign-in offers it if bitmagnet accepts it there.
+
+Nothing waits on the outcome. Whether a manager saved anything is not knowable here, and
+the browsers that implement none of this must behave exactly as they do today.
+
+-}
+port storeCredential : Credential -> Cmd msg
+
+
+type Msg
+    = LinkClicked Browser.UrlRequest
+    | UrlChanged Url
+    | FieldChanged String
+    | DebounceElapsed Int
+    | Submitted
+    | SortChanged String
+    | FiltersToggled
+    | FilterChanged Facet.Filters
+    | Scrolled Value
+    | Resized Int
+    | GotZone Time.Zone
+    | ToggleExpanded String
+    | ToggleFiles String
+    | ToggleFolder String String
+    | GotFiles String (Result (Graphql.Http.Error Bitmagnet.FileList) Bitmagnet.FileList)
+    | GotResults Int (Result (Graphql.Http.Error Page) Page)
+    | GotIdentity Int Int (Result (Graphql.Http.Error Identity.Identity) Identity.Identity)
+    | IdentityRetryRequested
+    | VisibilityChanged Browser.Events.Visibility
+    | LoginUsernameChanged String
+    | LoginPasswordChanged String
+    | LoginSubmitted
+    | GotLogin Credential (Result (Graphql.Http.Error ()) ())
+    | RegisterUsernameChanged String
+    | RegisterPasswordChanged String
+    | RegisterInvitationCodeChanged String
+    | RegisterSubmitted
+    | ScoringDebounceElapsed ScoredFor Int
+    | GotPasswordEntropy ScoredFor Int (Result (Graphql.Http.Error PasswordEntropy.Strength) PasswordEntropy.Strength)
+    | GotRegistration (Result (Graphql.Http.Error String) String)
+    | MenuToggled
+    | MenuClosed
+    | InvitationRoleChosen String
+    | InvitationExpiryChosen String
+    | InvitationCreateSubmitted
+    | GotInvitationCreated (Result (Graphql.Http.Error Invitations.Invitation) Invitations.Invitation)
+    | InvitationWithdrawRequested String
+    | InvitationWithdrawConfirmed String
+    | InvitationWithdrawCancelled
+    | GotInvitationWithdrawn (Result (Graphql.Http.Error ()) ())
+    | InvitationsPageRequested Int
+    | GotInvitations Int (Result (Graphql.Http.Error Invitations.Page) Invitations.Page)
+    | UserSearchChanged String
+    | UserSearchDebounceElapsed Int
+    | UsersPageRequested Int
+    | UserRoleChosen Int String
+    | UserDisableRequested Int
+    | UserEnableRequested Int
+    | UserDeleteRequested Int
+    | UserActConfirmed
+    | UserActCancelled
+    | GotUsers Int (Result (Graphql.Http.Error Users.Page) Users.Page)
+    | GotUserRole (Result (Graphql.Http.Error Identity.User) Identity.User)
+    | GotUserEnabled (Result (Graphql.Http.Error Identity.User) Identity.User)
+    | GotUserDeleted (Result (Graphql.Http.Error ()) ())
+    | RoleNameChanged String
+    | RoleActionToggled Identity.ObjectAction
+    | RoleSubmitted
+    | RoleEditRequested String
+    | RoleEditCancelled
+    | RoleDeleteRequested String
+    | RoleActConfirmed
+    | RoleActCancelled
+    | GotRoles Int (Result (Graphql.Http.Error Roles.Page) Roles.Page)
+    | GotRoleSaved (Result (Graphql.Http.Error Roles.Role) Roles.Role)
+    | GotRoleDeleted String (Result (Graphql.Http.Error ()) ())
+    | ApiKeyNameChanged String
+    | ApiKeyExpiryChosen String
+    | ApiKeyActionToggled Identity.ObjectAction
+    | ApiKeyCreateSubmitted
+    | ApiKeyRevealDismissed
+    | ApiKeyRevokeRequested Int
+    | ApiKeyRevokeConfirmed Int
+    | ApiKeyRevokeCancelled
+    | GotApiKeys Int (Result (Graphql.Http.Error (List ApiKeys.Key)) (List ApiKeys.Key))
+    | GotObjectActions Int (Result (Graphql.Http.Error (List Identity.ObjectAction)) (List Identity.ObjectAction))
+    | GotApiKeyCreated (Result (Graphql.Http.Error ApiKeys.Revealed) ApiKeys.Revealed)
+    | GotApiKeyDeleted (Result (Graphql.Http.Error ()) ())
+    | SignOutRequested
+    | GotSignOut (Result (Graphql.Http.Error ()) ())
+    | PasswordChangeCurrentChanged String
+    | PasswordChangeNewChanged String
+    | PasswordChangeSubmitted
+    | GotPasswordChange PasswordChange.Sent (Result (Graphql.Http.Error ()) ())
+    | AuthenticationChangedHere Refresh
+    | AuthenticationChanged
+    | HealthPollDue
+    | GotHealth Int (Result (Graphql.Http.Error Health.Report) Health.Report)
+    | JobsChosen Route.JobsParams
+    | JobToggled String
+    | GotJobs Int (Result (Graphql.Http.Error QueueJobs.Page) QueueJobs.Page)
+    | TorrentStatsChosen Route.TorrentStatsParams
+    | QueueStatsChosen Route.QueueStatsParams
+    | StatsRefreshDue
+    | StatsRefreshRequested
+    | GotTorrentStats Int (Result (Graphql.Http.Error TorrentStats.Statistics) TorrentStats.Statistics)
+    | GotQueueStats Int (Result (Graphql.Http.Error QueueStats.Statistics) QueueStats.Statistics)
+    | QueueAdminQueueToggled String
+    | QueueAdminStatusToggled QueueJobStatus
+    | QueueAdminFormEdited QueueAdmin.Edit
+    | QueueAdminPurgeAsked
+    | QueueAdminReprocessAsked
+    | QueueAdminActCancelled
+    | QueueAdminActConfirmed
+    | GotQueueAdminCount Int QueueAdmin.Scope (Result (Graphql.Http.Error QueueAdmin.Tally) QueueAdmin.Tally)
+    | QueueAdminRecountAsked
+    | GotQueueAdminAct QueueAdmin.Call (Result (Graphql.Http.Error ()) ())
+    | Ignored
+
+
+{-| Every message, and then what it did to where the person is, for the one page that keeps
+something across that: the queue's administration (`QueueAdmin.settle`). Deciding it once,
+from where the person was and is, rather than at each place a route or an Identity changes,
+keeps a new such place from forgetting it.
+-}
+update : Msg -> Model -> ( Model, Cmd Msg )
+update msg model =
+    let
+        ( updated, cmd ) =
+            updateModel msg model
+    in
+    ( { updated
+        | queueAdmin =
+            QueueAdmin.settle
+                { before = queueAdminWhereabouts model, after = queueAdminWhereabouts updated }
+                updated.queueAdmin
+      }
+    , cmd
+    )
+
+
+{-| Where the person is, as the queue's administration needs to know it.
+-}
+queueAdminWhereabouts : Model -> QueueAdmin.Whereabouts
+queueAdminWhereabouts model =
+    { route = model.route
+    , identity = model.identity
+    , access = Route.guard model.basePath model.identity model.route
+    }
+
+
+updateModel : Msg -> Model -> ( Model, Cmd Msg )
+updateModel msg model =
+    case msg of
+        Ignored ->
+            ( model, Cmd.none )
+
+        LoginUsernameChanged username ->
+            ( { model | login = Login.withUsername username model.login }, Cmd.none )
+
+        LoginPasswordChanged password ->
+            ( { model | login = Login.withPassword password model.login }, Cmd.none )
+
+        LoginSubmitted ->
+            if not (Login.canSubmit model.login) then
+                ( model, Cmd.none )
+
+            else
+                -- The credential travels with the request and comes back with its answer, so
+                -- what is offered to the credential store is what bitmagnet accepted, whatever
+                -- the form holds by then.
+                let
+                    credential =
+                        Login.credentials model.login
+                in
+                ( { model | login = Login.withState Login.Submitting model.login }
+                , Login.submit model.apiUrl credential (GotLogin credential)
+                )
+
+        GotLogin _ (Err error) ->
+            ( { model | login = Login.withState (Login.Rejected (ApiError.fromError error)) model.login }
+            , Cmd.none
+            )
+
+        GotLogin credential (Ok ()) ->
+            let
+                destination =
+                    Route.returnDestination model.basePath model.route
+
+                -- Dropping the form takes the password with it. The rest is exactly what
+                -- any other authentication change does — tell the other tabs, and let the
+                -- server say what the new Identity may do — so it goes through the same
+                -- branch rather than a second copy of it that could drift. A password change
+                -- left unsettled is settled by it.
+                ( refreshed, refresh ) =
+                    updateModel (AuthenticationChangedHere AfterSignIn)
+                        { model
+                            | login = Login.empty
+                            , passwordChange = PasswordChange.signedIn model.passwordChange
+                        }
+            in
+            ( refreshed
+            , Cmd.batch
+                [ storeCredential credential
+                , Nav.replaceUrl model.key (Route.toHref model.basePath destination)
+                , refresh
+                ]
+            )
+
+        RegisterUsernameChanged username ->
+            ( { model | register = Register.withUsername username model.register }, Cmd.none )
+
+        RegisterInvitationCodeChanged code ->
+            ( { model | register = Register.withInvitationCode code model.register }, Cmd.none )
+
+        RegisterPasswordChanged password ->
+            scorePassword ForRegistration
+                password
+                { model | register = Register.withPassword password model.register }
+
+        ScoringDebounceElapsed scored scoring ->
+            if scoring /= model.scoring then
+                -- Another keystroke landed; that one owns the measurement.
+                ( model, Cmd.none )
+
+            else
+                ( model
+                , PasswordEntropy.measure model.apiUrl
+                    (scoredPassword scored model)
+                    (GotPasswordEntropy scored scoring)
+                )
+
+        GotPasswordEntropy scored scoring result ->
+            if scoring /= model.scoring then
+                ( model, Cmd.none )
+
+            else
+                ( withMeasurement scored (PasswordEntropy.answered result) model
+                , Cmd.none
+                )
+
+        RegisterSubmitted ->
+            if not (Register.canSubmit model.register) then
+                ( model, Cmd.none )
+
+            else
+                ( { model | register = Register.withState Register.Submitting model.register }
+                , Register.submit model.apiUrl
+                    (Register.credentials model.register)
+                    GotRegistration
+                )
+
+        GotRegistration (Err error) ->
+            ( { model
+                | register =
+                    Register.withState (Register.Rejected (ApiError.fromError error))
+                        model.register
+              }
+            , Cmd.none
+            )
+
+        GotRegistration (Ok username) ->
+            -- Registering does not authenticate the browser: bitmagnet sets no cookie and
+            -- the spec requires the person to sign in with what they just chose. Dropping
+            -- the form takes the password with it, and the username is carried across so
+            -- the login form opens on the name that was actually created.
+            --
+            -- The password is offered to the browser's credential store on the way out.
+            -- This is the moment it is about to stop existing anywhere, and the one
+            -- moment a manager would have been prompted by a form submission the browser
+            -- never sees.
+            --
+            -- `replaceUrl`, so going back does not return to a form whose Invitation has
+            -- now been claimed.
+            ( { model
+                | register = Register.empty
+                , login = Login.withUsername username Login.empty
+              }
+            , Cmd.batch
+                [ storeCredential
+                    { id = username
+                    , password = Register.passwordOf model.register
+                    }
+                , Nav.replaceUrl model.key
+                    (Route.toHref model.basePath (Route.Login { returnUrl = Nothing }))
+                ]
+            )
+
+        MenuToggled ->
+            ( { model | menuOpen = not model.menuOpen }, Cmd.none )
+
+        MenuClosed ->
+            ( { model | menuOpen = False }, Cmd.none )
+
+        InvitationRoleChosen role ->
+            ( { model | invitations = Invitations.withRole role model.invitations }, Cmd.none )
+
+        InvitationExpiryChosen chosen ->
+            ( { model | invitations = Invitations.withExpiry chosen model.invitations }, Cmd.none )
+
+        InvitationCreateSubmitted ->
+            if model.invitations.creation == Invitations.Submitting then
+                ( model, Cmd.none )
+
+            else
+                ( { model | invitations = Invitations.withSubmission Invitations.Submitting model.invitations }
+                , Invitations.create model.apiUrl
+                    { role = model.invitations.role, expiry = model.invitations.expiry }
+                    GotInvitationCreated
+                )
+
+        GotInvitationCreated (Err error) ->
+            onRequestFailure error
+                model
+                (\_ current ->
+                    ( { current
+                        | invitations =
+                            Invitations.withSubmission
+                                (Invitations.Rejected (ApiError.fromError error))
+                                current.invitations
+                      }
+                    , Cmd.none
+                    )
+                )
+
+        GotInvitationCreated (Ok created) ->
+            -- The new Invitation is kept, because its code is the entire product of the
+            -- mutation and the list will not distinguish it from any other row. The list
+            -- itself is refetched rather than having the row spliced in: the server's
+            -- copy is what this screen is for.
+            --
+            -- Refetched at the first page, not the current one. bitmagnet orders these
+            -- newest first, so a creation made while reading page three would otherwise
+            -- refetch a page the new Invitation is not on.
+            ( { model
+                | invitations =
+                    model.invitations
+                        |> Invitations.withSubmission (Invitations.Created created)
+                        |> Invitations.withOffset 0
+                        |> Invitations.withListing Invitations.Loading
+              }
+            , Invitations.fetch model.apiUrl 0 (GotInvitations model.identityEpoch)
+            )
+
+        InvitationWithdrawRequested code ->
+            ( { model | invitations = Invitations.withConfirming (Just code) model.invitations }
+            , Cmd.none
+            )
+
+        InvitationWithdrawCancelled ->
+            ( { model | invitations = Invitations.withConfirming Nothing model.invitations }
+            , Cmd.none
+            )
+
+        InvitationWithdrawConfirmed code ->
+            ( { model | invitations = Invitations.withConfirming Nothing model.invitations }
+            , Invitations.withdraw model.apiUrl code GotInvitationWithdrawn
+            )
+
+        GotInvitationWithdrawn (Err error) ->
+            onRequestFailure error
+                model
+                (\_ current ->
+                    ( { current
+                        | invitations =
+                            Invitations.withWithdrawal (Just (ApiError.fromError error))
+                                current.invitations
+                      }
+                    , Cmd.none
+                    )
+                )
+
+        GotInvitationWithdrawn (Ok ()) ->
+            ( model
+            , Invitations.fetch model.apiUrl model.invitations.offset (GotInvitations model.identityEpoch)
+            )
+
+        InvitationsPageRequested offset ->
+            ( { model
+                | invitations =
+                    model.invitations
+                        |> Invitations.withOffset offset
+                        |> Invitations.withListing Invitations.Loading
+              }
+            , Invitations.fetch model.apiUrl offset (GotInvitations model.identityEpoch)
+            )
+
+        GotInvitations identityEpoch (Ok fetched) ->
+            if identityEpoch /= model.identityEpoch then
+                ( model, Cmd.none )
+
+            else
+                case ( fetched.invitations, Invitations.previousOffset model.invitations.offset ) of
+                    -- Withdrawing the last row of the last page leaves the offset past
+                    -- the end, and an empty page there reads as "there are none" on an
+                    -- instance that has fifty. Step back rather than say that.
+                    ( [], Just back ) ->
+                        ( { model | invitations = Invitations.withOffset back model.invitations }
+                        , Invitations.fetch model.apiUrl back (GotInvitations model.identityEpoch)
+                        )
+
+                    _ ->
+                        ( { model | invitations = Invitations.withListing (Invitations.Loaded fetched) model.invitations }
+                        , Cmd.none
+                        )
+
+        GotInvitations identityEpoch (Err error) ->
+            if identityEpoch /= model.identityEpoch then
+                ( model, Cmd.none )
+
+            else
+                onRequestFailure error
+                    model
+                    (\_ current ->
+                        ( { current
+                            | invitations =
+                                Invitations.withListing
+                                    (Invitations.Failed (ApiError.fromError error))
+                                    current.invitations
+                          }
+                        , Cmd.none
+                        )
+                    )
+
+        UserSearchChanged query ->
+            let
+                userTyping =
+                    model.userTyping + 1
+            in
+            ( { model | users = Users.withQuery query model.users, userTyping = userTyping }
+            , Process.sleep debounceMs |> Task.perform (\_ -> UserSearchDebounceElapsed userTyping)
+            )
+
+        UserSearchDebounceElapsed userTyping ->
+            if userTyping /= model.userTyping then
+                -- Another keystroke landed; that one owns the search.
+                ( model, Cmd.none )
+
+            else
+                fetchUsers model
+
+        UsersPageRequested offset ->
+            fetchUsers
+                { model
+                    | users =
+                        model.users
+                            |> Users.withOffset offset
+                            |> Users.withListing Users.Loading
+                }
+
+        UserRoleChosen userId role ->
+            case model.identity of
+                Identity.UserAuthenticated me _ ->
+                    if me.id == userId then
+                        -- Changing your own Role can sign this very screen away, so it
+                        -- asks first. Everyone else's Role is not self-affecting: an
+                        -- administrator applying it can just as easily reverse it.
+                        ( { model
+                            | users =
+                                Users.withConfirming
+                                    (Just (Users.ChangeOwnRole { userId = userId, role = role }))
+                                    model.users
+                          }
+                        , Cmd.none
+                        )
+
+                    else
+                        -- Any ask armed on another row is spent: it was armed against a
+                        -- screen where nothing was running, and its two buttons are the
+                        -- one pair a running act would otherwise leave live.
+                        ( { model
+                            | users =
+                                model.users
+                                    |> Users.withConfirming Nothing
+                                    |> Users.withAction Users.Working
+                          }
+                        , Users.setRole model.apiUrl userId role GotUserRole
+                        )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        UserDisableRequested userId ->
+            -- Disabling always asks: it takes the User's sign-ins and their API keys
+            -- away until someone with the authority undoes it.
+            ( { model | users = Users.withConfirming (Just (Users.Disable userId)) model.users }
+            , Cmd.none
+            )
+
+        UserEnableRequested userId ->
+            -- Enabling is the one act that grants rather than takes, and the ticket
+            -- still asks that it be deliberate; its ask says what it grants rather
+            -- than what it costs.
+            ( { model | users = Users.withConfirming (Just (Users.Enable userId)) model.users }
+            , Cmd.none
+            )
+
+        UserDeleteRequested userId ->
+            ( { model | users = Users.withConfirming (Just (Users.Delete userId)) model.users }
+            , Cmd.none
+            )
+
+        UserActConfirmed ->
+            -- Which act the confirmation belongs to is what was armed; the ask in the
+            -- state is the one place the User is named, so the message carries nothing.
+            case model.users.confirming of
+                Just (Users.Delete id) ->
+                    actConfirmed model (Users.delete model.apiUrl id GotUserDeleted)
+
+                Just (Users.Disable id) ->
+                    actConfirmed model (Users.setEnabled model.apiUrl id False GotUserEnabled)
+
+                Just (Users.Enable id) ->
+                    actConfirmed model (Users.setEnabled model.apiUrl id True GotUserEnabled)
+
+                Just (Users.ChangeOwnRole { userId, role }) ->
+                    actConfirmed model (Users.setRole model.apiUrl userId role GotUserRole)
+
+                Nothing ->
+                    ( model, Cmd.none )
+
+        UserActCancelled ->
+            ( { model | users = Users.withConfirming Nothing model.users }, Cmd.none )
+
+        GotUsers usersEpoch (Ok fetched) ->
+            if usersEpoch /= model.usersEpoch then
+                ( model, Cmd.none )
+
+            else
+                case ( fetched.users, Users.previousOffset model.users.offset ) of
+                    -- Removing the last row of the last page leaves the offset past the
+                    -- end, and an empty page there reads as "there are none" on an
+                    -- instance that has fifty. Step back rather than say that.
+                    ( [], Just back ) ->
+                        fetchUsers
+                            { model
+                                | users =
+                                    model.users
+                                        |> Users.withOffset back
+                                        |> Users.withListing Users.Loading
+                            }
+
+                    _ ->
+                        ( { model | users = Users.withListing (Users.Loaded fetched) model.users }
+                        , Cmd.none
+                        )
+
+        GotUsers usersEpoch (Err error) ->
+            if usersEpoch /= model.usersEpoch then
+                ( model, Cmd.none )
+
+            else
+                onRequestFailure error
+                    model
+                    (\_ current ->
+                        ( { current
+                            | users =
+                                Users.withListing
+                                    (Users.Failed (ApiError.fromError error))
+                                    current.users
+                          }
+                        , Cmd.none
+                        )
+                    )
+
+        GotUserRole (Err error) ->
+            gotActFailure error model
+
+        GotUserRole (Ok _) ->
+            actAccepted model
+
+        GotUserEnabled (Err error) ->
+            gotActFailure error model
+
+        GotUserEnabled (Ok _) ->
+            actAccepted model
+
+        GotUserDeleted (Err error) ->
+            gotActFailure error model
+
+        GotUserDeleted (Ok ()) ->
+            -- A deleted self shows up here on its own: the listing refetch is the first
+            -- request the dead credential makes, it comes back refused, and the
+            -- Identity is refetched into whatever the server now says it is.
+            actAccepted model
+
+        RoleNameChanged name ->
+            let
+                typed =
+                    Roles.withName name model.roles.draft
+
+                draft =
+                    case model.roles.listing of
+                        Roles.Loaded loadedPage ->
+                            if String.trim name == "anon" then
+                                -- anon already exists. Load its whole stored set even
+                                -- when its name was typed into the create form, so this
+                                -- path cannot discard Permissions no checkbox expresses.
+                                Roles.draftNamed "anon" loadedPage |> Maybe.withDefault typed
+
+                            else
+                                typed
+
+                        _ ->
+                            typed
+            in
+            ( { model | roles = Roles.withDraft draft model.roles }
+            , Cmd.none
+            )
+
+        RoleActionToggled action ->
+            ( { model | roles = Roles.withDraft (Roles.toggle action model.roles.draft) model.roles }
+            , Cmd.none
+            )
+
+        RoleSubmitted ->
+            case model.roles.listing of
+                Roles.Loaded loadedPage ->
+                    let
+                        draft =
+                            model.roles.draft
+
+                        name =
+                            String.trim draft.name
+                    in
+                    -- The submit button is disabled without a name, but Enter in the name
+                    -- field submits the form regardless, so the refusal lives here too.
+                    -- So does the refusal to write a Role the form is only reading.
+                    if String.isEmpty name || not (Roles.writable draft) then
+                        ( model, Cmd.none )
+
+                    else
+                        case Roles.confirmationFor loadedPage.actions (Roles.ownRole model.identity) draft of
+                            Just confirmation ->
+                                ( { model | roles = Roles.withConfirming (Just confirmation) model.roles }
+                                , Cmd.none
+                                )
+
+                            Nothing ->
+                                ( { model | roles = Roles.withSubmission Roles.Saving model.roles }
+                                , Roles.put model.apiUrl
+                                    name
+                                    (Roles.desiredActions loadedPage.actions draft)
+                                    GotRoleSaved
+                                )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        RoleEditRequested name ->
+            case model.roles.listing of
+                Roles.Loaded loadedPage ->
+                    case Roles.draftNamed name loadedPage of
+                        -- The Draft is built from the Role as the server last described
+                        -- it, which is what keeps a save from revoking what the form was
+                        -- never shown. An armed deletion is spent: it was armed against a
+                        -- screen that is now editing something.
+                        Just draft ->
+                            ( { model
+                                | roles =
+                                    model.roles
+                                        |> Roles.withDraft draft
+                                        |> Roles.withConfirming Nothing
+                              }
+                            , Cmd.none
+                            )
+
+                        Nothing ->
+                            ( model, Cmd.none )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        RoleEditCancelled ->
+            ( { model | roles = Roles.withDraft Roles.newDraft model.roles }, Cmd.none )
+
+        RoleDeleteRequested name ->
+            ( { model | roles = Roles.withConfirming (Just (Roles.Deleting name)) model.roles }
+            , Cmd.none
+            )
+
+        RoleActCancelled ->
+            ( { model | roles = Roles.withConfirming Nothing model.roles }, Cmd.none )
+
+        RoleActConfirmed ->
+            -- Which act the confirmation belongs to is what was armed; the ask in the
+            -- state is the one place the Role is named, so the message carries nothing.
+            case ( model.roles.confirming, model.roles.listing ) of
+                ( Just (Roles.Deleting name), _ ) ->
+                    ( { model | roles = armed model.roles }
+                    , Roles.delete model.apiUrl name (GotRoleDeleted name)
+                    )
+
+                ( Just Roles.SavingAnonymous, Roles.Loaded loadedPage ) ->
+                    ( { model | roles = armed model.roles }
+                    , Roles.put model.apiUrl
+                        "anon"
+                        (Roles.desiredActions loadedPage.actions model.roles.draft)
+                        GotRoleSaved
+                    )
+
+                ( Just (Roles.SavingOwn name), Roles.Loaded loadedPage ) ->
+                    ( { model | roles = armed model.roles }
+                    , Roles.put model.apiUrl
+                        name
+                        (Roles.desiredActions loadedPage.actions model.roles.draft)
+                        GotRoleSaved
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        GotRoles rolesEpoch (Ok fetched) ->
+            if rolesEpoch /= model.rolesEpoch then
+                ( model, Cmd.none )
+
+            else
+                ( { model | roles = Roles.withListing (Roles.Loaded fetched) model.roles }
+                , Cmd.none
+                )
+
+        GotRoles rolesEpoch (Err error) ->
+            if rolesEpoch /= model.rolesEpoch then
+                ( model, Cmd.none )
+
+            else
+                onRequestFailure error
+                    model
+                    (\_ current ->
+                        ( { current
+                            | roles =
+                                Roles.withListing
+                                    (Roles.Failed (ApiError.fromError error))
+                                    current.roles
+                          }
+                        , Cmd.none
+                        )
+                    )
+
+        GotRoleSaved (Ok role) ->
+            -- The act is over the moment the server says so; the listing is refetched
+            -- because the answer to `putRole` is one Role and this screen is about all
+            -- of them.
+            fetchRoles
+                { model | roles = Roles.withSubmission (Roles.Saved role.name) model.roles }
+
+        GotRoleSaved (Err error) ->
+            onRequestFailure error
+                model
+                (\_ current ->
+                    ( { current
+                        | roles =
+                            Roles.withSubmission
+                                (Roles.Rejected (ApiError.fromError error))
+                                current.roles
+                      }
+                    , Cmd.none
+                    )
+                )
+
+        GotRoleDeleted name (Ok ()) ->
+            -- Editing the Role that has just stopped existing is a form that would
+            -- recreate it on save, so that Draft goes with it. Another Role's edit is
+            -- left alone.
+            let
+                edited =
+                    if model.roles.draft.name == name then
+                        Roles.withDraft Roles.newDraft model.roles
+
+                    else
+                        model.roles
+            in
+            -- The refusal a previous deletion left is spent: it was about an attempt that
+            -- this one has now outlived, and leaving it up reports a failure over a list
+            -- that just succeeded.
+            fetchRoles
+                { model
+                    | roles =
+                        edited
+                            |> Roles.withSubmission Roles.Ready
+                            |> Roles.withDeletion Nothing
+                }
+
+        GotRoleDeleted _ (Err error) ->
+            onRequestFailure error
+                model
+                (\_ current ->
+                    ( { current
+                        | roles =
+                            current.roles
+                                |> Roles.withSubmission Roles.Ready
+                                |> Roles.withDeletion (Just (ApiError.fromError error))
+                      }
+                    , Cmd.none
+                    )
+                )
+
+        ApiKeyNameChanged name ->
+            ( { model | apiKeys = ApiKeys.withDraft (ApiKeys.withName name model.apiKeys.draft) model.apiKeys }
+            , Cmd.none
+            )
+
+        ApiKeyExpiryChosen chosen ->
+            ( { model | apiKeys = ApiKeys.withDraft (ApiKeys.withExpiry chosen model.apiKeys.draft) model.apiKeys }
+            , Cmd.none
+            )
+
+        ApiKeyActionToggled action ->
+            ( { model | apiKeys = ApiKeys.toggle action model.apiKeys }, Cmd.none )
+
+        ApiKeyCreateSubmitted ->
+            if model.apiKeys.creation == ApiKeys.Creating then
+                ( model, Cmd.none )
+
+            else
+                ( { model | apiKeys = ApiKeys.withCreation ApiKeys.Creating model.apiKeys }
+                , ApiKeys.create model.apiUrl (ApiKeys.offerable model.identity model.apiKeys.registry) model.apiKeys.draft GotApiKeyCreated
+                )
+
+        ApiKeyRevealDismissed ->
+            -- The key's value leaves the model with the panel. It was only ever here to
+            -- be read once, and a dismissed panel that still held it would be a copy nobody
+            -- asked to keep.
+            ( { model
+                | apiKeys =
+                    model.apiKeys
+                        |> ApiKeys.withCreation ApiKeys.Ready
+                        |> ApiKeys.withDraft ApiKeys.newDraft
+              }
+            , Cmd.none
+            )
+
+        ApiKeyRevokeRequested id ->
+            ( { model | apiKeys = ApiKeys.withConfirming (Just id) model.apiKeys }, Cmd.none )
+
+        ApiKeyRevokeCancelled ->
+            ( { model | apiKeys = ApiKeys.withConfirming Nothing model.apiKeys }, Cmd.none )
+
+        ApiKeyRevokeConfirmed id ->
+            ( { model | apiKeys = ApiKeys.withConfirming Nothing model.apiKeys }
+            , ApiKeys.delete model.apiUrl id GotApiKeyDeleted
+            )
+
+        GotApiKeys apiKeysEpoch (Ok fetched) ->
+            if apiKeysEpoch /= model.apiKeysEpoch then
+                ( model, Cmd.none )
+
+            else
+                ( { model | apiKeys = ApiKeys.withListing (ApiKeys.Loaded fetched) model.apiKeys }
+                , Cmd.none
+                )
+
+        GotApiKeys apiKeysEpoch (Err error) ->
+            if apiKeysEpoch /= model.apiKeysEpoch then
+                ( model, Cmd.none )
+
+            else
+                onRequestFailure error
+                    model
+                    (\_ current ->
+                        ( { current
+                            | apiKeys =
+                                ApiKeys.withListing
+                                    (ApiKeys.Failed (ApiError.fromError error))
+                                    current.apiKeys
+                          }
+                        , Cmd.none
+                        )
+                    )
+
+        GotObjectActions apiKeysEpoch (Ok actions) ->
+            if apiKeysEpoch /= model.apiKeysEpoch then
+                ( model, Cmd.none )
+
+            else
+                ( { model | apiKeys = ApiKeys.withRegistry (Just actions) model.apiKeys }
+                , Cmd.none
+                )
+
+        GotObjectActions _ (Err _) ->
+            -- The registry is an expansion, not the screen. Without it `ApiKeys.offerable`
+            -- falls back to the Identity's own concrete Object actions, which is a smaller
+            -- offer rather than a broken page — so this failure is not reported as one.
+            ( model, Cmd.none )
+
+        GotApiKeyCreated (Ok revealed) ->
+            -- The key's value is put on screen before the listing is refetched: the
+            -- refetch cannot return it, and a reader who navigates away has lost it.
+            let
+                ( refetched, cmd ) =
+                    fetchApiKeys model
+            in
+            ( { refetched | apiKeys = ApiKeys.withCreation (ApiKeys.Created revealed) refetched.apiKeys }
+            , cmd
+            )
+
+        GotApiKeyCreated (Err error) ->
+            onRequestFailure error
+                model
+                (\_ current ->
+                    ( { current
+                        | apiKeys =
+                            ApiKeys.withCreation
+                                (ApiKeys.Rejected (ApiError.fromError error))
+                                current.apiKeys
+                      }
+                    , Cmd.none
+                    )
+                )
+
+        GotApiKeyDeleted (Ok ()) ->
+            let
+                ( refetched, cmd ) =
+                    fetchApiKeys model
+            in
+            ( { refetched | apiKeys = ApiKeys.withRevocation Nothing refetched.apiKeys }, cmd )
+
+        GotApiKeyDeleted (Err error) ->
+            onRequestFailure error
+                model
+                (\_ current ->
+                    ( { current
+                        | apiKeys =
+                            ApiKeys.withRevocation (Just (ApiError.fromError error)) current.apiKeys
+                      }
+                    , Cmd.none
+                    )
+                )
+
+        SignOutRequested ->
+            if model.signOut == UserOverview.SigningOut then
+                ( model, Cmd.none )
+
+            else
+                ( { model | signOut = UserOverview.SigningOut }
+                , UserOverview.signOut model.apiUrl GotSignOut
+                )
+
+        GotSignOut (Ok ()) ->
+            signedOut model
+
+        GotSignOut (Err error) ->
+            let
+                failure =
+                    ApiError.fromError error
+            in
+            if ApiError.isUnauthorized failure then
+                -- Refusing to sign out a caller it does not consider signed in is the
+                -- outcome that was asked for: whatever the browser is still sending,
+                -- bitmagnet no longer accepts it as a User.
+                signedOut model
+
+            else
+                -- Anything else leaves the cookie where it was, so nothing has changed
+                -- and the page says so and offers the action again.
+                ( { model | signOut = UserOverview.Refused failure }, Cmd.none )
+
+        PasswordChangeCurrentChanged current ->
+            ( { model | passwordChange = PasswordChange.withCurrent current model.passwordChange }
+            , Cmd.none
+            )
+
+        PasswordChangeNewChanged new ->
+            scorePassword ForPasswordChange
+                new
+                { model | passwordChange = PasswordChange.withNew new model.passwordChange }
+
+        PasswordChangeSubmitted ->
+            case PasswordChange.sending model.identity model.passwordChange of
+                Just ( sending, sent ) ->
+                    ( { model | passwordChange = sending }
+                    , PasswordChange.submit model.apiUrl sending (GotPasswordChange sent)
+                    )
+
+                Nothing ->
+                    ( model, Cmd.none )
+
+        GotPasswordChange sent result ->
+            passwordChangeAnswered
+                (PasswordChange.answered model.basePath sent result model.passwordChange model.login)
+                model
+
+        AuthenticationChanged ->
+            beginIdentityRefresh Resolving model
+
+        IdentityRetryRequested ->
+            case ( model.identity, model.identityRefresh ) of
+                ( Identity.Failed _, AfterSignIn ) ->
+                    -- The cookie is already set. This is another Identity query, not
+                    -- another authentication change to announce to the other tabs.
+                    beginIdentityRefresh AfterSignIn model
+
+                _ ->
+                    ( model, Cmd.none )
+
+        AuthenticationChangedHere reason ->
+            -- Sign-in, sign-out and an accepted password change dispatch this after bitmagnet
+            -- confirms the mutation. Keeping local state updates in those workflows avoids
+            -- bouncing our own notification back through the channel.
+            let
+                ( refreshing, refresh ) =
+                    beginIdentityRefresh reason model
+            in
+            ( refreshing, Cmd.batch [ authenticationChanged (), refresh ] )
+
+        VisibilityChanged Browser.Events.Visible ->
+            -- Polling stopped while the tab was away, so the header is as old as the
+            -- moment it was hidden. Ask now rather than at the next poll.
+            let
+                ( refreshed, healthCmd ) =
+                    refreshHealth { model | visible = True }
+
+                -- And so is a chart that was asked to keep itself fresh.
+                ( looked, statsCmd ) =
+                    if Route.refreshInterval refreshed.route /= Nothing then
+                        lookAgain Regardless refreshed
+
+                    else
+                        ( refreshed, Cmd.none )
+            in
+            ( { looked | identityAsks = looked.identityAsks + 1 }
+            , Cmd.batch
+                [ Identity.fetch model.apiUrl (GotIdentity model.identityEpoch (looked.identityAsks + 1))
+                , healthCmd
+                , statsCmd
+                ]
+            )
+
+        VisibilityChanged Browser.Events.Hidden ->
+            ( { model | visible = False }, Cmd.none )
+
+        HealthPollDue ->
+            if model.visible then
+                refreshHealth model
+
+            else
+                ( model, Cmd.none )
+
+        GotHealth healthEpoch result ->
+            if healthEpoch /= model.healthEpoch then
+                ( model, Cmd.none )
+
+            else
+                case result of
+                    Ok report ->
+                        ( { model | health = Health.Reported report }, Cmd.none )
+
+                    Err error ->
+                        case model.identity of
+                            -- Asked without a known Identity, so a refusal says nothing new
+                            -- about the credential. Refreshing the Identity on it, as any
+                            -- other refusal does, could fail again and ask again, forever.
+                            Identity.Failed _ ->
+                                ( { model | health = Health.Unavailable (ApiError.fromError error) }
+                                , Cmd.none
+                                )
+
+                            _ ->
+                                onRequestFailure error
+                                    model
+                                    (\_ current ->
+                                        ( { current | health = Health.Unavailable (ApiError.fromError error) }
+                                        , Cmd.none
+                                        )
+                                    )
+
+        GotIdentity identityEpoch ask result ->
+            if identityEpoch /= model.identityEpoch then
+                ( model, Cmd.none )
+
+            else
+                case result of
+                    Err error ->
+                        let
+                            message =
+                                refreshFailure model.identityRefresh
+                                    (ApiError.toMessage (ApiError.fromError error))
+                        in
+                        -- Health is still asked for. Not reaching bitmagnet is exactly what
+                        -- the header should say, and an answer is worth showing either way.
+                        refreshHealth
+                            { model
+                                | identity = Identity.Failed message
+                                , results = Failed message
+                                , health = Health.Unasked
+                            }
+
+                    Ok identity ->
+                        let
+                            answered =
+                                PasswordChange.identityAnswered model.basePath
+                                    ask
+                                    identity
+                                    model.passwordChange
+                                    model.login
+
+                            ( resolved, cmd ) =
+                                identityResolved identity
+                                    { model | passwordChange = answered.change, login = answered.login }
+                        in
+                        ( resolved, Cmd.batch [ cmd, goTo model answered.goTo ] )
+
+        LinkClicked (Browser.Internal url) ->
+            case ( Route.fromUrl model.basePath url, model.route ) of
+                -- A row's name links to the torrent's own page, which is what makes
+                -- middle-click and "open in new tab" work. But an ordinary click on a
+                -- result should open it where it already is, so the navigation is turned
+                -- back into an expansion. Only from a list: on the torrent page itself the
+                -- link is to the page you are on.
+                ( Route.Torrent hash, Route.Search _ ) ->
+                    ( mapItems
+                        (\item ->
+                            if item.row.infoHash == hash then
+                                { item | expanded = not item.expanded }
+
+                            else
+                                item
+                        )
+                        model
+                    , Cmd.none
+                    )
+
+                _ ->
+                    ( { model | menuOpen = False }
+                    , Nav.pushUrl model.key (Url.toString url)
+                    )
+
+        LinkClicked (Browser.External url) ->
+            ( model, Nav.load url )
+
+        UrlChanged url ->
+            let
+                route =
+                    Route.fromUrl model.basePath url
+            in
+            if route == model.route then
+                -- Same query re-submitted; don't throw away results to fetch them again.
+                ( model, Cmd.none )
+
+            else if Route.sameQuestion model.route route then
+                -- The page has the answer to this already: how often to look again is not
+                -- what to look at, and the statistics pages pick their events (and the queue's
+                -- queues) out of the answer they have. The chart stays, drawn as the route now says,
+                -- and the timer is the subscription's to restart.
+                ( { model | route = route }, Cmd.none )
+
+            else
+                let
+                    -- Leaving a screen ends what was on it: an armed ask, a refusal, the
+                    -- page being read — and the epoch moves with it, so an answer still
+                    -- in flight from the screen just left belongs to no future screen.
+                    -- The search debounce is spent with them: a timer still pending has
+                    -- no search left to run.
+                    leaving =
+                        { model
+                            | users = Users.empty
+                            , usersEpoch = model.usersEpoch + 1
+                            , userTyping = model.userTyping + 1
+                            , roles = Roles.empty
+                            , rolesEpoch = model.rolesEpoch + 1
+                            , apiKeys = ApiKeys.empty
+                            , apiKeysEpoch = model.apiKeysEpoch + 1
+
+                            -- Another page of the jobs keeps the one shown until it
+                            -- arrives, so a chosen filter does not blank the screen.
+                            , jobs =
+                                case ( model.route, route ) of
+                                    ( Route.QueueJobs _, Route.QueueJobs _ ) ->
+                                        QueueJobs.refreshing model.jobs
+
+                                    _ ->
+                                        QueueJobs.empty
+
+                            -- The same for the torrent timeline and the queue's statistics:
+                            -- the old chart stays, quieter, until the new one comes.
+                            , torrentStats =
+                                case ( model.route, route ) of
+                                    ( Route.TorrentStats _, Route.TorrentStats _ ) ->
+                                        StatsLook.refreshing model.torrentStats
+
+                                    _ ->
+                                        StatsLook.empty
+                            , queueStats =
+                                case ( model.route, route ) of
+                                    ( Route.QueueStats _, Route.QueueStats _ ) ->
+                                        StatsLook.refreshing model.queueStats
+
+                                    _ ->
+                                        StatsLook.empty
+                        }
+
+                    epoch =
+                        model.epoch + 1
+
+                    ( results, cmd ) =
+                        guardedLoad leaving model.identity epoch route
+
+                    navigated =
+                        { leaving
+                            | route = route
+                            , menuOpen = False
+                            , field = syncField model route
+
+                            -- A refusal described one attempt on one visit. Leaving the
+                            -- page ends it, so coming back does not reopen it as though
+                            -- something had just failed.
+                            , signOut = UserOverview.Ready
+
+                            -- And takes the passwords typed into the password change with
+                            -- it, though not a change sent and unsettled: its answer may still
+                            -- come, and if it is lost, its new password may be the one that
+                            -- now signs in.
+                            , passwordChange = PasswordChange.left model.passwordChange
+
+                            -- Why the login form was opened is said only on arrival there.
+                            , login =
+                                case route of
+                                    Route.Login _ ->
+                                        PasswordChange.loginOnArrival model.basePath
+                                            model.identity
+                                            model.route
+                                            model.passwordChange
+                                            model.login
+
+                                    _ ->
+                                        Login.withoutReason model.login
+
+                            -- Arriving at registration takes the Invitation from the
+                            -- link; arriving anywhere else drops a password that is no
+                            -- longer being typed into anything.
+                            , register = Register.prefilled (invitationCodeFor route)
+
+                            -- Leaving the screen ends what was on it: an armed
+                            -- withdrawal, a refusal, and the page that was being read.
+                            , invitations = Invitations.empty
+
+                            -- And abandons any measurement of that password. Without
+                            -- this, one still in flight when the page was left comes
+                            -- back to a form nobody has typed into and scores it.
+                            , scoring = model.scoring + 1
+                            , results = results
+                            , epoch = epoch
+                            , infiniteList = InfiniteList.init
+                        }
+
+                    -- The status page is opened to see how bitmagnet is now, not at the last
+                    -- poll, which may be up to half a minute old.
+                    ( arrived, healthCmd ) =
+                        if route == Route.Status then
+                            refreshHealth navigated
+
+                        else
+                            ( navigated, Cmd.none )
+                in
+                ( arrived
+                , Cmd.batch
+                    [ cmd, scrollListToTop, focusIfFormAppeared model navigated, healthCmd ]
+                )
+
+        FieldChanged field ->
+            let
+                typing =
+                    model.typing + 1
+            in
+            ( { model | field = field, typing = typing }
+            , Process.sleep debounceMs |> Task.perform (\_ -> DebounceElapsed typing)
+            )
+
+        DebounceElapsed typing ->
+            if typing /= model.typing then
+                -- Another keystroke landed; that one owns the search.
+                ( model, Cmd.none )
+
+            else
+                ( model
+                , Nav.replaceUrl model.key (Route.toHref model.basePath (currentSearch model))
+                )
+
+        Submitted ->
+            ( model, Nav.pushUrl model.key (Route.toHref model.basePath (currentSearch model)) )
+
+        SortChanged raw ->
+            -- Choosing an ordering is a deliberate act, so it earns a history entry —
+            -- unlike the keystrokes that `replaceUrl` collapses.
+            ( model
+            , Nav.pushUrl model.key
+                (Route.toHref model.basePath (searchRoute model (Sort.fromParam raw) (currentFilters model)))
+            )
+
+        FiltersToggled ->
+            ( { model | filtersOpen = not model.filtersOpen }, Cmd.none )
+
+        FilterChanged filters ->
+            ( model
+            , Nav.pushUrl model.key
+                (Route.toHref model.basePath (searchRoute model (currentSort model) filters))
+            )
+
+        Resized height ->
+            ( { model | viewportHeight = height }, Cmd.none )
+
+        GotZone zone ->
+            -- Arrives during startup, normally before any results; re-date whatever is
+            -- already on screen rather than leaving a stray UTC row behind.
+            ( { model | zone = zone }
+                |> mapItems (\item -> { item | published = Format.date zone item.row.publishedAt })
+            , Cmd.none
+            )
+
+        ToggleExpanded rowId ->
+            ( mapItem rowId (\item -> { item | expanded = not item.expanded }) model
+            , Cmd.none
+            )
+
+        ToggleFiles rowId ->
+            if not (Identity.can (Identity.graphql "torrent" "query") model.identity) then
+                ( model, Cmd.none )
+
+            else
+                case itemById rowId model of
+                    Just item ->
+                        case item.files of
+                            Unopened ->
+                                ( mapItem rowId (\i -> { i | files = Fetching }) model
+                                , Bitmagnet.files item.row.infoHash
+                                    |> Bitmagnet.queryRequest model.apiUrl
+                                    |> Graphql.Http.send (GotFiles rowId)
+                                )
+
+                            _ ->
+                                ( mapItem rowId (\i -> { i | files = Unopened }) model, Cmd.none )
+
+                    Nothing ->
+                        ( model, Cmd.none )
+
+        GotFiles rowId (Ok fileList) ->
+            ( mapItem rowId
+                (\item ->
+                    { item
+                        | files =
+                            Open
+                                { root = FileTree.root item.row.name fileList.files
+
+                                -- Every folder open. Opening the root is one gesture that
+                                -- shows the whole shape; closing them again is per folder.
+                                , collapsed = Set.empty
+                                , omission = omissions fileList
+                                }
+                    }
+                )
+                model
+            , Cmd.none
+            )
+
+        ToggleFolder rowId key ->
+            ( mapItem rowId
+                (\item ->
+                    case item.files of
+                        Open open ->
+                            { item
+                                | files =
+                                    Open
+                                        { open
+                                            | collapsed =
+                                                if Set.member key open.collapsed then
+                                                    Set.remove key open.collapsed
+
+                                                else
+                                                    Set.insert key open.collapsed
+                                        }
+                            }
+
+                        _ ->
+                            item
+                )
+                model
+            , Cmd.none
+            )
+
+        GotFiles rowId (Err error) ->
+            onRequestFailure error
+                model
+                (\message current ->
+                    ( mapItem rowId (\item -> { item | files = FilesFailed message }) current
+                    , Cmd.none
+                    )
+                )
+
+        Scrolled event ->
+            let
+                scrolled =
+                    { model | infiniteList = InfiniteList.updateScroll event model.infiniteList }
+            in
+            if nearBottom event then
+                requestMore scrolled
+
+            else
+                ( scrolled, Cmd.none )
+
+        JobsChosen params ->
+            ( model, Nav.pushUrl model.key (Route.toHref model.basePath (Route.QueueJobs params)) )
+
+        QueueAdminQueueToggled queue ->
+            let
+                ( queueAdmin, call ) =
+                    QueueAdmin.toggleQueue queue model.queueAdmin
+            in
+            callQueue call { model | queueAdmin = queueAdmin }
+
+        QueueAdminStatusToggled status ->
+            let
+                ( queueAdmin, call ) =
+                    QueueAdmin.toggleStatus status model.queueAdmin
+            in
+            callQueue call { model | queueAdmin = queueAdmin }
+
+        QueueAdminFormEdited change ->
+            ( { model | queueAdmin = QueueAdmin.edit change model.queueAdmin }, Cmd.none )
+
+        QueueAdminPurgeAsked ->
+            ( { model | queueAdmin = QueueAdmin.askPurge model.queueAdmin }, Cmd.none )
+
+        QueueAdminReprocessAsked ->
+            ( { model | queueAdmin = QueueAdmin.askReprocess model.queueAdmin }, Cmd.none )
+
+        QueueAdminActCancelled ->
+            ( { model | queueAdmin = QueueAdmin.cancel model.queueAdmin }, Cmd.none )
+
+        QueueAdminActConfirmed ->
+            case QueueAdmin.confirm model.queueAdmin of
+                ( queueAdmin, Just call ) ->
+                    callQueue call { model | queueAdmin = queueAdmin }
+
+                ( _, Nothing ) ->
+                    ( model, Cmd.none )
+
+        QueueAdminRecountAsked ->
+            let
+                ( queueAdmin, call ) =
+                    QueueAdmin.recount model.queueAdmin
+            in
+            callQueue call { model | queueAdmin = queueAdmin }
+
+        GotQueueAdminCount epoch scope result ->
+            if epoch /= model.epoch then
+                ( model, Cmd.none )
+
+            else
+                case result of
+                    Ok counts ->
+                        ( { model | queueAdmin = QueueAdmin.counted scope (Ok counts) model.queueAdmin }, Cmd.none )
+
+                    Err error ->
+                        onRequestFailure error
+                            model
+                            (\_ current ->
+                                ( { current | queueAdmin = QueueAdmin.counted scope (Err (ApiError.fromError error)) current.queueAdmin }
+                                , Cmd.none
+                                )
+                            )
+
+        GotQueueAdminAct call result ->
+            -- The answer is the act's first, whatever else it says: it ends the act on its way,
+            -- which outlasts leaving the page and a refetched Identity alike. Then a refusal
+            -- that says the Identity is stale refetches it, and anything else sends the recount
+            -- the page asks for, which it does only while it is showing and allowed.
+            let
+                ( queueAdmin, recount ) =
+                    QueueAdmin.answered (queueAdminWhereabouts model) call result model.queueAdmin
+
+                answered =
+                    { model | queueAdmin = queueAdmin }
+
+                counting current =
+                    case recount of
+                        Just countCall ->
+                            callQueue countCall current
+
+                        Nothing ->
+                            ( current, Cmd.none )
+            in
+            case result of
+                Ok () ->
+                    counting answered
+
+                Err error ->
+                    onRequestFailure error answered (\_ current -> counting current)
+
+        JobToggled jobId ->
+            ( { model | jobs = QueueJobs.toggle jobId model.jobs }, Cmd.none )
+
+        GotJobs epoch result ->
+            if epoch /= model.epoch then
+                ( model, Cmd.none )
+
+            else
+                case result of
+                    Ok fetched ->
+                        ( { model | jobs = QueueJobs.loaded fetched model.jobs }, Cmd.none )
+
+                    Err error ->
+                        onRequestFailure error
+                            model
+                            (\_ current ->
+                                ( { current | jobs = QueueJobs.failed (ApiError.fromError error) current.jobs }
+                                , Cmd.none
+                                )
+                            )
+
+        TorrentStatsChosen params ->
+            chooseStats (Route.TorrentStats params) model
+
+        QueueStatsChosen params ->
+            chooseStats (Route.QueueStats params) model
+
+        StatsRefreshDue ->
+            if model.visible then
+                lookAgain IfIdle model
+
+            else
+                ( model, Cmd.none )
+
+        StatsRefreshRequested ->
+            lookAgain Regardless model
+
+        GotTorrentStats epoch result ->
+            case StatsLook.answerFor { askedUnder = epoch, current = model.epoch } (torrentStatsOn model.route) of
+                Just params ->
+                    case result of
+                        Ok fetched ->
+                            ( { model | torrentStats = TorrentStats.loaded params fetched model.torrentStats }, Cmd.none )
+
+                        Err error ->
+                            onRequestFailure error
+                                model
+                                (\_ current ->
+                                    ( { current | torrentStats = TorrentStats.failed params (ApiError.fromError error) current.torrentStats }
+                                    , Cmd.none
+                                    )
+                                )
+
+                -- Asked under a look that has been left, or a newer one was asked for.
+                Nothing ->
+                    ( model, Cmd.none )
+
+        GotQueueStats epoch result ->
+            case StatsLook.answerFor { askedUnder = epoch, current = model.epoch } (queueStatsOn model.route) of
+                Just params ->
+                    case result of
+                        Ok fetched ->
+                            ( { model | queueStats = QueueStats.loaded params fetched model.queueStats }, Cmd.none )
+
+                        Err error ->
+                            onRequestFailure error
+                                model
+                                (\_ current ->
+                                    ( { current | queueStats = QueueStats.failed params (ApiError.fromError error) current.queueStats }
+                                    , Cmd.none
+                                    )
+                                )
+
+                -- Asked under a look that has been left, or a newer one was asked for.
+                Nothing ->
+                    ( model, Cmd.none )
+
+        GotResults epoch result ->
+            if epoch /= model.epoch then
+                -- A page for a query the user has already moved on from.
+                ( model, Cmd.none )
+
+            else
+                case result of
+                    Ok page ->
+                        let
+                            appended =
+                                { model | results = append model.zone page model.results }
+                        in
+                        case model.route of
+                            -- The torrent page is the expanded row, standalone: there is
+                            -- nothing to scroll and nothing to reveal.
+                            Route.Torrent _ ->
+                                ( mapItems (\item -> { item | expanded = True }) appended, Cmd.none )
+
+                            _ ->
+                                fillViewport appended
+
+                    Err error ->
+                        onRequestFailure error
+                            model
+                            (\message current ->
+                                ( { current | results = Failed message }, Cmd.none )
+                            )
+
+
+{-| The torrent timeline's look, on its route.
+-}
+torrentStatsOn : Route -> Maybe Route.TorrentStatsParams
+torrentStatsOn route =
+    case route of
+        Route.TorrentStats params ->
+            Just params
+
+        _ ->
+            Nothing
+
+
+{-| The queue's statistics' look, on their route.
+-}
+queueStatsOn : Route -> Maybe Route.QueueStatsParams
+queueStatsOn route =
+    case route of
+        Route.QueueStats params ->
+            Just params
+
+        _ ->
+            Nothing
+
+
+{-| A statistics page's controls, or its queues, events or sources, chosen: `route` is the page
+as they would make it.
+-}
+chooseStats : Route -> Model -> ( Model, Cmd Msg )
+chooseStats route model =
+    if route == model.route then
+        -- A chip already in force, or a number typed that came to the multiplier already in
+        -- force: nothing to ask for, and no history entry. Elm draws the page again all the
+        -- same, which puts a field's value back to what the page says, so a number that was
+        -- typed and not kept does not stay in it.
+        ( model, Cmd.none )
+
+    else
+        -- Choosing what to look at is a deliberate act, so it earns a history entry.
+        ( model, Nav.pushUrl model.key (Route.toHref model.basePath route) )
+
+
+{-| Send what the queue's administration asks for, under a fresh epoch, so that only the
+answer to the newest count is drawn. The page asks for nothing while it is not showing, and an
+act's answer, the one answer not checked by epoch, is checked by its number.
+-}
+callQueue : QueueAdmin.Call -> Model -> ( Model, Cmd Msg )
+callQueue call model =
+    let
+        epoch =
+            model.epoch + 1
+    in
+    ( { model | epoch = epoch }
+    , QueueAdmin.send model.apiUrl (queueAdminCalls epoch) call
+    )
+
+
+{-| Where the answers to the queue's administration's calls go: a count under `epoch`.
+-}
+queueAdminCalls :
+    Int
+    ->
+        { counted : QueueAdmin.Scope -> Result (Graphql.Http.Error QueueAdmin.Tally) QueueAdmin.Tally -> Msg
+        , acted : QueueAdmin.Call -> Result (Graphql.Http.Error ()) () -> Msg
+        }
+queueAdminCalls epoch =
+    { counted = GotQueueAdminCount epoch
+    , acted = GotQueueAdminAct
+    }
+
+
+queueAdminMessages : QueueAdmin.Messages Msg
+queueAdminMessages =
+    { queueToggled = QueueAdminQueueToggled
+    , statusToggled = QueueAdminStatusToggled
+    , edited = QueueAdminFormEdited
+    , recountAsked = QueueAdminRecountAsked
+    , purgeAsked = QueueAdminPurgeAsked
+    , reprocessAsked = QueueAdminReprocessAsked
+    , cancelled = QueueAdminActCancelled
+    , confirmed = QueueAdminActConfirmed
+    }
+
+
+torrentStatsMessages : TorrentStats.Messages Msg
+torrentStatsMessages =
+    { navigate = TorrentStatsChosen
+    , refreshRequested = StatsRefreshRequested
+    }
+
+
+queueStatsMessages : QueueStats.Messages Msg
+queueStatsMessages =
+    { navigate = QueueStatsChosen
+    , refreshRequested = StatsRefreshRequested
+    }
+
+
+jobsMessages : QueueJobs.Messages Msg
+jobsMessages =
+    { navigate = JobsChosen
+    , toggled = JobToggled
+    }
+
+
+invitationsMessages : Invitations.Messages Msg
+invitationsMessages =
+    { roleChosen = InvitationRoleChosen
+    , expiryChosen = InvitationExpiryChosen
+    , submitted = InvitationCreateSubmitted
+    , withdrawRequested = InvitationWithdrawRequested
+    , withdrawConfirmed = InvitationWithdrawConfirmed
+    , withdrawCancelled = InvitationWithdrawCancelled
+    , pageRequested = InvitationsPageRequested
+    }
+
+
+usersMessages : Users.Messages Msg
+usersMessages =
+    { queryChanged = UserSearchChanged
+    , pageRequested = UsersPageRequested
+    , roleChosen = UserRoleChosen
+    , disableRequested = UserDisableRequested
+    , enableRequested = UserEnableRequested
+    , deleteRequested = UserDeleteRequested
+    , confirmed = UserActConfirmed
+    , cancelled = UserActCancelled
+    }
+
+
+rolesMessages : Roles.Messages Msg
+rolesMessages =
+    { nameChanged = RoleNameChanged
+    , actionToggled = RoleActionToggled
+    , submitted = RoleSubmitted
+    , editRequested = RoleEditRequested
+    , editCancelled = RoleEditCancelled
+    , deleteRequested = RoleDeleteRequested
+    , confirmed = RoleActConfirmed
+    , cancelled = RoleActCancelled
+    }
+
+
+apiKeysMessages : ApiKeys.Messages Msg
+apiKeysMessages =
+    { nameChanged = ApiKeyNameChanged
+    , expiryChosen = ApiKeyExpiryChosen
+    , actionToggled = ApiKeyActionToggled
+    , submitted = ApiKeyCreateSubmitted
+    , revealDismissed = ApiKeyRevealDismissed
+    , revokeRequested = ApiKeyRevokeRequested
+    , revokeConfirmed = ApiKeyRevokeConfirmed
+    , revokeCancelled = ApiKeyRevokeCancelled
+    }
+
+
+registerMessages : Register.Messages Msg
+registerMessages =
+    { usernameChanged = RegisterUsernameChanged
+    , passwordChanged = RegisterPasswordChanged
+    , invitationCodeChanged = RegisterInvitationCodeChanged
+    , submitted = RegisterSubmitted
+    }
+
+
+userOverviewMessages : UserOverview.Messages Msg
+userOverviewMessages =
+    { signOutRequested = SignOutRequested
+    , passwordChange =
+        { currentChanged = PasswordChangeCurrentChanged
+        , newChanged = PasswordChangeNewChanged
+        , submitted = PasswordChangeSubmitted
+        }
+    }
+
+
+{-| Carry out what `PasswordChange.answered` decided about an answer to a password change.
+
+An accepted change ended every sign-in the User had, this one included, so it is an
+authentication change like sign-out: the other tabs are told, and the Identity is asked for
+again. A refusal saying the Identity is stale asks for it again without telling anyone, as for
+any other request. The new password is offered to the credential store only when bitmagnet
+accepted it.
+
+-}
+passwordChangeAnswered : PasswordChange.Answered -> Model -> ( Model, Cmd Msg )
+passwordChangeAnswered answered model =
+    let
+        settled =
+            { model | passwordChange = answered.change, login = answered.login }
+
+        ( refreshed, refresh ) =
+            case answered.signIn of
+                PasswordChange.Ended ->
+                    updateModel (AuthenticationChangedHere AfterPasswordChange) settled
+
+                PasswordChange.Stale ->
+                    beginIdentityRefresh Resolving settled
+
+                PasswordChange.Unaffected ->
+                    ( settled, Cmd.none )
+    in
+    ( refreshed
+    , Cmd.batch
+        [ answered.offer |> Maybe.map storeCredential |> Maybe.withDefault Cmd.none
+        , goTo model answered.goTo
+        , refresh
+        ]
+    )
+
+
+{-| Replace the address with `destination`, if there is one. `replaceUrl`, so that going back
+does not return to a page the browser has just been signed out of.
+-}
+goTo : Model -> Maybe Route -> Cmd Msg
+goTo model destination =
+    destination
+        |> Maybe.map (\route -> Nav.replaceUrl model.key (Route.toHref model.basePath route))
+        |> Maybe.withDefault Cmd.none
+
+
+{-| bitmagnet has cleared the cookie, so this is an authentication change like any other:
+the other tabs are told and the server is asked what the Identity has become.
+
+The destination is said rather than inferred. The User overview is no longer somewhere
+this Identity may be, and the guard answers that by sending it to a login form asking it
+to come back — which is the one place someone who just signed out is not going.
+
+-}
+signedOut : Model -> ( Model, Cmd Msg )
+signedOut model =
+    let
+        ( refreshed, refresh ) =
+            updateModel (AuthenticationChangedHere AfterSignOut)
+                { model | signOut = UserOverview.Ready }
+    in
+    ( refreshed
+    , Cmd.batch
+        [ Nav.replaceUrl model.key
+            (Route.toHref model.basePath (Route.Search Route.emptySearch))
+        , refresh
+        ]
+    )
+
+
+{-| Ask for a typed password to be measured once typing pauses. Every keystroke in either form
+moves the counter, so only the last one's measurement is asked for, and only its answer lands.
+An empty field has nothing to measure.
+-}
+scorePassword : ScoredFor -> String -> Model -> ( Model, Cmd Msg )
+scorePassword scored password model =
+    let
+        scoring =
+            model.scoring + 1
+    in
+    ( { model | scoring = scoring }
+    , if String.isEmpty password then
+        Cmd.none
+
+      else
+        Process.sleep scoringDebounceMs
+            |> Task.perform (\_ -> ScoringDebounceElapsed scored scoring)
+    )
+
+
+scoredPassword : ScoredFor -> Model -> String
+scoredPassword scored model =
+    case scored of
+        ForRegistration ->
+            Register.passwordOf model.register
+
+        ForPasswordChange ->
+            PasswordChange.newPassword model.passwordChange
+
+
+withMeasurement : ScoredFor -> PasswordEntropy.Entropy -> Model -> Model
+withMeasurement scored measurement model =
+    case scored of
+        ForRegistration ->
+            { model | register = Register.measured measurement model.register }
+
+        ForPasswordChange ->
+            { model | passwordChange = PasswordChange.measured measurement model.passwordChange }
+
+
+loginMessages : Login.Messages Msg
+loginMessages =
+    { usernameChanged = LoginUsernameChanged
+    , passwordChanged = LoginPasswordChanged
+    , submitted = LoginSubmitted
+    }
+
+
+{-| `autofocus` never fires here: `Browser.application` renders a form as a virtual-DOM
+patch rather than a new document. Focus is moved explicitly instead.
+
+What matters is when the form _appears_, which is not the same as when its route is
+entered. Arriving cold on `/login` renders "Resolving Identity…" first, because the guard
+cannot decide anything until `self.identity` answers — so focusing on arrival targets an
+element that does not exist yet, and silently does nothing. The form appears on whichever
+comes second, the navigation or the Identity, so both ask this.
+
+-}
+focusIfFormAppeared : Model -> Model -> Cmd Msg
+focusIfFormAppeared before after =
+    case ( firstField before, firstField after ) of
+        ( _, Nothing ) ->
+            Cmd.none
+
+        ( appeared, Just field ) ->
+            if appeared == Just field then
+                -- The same form was already on screen; the cursor is wherever the person
+                -- put it, and moving it back to the top would be taking it from them.
+                Cmd.none
+
+            else
+                Task.attempt (\_ -> Ignored) (Browser.Dom.focus field)
+
+
+{-| The field focus belongs in on the page as currently drawn, if any. A route whose guard
+has not resolved is not showing its form yet, and neither is a route without one.
+-}
+firstField : Model -> Maybe String
+firstField model =
+    case ( model.route, Route.guard model.basePath model.identity model.route ) of
+        ( Route.Login _, Route.Allowed ) ->
+            Just (Login.focusFieldId model.login)
+
+        ( Route.Register _, Route.Allowed ) ->
+            Just Register.usernameFieldId
+
+        _ ->
+            Nothing
+
+
+{-| Every failed request asks the same question first: does this say the Identity Magnes
+is holding has gone stale? If so the answer is always to refetch it, and whatever the call
+site wanted to show instead never happens. Only once that is ruled out does the call site
+get its message.
+-}
+onRequestFailure :
+    Graphql.Http.Error a
+    -> Model
+    -> (String -> Model -> ( Model, Cmd Msg ))
+    -> ( Model, Cmd Msg )
+onRequestFailure error model toFailed =
+    let
+        failure =
+            ApiError.fromError error
+    in
+    if ApiError.isUnauthorized failure then
+        beginIdentityRefresh Resolving model
+
+    else
+        toFailed (ApiError.toMessage failure) model
+
+
+{-| The timer of a page that looks again by itself. It runs only while the tab is showing:
+a chart nobody can see is not worth the requests, and `VisibilityChanged` looks again the
+moment the tab returns. Which pages have one is `Route.refreshInterval`'s to say.
+-}
+statsTimer : Model -> Sub Msg
+statsTimer model =
+    case ( model.visible, Route.refreshInterval model.route ) of
+        ( True, Just interval ) ->
+            Time.every interval (\_ -> StatsRefreshDue)
+
+        _ ->
+            Sub.none
+
+
+{-| How firmly a page is told to look again. A timer asks `IfIdle`: one that fires over a slow
+request waits for the next tick rather than piling another on. A person asking, or a tab
+coming back to the front, asks `Regardless`, and the request on its way, which may be one that
+is never answered, is given up on.
+-}
+type Nudge
+    = IfIdle
+    | Regardless
+
+
+{-| Look again, under a fresh epoch so that only the newest answer lands. Every route is
+listed, with no catch-all, so that a page that is given a timer (`Route.refreshInterval`)
+cannot be left without the look it asks for.
+-}
+lookAgain : Nudge -> Model -> ( Model, Cmd Msg )
+lookAgain nudge model =
+    if Route.guard model.basePath model.identity model.route /= Route.Allowed then
+        ( model, Cmd.none )
+
+    else
+        case model.route of
+            Route.TorrentStats params ->
+                if nudge == IfIdle && not (StatsLook.timerDue params.controls model.torrentStats) then
+                    ( model, Cmd.none )
+
+                else
+                    let
+                        epoch =
+                            model.epoch + 1
+                    in
+                    ( { model | epoch = epoch, torrentStats = StatsLook.refreshing model.torrentStats }
+                    , TorrentStats.fetch model.apiUrl params (GotTorrentStats epoch)
+                    )
+
+            Route.QueueStats params ->
+                if nudge == IfIdle && not (StatsLook.timerDue params.controls model.queueStats) then
+                    ( model, Cmd.none )
+
+                else
+                    let
+                        epoch =
+                            model.epoch + 1
+                    in
+                    ( { model | epoch = epoch, queueStats = StatsLook.refreshing model.queueStats }
+                    , QueueStats.fetch model.apiUrl params (GotQueueStats epoch)
+                    )
+
+            Route.Search _ ->
+                ( model, Cmd.none )
+
+            Route.Torrent _ ->
+                ( model, Cmd.none )
+
+            Route.Login _ ->
+                ( model, Cmd.none )
+
+            Route.Register _ ->
+                ( model, Cmd.none )
+
+            Route.UserOverview ->
+                ( model, Cmd.none )
+
+            Route.APIKeys ->
+                ( model, Cmd.none )
+
+            Route.AdminUsers ->
+                ( model, Cmd.none )
+
+            Route.AdminRoles ->
+                ( model, Cmd.none )
+
+            Route.AdminInvitations ->
+                ( model, Cmd.none )
+
+            Route.AdminQueue ->
+                ( model, Cmd.none )
+
+            Route.Status ->
+                ( model, Cmd.none )
+
+            Route.QueueJobs _ ->
+                ( model, Cmd.none )
+
+            Route.NotFound ->
+                ( model, Cmd.none )
+
+
+{-| Ask for the health report again, under a fresh epoch so that only the newest answer
+lands. Which fields are asked for depends on the Identity, so nothing is asked while it is
+being resolved, and an Identity that may not read health has nothing to show.
+
+An Identity that could not be resolved is still asked for, without workers. The likeliest
+reason it failed is that bitmagnet cannot be reached, which is what the header should say
+rather than go blank.
+
+-}
+refreshHealth : Model -> ( Model, Cmd Msg )
+refreshHealth model =
+    if mayAskHealth model.identity then
+        let
+            healthEpoch =
+                model.healthEpoch + 1
+        in
+        ( { model | healthEpoch = healthEpoch }
+        , Health.fetch model.apiUrl model.identity (GotHealth healthEpoch)
+        )
+
+    else
+        ( { model | health = Health.Unasked, healthEpoch = model.healthEpoch + 1 }, Cmd.none )
+
+
+mayAskHealth : Identity.Identity -> Bool
+mayAskHealth identity =
+    case identity of
+        Identity.Unknown ->
+            False
+
+        Identity.Failed _ ->
+            True
+
+        _ ->
+            Identity.can (Identity.graphql "health" "query") identity
+
+
+{-| Refetch the User listing under a fresh epoch, so only the answer to this very
+question is applied. Every trigger goes through here: the search, a page turn, and the
+refetch an act performs once the server has accepted it.
+-}
+fetchUsers : Model -> ( Model, Cmd Msg )
+fetchUsers model =
+    let
+        usersEpoch =
+            model.usersEpoch + 1
+    in
+    ( { model | usersEpoch = usersEpoch }
+    , Users.fetch model.apiUrl model.users.query model.users.offset (GotUsers usersEpoch)
+    )
+
+
+{-| Refetch the API-key listing under a fresh epoch, for the same reason the Role listing
+does: `createAPIKey` answers with one key and `deleteAPIKey` with nothing, and the screen
+is about all of them. The registry is not refetched — it is bitmagnet's, and neither act
+changes it.
+-}
+fetchApiKeys : Model -> ( Model, Cmd Msg )
+fetchApiKeys model =
+    let
+        apiKeysEpoch =
+            model.apiKeysEpoch + 1
+    in
+    ( { model | apiKeysEpoch = apiKeysEpoch }
+    , ApiKeys.fetch model.apiUrl (GotApiKeys apiKeysEpoch)
+    )
+
+
+{-| An armed Role act, confirmed: the ask is spent and the act is the only one running.
+-}
+armed : Roles.State -> Roles.State
+armed roles =
+    roles
+        |> Roles.withConfirming Nothing
+        |> Roles.withSubmission Roles.Saving
+
+
+{-| Refetch the Role listing under a fresh epoch, so only the answer to this very question
+is applied. Both acts come through here once the server has accepted them: `putRole`
+answers with one Role and `deleteRole` with nothing, and the screen is about all of them.
+-}
+fetchRoles : Model -> ( Model, Cmd Msg )
+fetchRoles model =
+    let
+        rolesEpoch =
+            model.rolesEpoch + 1
+    in
+    ( { model | rolesEpoch = rolesEpoch }
+    , Roles.fetch model.apiUrl (GotRoles rolesEpoch)
+    )
+
+
+{-| An act whose ask was confirmed: the ask is spent, the act is the only one running,
+and its refusal, if it comes, is announced above the list.
+-}
+actConfirmed : Model -> Cmd Msg -> ( Model, Cmd Msg )
+actConfirmed model cmd =
+    ( { model
+        | users =
+            model.users
+                |> Users.withConfirming Nothing
+                |> Users.withAction Users.Working
+      }
+    , cmd
+    )
+
+
+{-| The server accepted the act. The act itself is over the moment the server says so
+— leaving `Working` set here would hold every control on the screen disabled until a
+navigation — and the listing is refetched to show what the server now says, since the
+mutation's own answer is not spliced in.
+-}
+actAccepted : Model -> ( Model, Cmd Msg )
+actAccepted model =
+    fetchUsers { model | users = Users.withAction Users.None model.users }
+
+
+{-| A refused act keeps its refusal for the screen to announce, unless the refusal says
+the Identity in hand has gone stale — in which case the answer is always to refetch it,
+and whatever the act wanted to say never happens.
+-}
+gotActFailure : Graphql.Http.Error a -> Model -> ( Model, Cmd Msg )
+gotActFailure error model =
+    onRequestFailure error
+        model
+        (\_ current ->
+            ( { current | users = Users.withAction (Users.Refused (ApiError.fromError error)) current.users }
+            , Cmd.none
+            )
+        )
+
+
+{-| The URL is the source of truth for what was searched, but not for what is in the box:
+adopting the parsed value mid-typing would eat a trailing space. Only take the URL's
+version when it says something different from what is typed — a back button, or a link.
+-}
+syncField : Model -> Route -> String
+syncField model route =
+    case route of
+        Route.Search params ->
+            if trimToMaybe model.field == params.q then
+                model.field
+
+            else
+                Maybe.withDefault "" params.q
+
+        _ ->
+            model.field
+
+
+{-| The search the box and the menu currently describe. Both the field and the ordering
+travel together, so changing one never silently drops the other.
+-}
+searchRoute : Model -> Sort -> Facet.Filters -> Route
+searchRoute model sort filters =
+    Route.Search { q = trimToMaybe model.field, sort = sort, filters = filters }
+
+
+currentSort : Model -> Sort
+currentSort model =
+    case model.route of
+        Route.Search params ->
+            params.sort
+
+        _ ->
+            Sort.default
+
+
+currentFilters : Model -> Facet.Filters
+currentFilters model =
+    filtersFor model.route
+
+
+{-| The search as the box, the menu and the chips currently describe it. All three travel
+together, so changing one never silently drops the others.
+-}
+currentSearch : Model -> Route
+currentSearch model =
+    searchRoute model (currentSort model) (currentFilters model)
+
+
+trimToMaybe : String -> Maybe String
+trimToMaybe raw =
+    case String.trim raw of
+        "" ->
+            Nothing
+
+        trimmed ->
+            Just trimmed
+
+
+
+-- ITEMS
+
+
+itemById : String -> Model -> Maybe Item
+itemById rowId model =
+    case model.results of
+        Feed feed ->
+            List.filter (\item -> item.row.id == rowId) feed.items |> List.head
+
+        _ ->
+            Nothing
+
+
+{-| Rebuilds only the item that changed; every other record keeps its identity, so the
+per-item `lazy3` still skips them.
+-}
+mapItem : String -> (Item -> Item) -> Model -> Model
+mapItem rowId change model =
+    mapItems
+        (\item ->
+            if item.row.id == rowId then
+                change item
+
+            else
+                item
+        )
+        model
+
+
+mapItems : (Item -> Item) -> Model -> Model
+mapItems change model =
+    case model.results of
+        Feed feed ->
+            { model | results = Feed { feed | items = List.map change feed.items } }
+
+        _ ->
+            model
+
+
+
+-- FETCHING
+
+
+pendingResults : Route -> Results
+pendingResults route =
+    case route of
+        Route.NotFound ->
+            Blank
+
+        _ ->
+            Loading
+
+
+loadWhenReady : Identity.Identity -> String -> Epochs -> Route -> ( Results, Cmd Msg )
+loadWhenReady identity apiUrl epochs route =
+    case identity of
+        Identity.Unknown ->
+            ( pendingResults route, Cmd.none )
+
+        Identity.Failed message ->
+            ( Failed message, Cmd.none )
+
+        _ ->
+            if routeNeedsSearch route && not (Identity.can (Identity.graphql "torrentContent" "query") identity) then
+                ( Failed "Your Identity does not permit searching torrent content.", Cmd.none )
+
+            else
+                load identity apiUrl epochs route
+
+
+{-| The four counters a load has to carry. They are separate because they answer
+different questions: whether a page belongs to the search that is on screen, to the
+Identity that is in hand, and to the visit of the User or the Role screen that asked for
+it. A response that fails any check is dropped.
+-}
+type alias Epochs =
+    { query : Int
+    , identity : Int
+    , users : Int
+    , roles : Int
+    , apiKeys : Int
+    }
+
+
+guardedLoad : Model -> Identity.Identity -> Int -> Route -> ( Results, Cmd Msg )
+guardedLoad model identity epoch route =
+    case Route.guard model.basePath identity route of
+        Route.PendingIdentity ->
+            ( pendingResults route, Cmd.none )
+
+        Route.Refused message ->
+            ( Failed message, Cmd.none )
+
+        Route.RedirectTo destination ->
+            ( Blank
+            , Nav.replaceUrl model.key (Route.toHref model.basePath destination)
+            )
+
+        Route.Allowed ->
+            loadWhenReady identity
+                model.apiUrl
+                { query = epoch
+                , identity = model.identityEpoch
+                , users = model.usersEpoch
+                , roles = model.rolesEpoch
+                , apiKeys = model.apiKeysEpoch
+                }
+                route
+
+
+routeNeedsSearch : Route -> Bool
+routeNeedsSearch route =
+    case route of
+        Route.Search _ ->
+            True
+
+        Route.Torrent _ ->
+            True
+
+        Route.Login _ ->
+            False
+
+        Route.Register _ ->
+            False
+
+        Route.UserOverview ->
+            False
+
+        Route.APIKeys ->
+            False
+
+        Route.AdminUsers ->
+            False
+
+        Route.AdminRoles ->
+            False
+
+        Route.AdminInvitations ->
+            False
+
+        Route.AdminQueue ->
+            False
+
+        Route.Status ->
+            False
+
+        Route.QueueJobs _ ->
+            False
+
+        Route.TorrentStats _ ->
+            False
+
+        Route.QueueStats _ ->
+            False
+
+        Route.NotFound ->
+            False
+
+
+{-| The sentence for an Identity that could not be fetched, given what asked for it.
+-}
+refreshFailure : Refresh -> String -> String
+refreshFailure reason message =
+    case reason of
+        Resolving ->
+            message
+
+        AfterSignIn ->
+            "You are signed in. Magnes could not load your Identity: " ++ message
+
+        AfterSignOut ->
+            "You are signed out. Magnes could not load what this instance allows without a User: "
+                ++ message
+
+        -- The change worked; only what came after it did not. Saying so first keeps a
+        -- failure to load from reading as the password change having failed.
+        AfterPasswordChange ->
+            "Your password was changed, and that signed you out everywhere. Magnes could not load what this instance allows without a User: "
+                ++ message
+
+
+beginIdentityRefresh : Refresh -> Model -> ( Model, Cmd Msg )
+beginIdentityRefresh reason model =
+    let
+        epoch =
+            model.epoch + 1
+
+        identityEpoch =
+            model.identityEpoch + 1
+
+        ask =
+            model.identityAsks + 1
+    in
+    ( { model
+        | identity = Identity.Unknown
+        , identityEpoch = identityEpoch
+        , identityAsks = ask
+        , identityRefresh = reason
+
+        -- Whatever the Identity turns out to be, it is no longer the one any sign-out in
+        -- flight or already refused was about.
+        , signOut = UserOverview.Ready
+
+        -- Nor the one whose passwords are typed into the password change. A change sent and
+        -- unsettled is kept: this refresh may be what finds out it went through.
+        , passwordChange = PasswordChange.left model.passwordChange
+
+        -- Nor the one the administration listings were fetched under. The epoch keeps an
+        -- older answer from landing; this keeps the older data from being held.
+        , invitations = Invitations.empty
+        , users = Users.empty
+        , usersEpoch = model.usersEpoch + 1
+        , roles = Roles.empty
+        , rolesEpoch = model.rolesEpoch + 1
+        , jobs = QueueJobs.empty
+        , torrentStats = StatsLook.empty
+        , queueStats = StatsLook.empty
+
+        -- And a pending search-debounce is spent: the timer it would fire belongs to a
+        -- screen that no longer holds the search it was typed into.
+        , userTyping = model.userTyping + 1
+
+        -- The health report was asked for under the old Identity, and may show workers
+        -- the new one may not see. It is asked for again once the Identity is known.
+        , health = Health.Unasked
+        , healthEpoch = model.healthEpoch + 1
+        , results = pendingResults model.route
+        , epoch = epoch
+        , infiniteList = InfiniteList.init
+      }
+    , Cmd.batch
+        [ Identity.fetch model.apiUrl (GotIdentity identityEpoch ask)
+        , scrollListToTop
+        ]
+    )
+
+
+identityResolved : Identity.Identity -> Model -> ( Model, Cmd Msg )
+identityResolved identity model =
+    let
+        ( resolved, cmd ) =
+            identityApplied identity model
+    in
+    -- The reason is spent once an Identity arrives; a later failure is its own event.
+    ( { resolved | identityRefresh = Resolving }
+    , Cmd.batch [ cmd, focusIfFormAppeared model resolved ]
+    )
+
+
+identityApplied : Identity.Identity -> Model -> ( Model, Cmd Msg )
+identityApplied identity model =
+    case model.identity of
+        Identity.Unknown ->
+            let
+                ( results, cmd ) =
+                    guardedLoad model identity model.epoch model.route
+
+                ( refreshed, healthCmd ) =
+                    refreshHealth { model | identity = identity, results = results }
+            in
+            ( refreshed, Cmd.batch [ cmd, healthCmd ] )
+
+        Identity.Failed _ ->
+            let
+                ( results, cmd ) =
+                    guardedLoad model identity model.epoch model.route
+
+                ( refreshed, healthCmd ) =
+                    refreshHealth { model | identity = identity, results = results }
+            in
+            ( refreshed, Cmd.batch [ cmd, healthCmd ] )
+
+        previous ->
+            if previous == identity then
+                ( { model | identity = identity }, Cmd.none )
+
+            else
+                let
+                    epoch =
+                        model.epoch + 1
+
+                    ( results, cmd ) =
+                        guardedLoad model identity epoch model.route
+
+                    -- A different Identity may read different fields: workers, for one.
+                    ( refreshed, healthCmd ) =
+                        refreshHealth
+                            { model
+                                | identity = identity
+                                , health = Health.Unasked
+                                , results = results
+                                , epoch = epoch
+                                , infiniteList = InfiniteList.init
+                            }
+                in
+                ( refreshed
+                , Cmd.batch [ cmd, scrollListToTop, healthCmd ]
+                )
+
+
+{-| What a route needs fetched, and the state to show until it arrives.
+-}
+load : Identity.Identity -> String -> Epochs -> Route -> ( Results, Cmd Msg )
+load identity apiUrl epochs route =
+    case route of
+        Route.Search params ->
+            ( Loading, fetch apiUrl epochs.query (searchArgs params 0) )
+
+        Route.Torrent infoHash ->
+            ( Loading, fetch apiUrl epochs.query (Bitmagnet.byInfoHash infoHash) )
+
+        Route.Login _ ->
+            ( Blank, Cmd.none )
+
+        Route.Register _ ->
+            ( Blank, Cmd.none )
+
+        Route.UserOverview ->
+            ( Blank, Cmd.none )
+
+        Route.APIKeys ->
+            -- Two requests rather than one. `Query.auth` is non-null and permissioned, so
+            -- asking for the Object-action registry beside the keys would cost an ordinary
+            -- User their key list to a field they do not need. It is asked for separately,
+            -- and only by an Identity that has something a registry could expand.
+            ( Blank
+            , Cmd.batch
+                (ApiKeys.fetch apiUrl (GotApiKeys epochs.apiKeys)
+                    :: (if ApiKeys.needsRegistry identity then
+                            [ ApiKeys.fetchRegistry apiUrl (GotObjectActions epochs.apiKeys) ]
+
+                        else
+                            []
+                       )
+                )
+            )
+
+        Route.AdminUsers ->
+            ( Blank, Users.fetch apiUrl "" 0 (GotUsers epochs.users) )
+
+        Route.AdminRoles ->
+            ( Blank, Roles.fetch apiUrl (GotRoles epochs.roles) )
+
+        Route.AdminInvitations ->
+            ( Blank, Invitations.fetch apiUrl 0 (GotInvitations epochs.identity) )
+
+        Route.AdminQueue ->
+            ( Blank
+            , QueueAdmin.send apiUrl (queueAdminCalls epochs.query) QueueAdmin.opening
+            )
+
+        -- The health report is the header's as well as this page's, so it is fetched
+        -- and polled on its own rather than here: see `refreshHealth`.
+        Route.Status ->
+            ( Blank, Cmd.none )
+
+        Route.QueueJobs params ->
+            ( Blank, QueueJobs.fetch apiUrl params (GotJobs epochs.query) )
+
+        Route.TorrentStats params ->
+            ( Blank, TorrentStats.fetch apiUrl params (GotTorrentStats epochs.query) )
+
+        Route.QueueStats params ->
+            ( Blank, QueueStats.fetch apiUrl params (GotQueueStats epochs.query) )
+
+        Route.NotFound ->
+            ( Blank, Cmd.none )
+
+
+searchArgs : Route.SearchParams -> Int -> Bitmagnet.SearchArgs
+searchArgs params offset =
+    { queryString = params.q
+    , infoHashes = []
+    , sort = params.sort
+    , filters = params.filters
+
+    -- Only the first page asks for facet counts; they do not change as you page through,
+    -- and recomputing them over millions of rows on every scroll would be paid for nothing.
+    , aggregate = offset == 0
+    , limit = pageSize
+    , offset = offset
+    }
+
+
+fetch : String -> Int -> Bitmagnet.SearchArgs -> Cmd Msg
+fetch apiUrl epoch args =
+    Bitmagnet.search args
+        |> Bitmagnet.queryRequest apiUrl
+        |> Graphql.Http.send (GotResults epoch)
+
+
+{-| The next page, if there is one and none is already in flight. `fetching` is the guard
+that keeps a burst of scroll events from firing a dozen identical requests.
+-}
+requestMore : Model -> ( Model, Cmd Msg )
+requestMore model =
+    case ( model.results, model.route ) of
+        ( Feed feed, Route.Search params ) ->
+            if feed.hasNextPage && not feed.fetching then
+                ( { model | results = Feed { feed | fetching = True } }
+                , fetch model.apiUrl model.epoch (searchArgs params (List.length feed.items))
+                )
+
+            else
+                ( model, Cmd.none )
+
+        _ ->
+            ( model, Cmd.none )
+
+
+{-| A batch that doesn't reach the bottom of the container can never be scrolled, so it
+can never ask for the next one. Keep pulling until there is something to scroll.
+-}
+fillViewport : Model -> ( Model, Cmd Msg )
+fillViewport model =
+    case model.results of
+        Feed feed ->
+            if List.length feed.items * rowHeight < listHeight model then
+                requestMore model
+
+            else
+                ( model, Cmd.none )
+
+        _ ->
+            ( model, Cmd.none )
+
+
+{-| A new search reuses the scroll container, and the browser keeps its `scrollTop`. The
+virtualizer's model is reset in step with it, so without this the list would render from
+the old offset into a list that no longer has those rows.
+-}
+scrollListToTop : Cmd Msg
+scrollListToTop =
+    Browser.Dom.setViewportOf "results" 0 0 |> Task.attempt (\_ -> Ignored)
+
+
+{-| Appends a page, dropping rows already shown. Offset paging over a live crawler
+re-serves rows: new torrents arrive while you scroll and shift everything down.
+-}
+append : Time.Zone -> Page -> Results -> Results
+append zone page results =
+    let
+        base =
+            case results of
+                Feed feed ->
+                    feed
+
+                _ ->
+                    { items = [], ids = Set.empty, total = 0, totalIsEstimate = False, hasNextPage = False, fetching = False, contentTypes = [] }
+
+        fresh =
+            page.items
+                |> List.filter (\row -> not (Set.member row.id base.ids))
+                |> List.map
+                    (\row ->
+                        { row = row
+                        , published = Format.date zone row.publishedAt
+                        , expanded = False
+                        , files = Unopened
+                        }
+                    )
+    in
+    Feed
+        { base
+            | items = base.items ++ fresh
+            , ids = List.foldl (\item -> Set.insert item.row.id) base.ids fresh
+            , total = page.totalCount
+            , totalIsEstimate = page.totalCountIsEstimate
+            , hasNextPage = page.hasNextPage
+            , fetching = False
+            , contentTypes = Maybe.withDefault base.contentTypes page.contentTypes
+        }
+
+
+{-| The scroll event is decoded twice from one handler — once by the virtualizer to work
+out what to render, once here to work out whether to fetch. Elm allows one `on "scroll"`
+per node, so the two questions share a listener.
+-}
+nearBottom : Value -> Bool
+nearBottom event =
+    let
+        decoder =
+            Decode.map3 (\top height client -> top + client >= height - loadMoreMargin)
+                (Decode.at [ "target", "scrollTop" ] Decode.float)
+                (Decode.at [ "target", "scrollHeight" ] Decode.float)
+                (Decode.at [ "target", "clientHeight" ] Decode.float)
+    in
+    Decode.decodeValue decoder event |> Result.withDefault False
+
+
+
+-- VIEW
+
+
+{-| The virtualizer needs the container's height as a number, but the stylesheet is what
+actually sizes it — a flex child filling whatever the header leaves. The window height is
+therefore an overestimate, which the package documents as costing only a few extra
+rendered rows, and it avoids a second copy of the layout arithmetic that would silently
+go stale.
+-}
+listHeight : Model -> Int
+listHeight model =
+    model.viewportHeight
+
+
+view : Model -> Browser.Document Msg
+view model =
+    { title = documentTitle model
+    , body =
+        [ header []
+            [ div [ class "bar" ]
+                [ a [ class "wordmark", href (Route.toHref model.basePath (Route.Search Route.emptySearch)) ]
+                    [ h1 [] [ text "magnes" ] ]
+                , searchBox model
+                , Health.indicator model.basePath model.health
+                , IdentityMenu.view model.basePath
+                    identityMenuMessages
+                    model.identity
+                    model.route
+                    model.menuOpen
+                ]
+            , viewFilters model
+            ]
+        , main_ [] [ viewRoute model ]
+        ]
+    }
+
+
+documentTitle : Model -> String
+documentTitle model =
+    case model.route of
+        Route.Search { q } ->
+            Maybe.map (\term -> term ++ " — magnes") q |> Maybe.withDefault "magnes"
+
+        Route.Torrent infoHash ->
+            case model.results of
+                Feed { items } ->
+                    case items of
+                        item :: _ ->
+                            item.row.title ++ " — magnes"
+
+                        [] ->
+                            infoHash ++ " — magnes"
+
+                _ ->
+                    infoHash ++ " — magnes"
+
+        Route.Login _ ->
+            "sign in — magnes"
+
+        Route.Register _ ->
+            "register User — magnes"
+
+        Route.UserOverview ->
+            "User — magnes"
+
+        Route.APIKeys ->
+            "API keys — magnes"
+
+        Route.AdminUsers ->
+            "Users — magnes"
+
+        Route.AdminRoles ->
+            "Roles — magnes"
+
+        Route.AdminInvitations ->
+            "Invitations — magnes"
+
+        Route.AdminQueue ->
+            "queue administration — magnes"
+
+        Route.Status ->
+            "status — magnes"
+
+        Route.QueueJobs _ ->
+            "queue jobs — magnes"
+
+        Route.TorrentStats _ ->
+            "torrent statistics — magnes"
+
+        Route.QueueStats _ ->
+            "queue statistics — magnes"
+
+        Route.NotFound ->
+            "not found — magnes"
+
+
+identityMenuMessages : IdentityMenu.Messages Msg
+identityMenuMessages =
+    { toggled = MenuToggled
+    , dismissed = MenuClosed
+    , signOutRequested = SignOutRequested
+    }
+
+
+searchBox : Model -> Html Msg
+searchBox model =
+    form [ class "search", onSubmit Submitted ]
+        [ input
+            [ type_ "search"
+            , placeholder "search the index"
+            , value model.field
+            , spellcheck False
+            , attribute "autocomplete" "off"
+            , onInput FieldChanged
+            ]
+            []
+        , syntaxHint
+
+        -- One box, so a narrow screen wraps the two under the field together rather than
+        -- stranding the filters toggle on a line of its own. See the narrow-screen rules
+        -- in public/styles.css.
+        , div [ class "search-adjust" ]
+            [ sortMenu (currentSort model)
+            , filtersButton model
+            ]
+        ]
+
+
+{-| bitmagnet's query language, as a native tooltip. Everything it documents fits in six
+lines, and most of it is the syntax people already expect from a search box — so it is a
+reminder, not a manual, and it stays out of the way until pointed at.
+-}
+syntaxHint : Html Msg
+syntaxHint =
+    span
+        [ class "hint"
+        , attribute "title" syntaxSummary
+        , attribute "aria-label" syntaxSummary
+        , attribute "tabindex" "0"
+        ]
+        [ text "?" ]
+
+
+syntaxSummary : String
+syntaxSummary =
+    String.join "\n"
+        [ "Search syntax"
+        , ""
+        , "\"exact phrase\"   these words, in this order"
+        , "linux | bsd     either term"
+        , "!term           exclude the term"
+        , "appl*           starts with (suffix only)"
+        , "( )             group, to control precedence"
+        , "a . b           b immediately after a"
+        , ""
+        , "Case and punctuation are ignored."
+        ]
+
+
+filtersButton : Model -> Html Msg
+filtersButton model =
+    let
+        active =
+            Facet.count (currentFilters model)
+    in
+    button
+        [ class "filters-toggle"
+        , classList [ ( "open", model.filtersOpen ), ( "active", active > 0 ) ]
+        , type_ "button"
+        , attribute "aria-expanded"
+            (if model.filtersOpen then
+                "true"
+
+             else
+                "false"
+            )
+        , onClick FiltersToggled
+        ]
+        [ text
+            (if active == 0 then
+                "filters"
+
+             else
+                "filters (" ++ String.fromInt active ++ ")"
+            )
+        ]
+
+
+{-| Two facets out of the nine bitmagnet offers — see `Facet` for why the other seven are
+not drawn. Content type comes from the aggregation, so it lists only what this search
+actually contains and carries counts; file type is the fixed enum, drawn in full and
+without counts.
+
+A selected value is always shown even when the aggregation stops returning it, which it
+does as soon as it is the only thing selected — otherwise the chip you just clicked would
+vanish and leave no way to unclick it.
+
+-}
+viewFilters : Model -> Html Msg
+viewFilters model =
+    let
+        filters =
+            currentFilters model
+
+        buckets =
+            case model.results of
+                Feed feed ->
+                    feed.contentTypes
+
+                _ ->
+                    []
+
+        listed =
+            List.map Tuple.first buckets
+
+        contentValues =
+            buckets ++ List.map (\value -> ( value, 0 )) (List.filter (\v -> not (List.member v listed)) filters.content)
+    in
+    if not model.filtersOpen then
+        text ""
+
+    else
+        div [ class "facets" ]
+            [ Chip.facet "kind"
+                (List.map
+                    (\( value, n ) ->
+                        Chip.view
+                            { label = Facet.contentLabel value
+                            , count = Just n
+                            , selected = List.member value filters.content
+                            , onToggle = FilterChanged (Facet.toggleContent value filters)
+                            }
+                    )
+                    contentValues
+                )
+            , Chip.facet "files"
+                (List.map
+                    (\value ->
+                        Chip.view
+                            { label = Facet.fileLabel value
+                            , count = Nothing
+                            , selected = List.member value filters.files
+                            , onToggle = FilterChanged (Facet.toggleFile value filters)
+                            }
+                    )
+                    Facet.fileTypes
+                )
+            , if Facet.isEmpty filters then
+                text ""
+
+              else
+                button
+                    [ class "clear", type_ "button", onClick (FilterChanged Facet.empty) ]
+                    [ text "clear filters" ]
+            ]
+
+
+{-| A plain `select`, so it is a real form control: keyboard-operable, and rendered by the
+platform rather than reimplemented.
+-}
+sortMenu : Sort -> Html Msg
+sortMenu selected =
+    Html.select
+        [ class "sort"
+        , attribute "aria-label" "Sort results"
+        , onInput SortChanged
+        ]
+        (List.map
+            (\sort ->
+                Html.option
+                    [ value (Sort.toParam sort)
+                    , Html.Attributes.selected (sort == selected)
+                    ]
+                    [ text (Sort.label sort) ]
+            )
+            Sort.all
+        )
+
+
+viewRoute : Model -> Html Msg
+viewRoute model =
+    case Route.guard model.basePath model.identity model.route of
+        Route.PendingIdentity ->
+            p [ class "notice" ] [ text "Resolving Identity…" ]
+
+        Route.Refused message ->
+            case ( model.identity, model.identityRefresh ) of
+                ( Identity.Failed _, AfterSignIn ) ->
+                    div []
+                        [ p [ class "notice error" ] [ text message ]
+                        , button [ type_ "button", onClick IdentityRetryRequested ] [ text "Try again" ]
+                        ]
+
+                _ ->
+                    p [ class "notice error" ] [ text message ]
+
+        Route.RedirectTo _ ->
+            p [ class "notice" ] [ text "Redirecting…" ]
+
+        Route.Allowed ->
+            viewAllowedRoute model
+
+
+viewAllowedRoute : Model -> Html Msg
+viewAllowedRoute model =
+    case model.route of
+        Route.Search _ ->
+            viewResults model
+
+        Route.Torrent _ ->
+            viewTorrent model
+
+        Route.Login _ ->
+            Login.view loginMessages model.login
+
+        Route.Register _ ->
+            Register.view registerMessages model.register
+
+        Route.UserOverview ->
+            case model.identity of
+                Identity.UserAuthenticated user _ ->
+                    UserOverview.view model.zone userOverviewMessages model.signOut model.passwordChange user
+
+                -- Unreachable: the guard admits no other Identity to this route, and has
+                -- already answered them with a redirect.
+                _ ->
+                    p [ class "notice" ] [ text "Resolving Identity…" ]
+
+        Route.APIKeys ->
+            ApiKeys.view model.zone apiKeysMessages model.identity model.apiKeys
+
+        Route.AdminUsers ->
+            Users.view model.zone usersMessages model.identity model.users
+
+        Route.AdminRoles ->
+            Roles.view rolesMessages model.identity model.roles
+
+        Route.AdminInvitations ->
+            Invitations.view model.basePath model.zone invitationsMessages model.identity model.invitations
+
+        Route.AdminQueue ->
+            QueueAdmin.view model.basePath queueAdminMessages model.queueAdmin
+
+        Route.Status ->
+            div []
+                [ Health.view model.zone model.health
+                , Operations.view model.basePath model.identity
+                ]
+
+        Route.QueueJobs params ->
+            QueueJobs.view model.basePath model.zone jobsMessages params model.jobs
+
+        Route.TorrentStats params ->
+            TorrentStats.view model.zone torrentStatsMessages params model.torrentStats
+
+        Route.QueueStats params ->
+            QueueStats.view model.zone queueStatsMessages params model.queueStats
+
+        Route.NotFound ->
+            p [ class "notice" ] [ text "No such page." ]
+
+
+{-| The same expanded row the list draws, on its own — so a torrent can be linked without
+linking the search that found it.
+-}
+viewTorrent : Model -> Html Msg
+viewTorrent model =
+    case model.results of
+        Feed feed ->
+            case feed.items of
+                item :: _ ->
+                    div [ class "single" ] [ viewItem model.basePath (canQueryFiles model) item ]
+
+                [] ->
+                    p [ class "notice" ] [ text "No torrent with that hash is in the index." ]
+
+        Loading ->
+            p [ class "notice" ] [ text "Looking it up…" ]
+
+        Failed message ->
+            p [ class "notice error" ] [ text message ]
+
+        Blank ->
+            p [ class "notice" ] [ text "No torrent with that hash is in the index." ]
+
+
+viewResults : Model -> Html Msg
+viewResults model =
+    case model.results of
+        Blank ->
+            p [ class "notice" ] [ text "Search the index, or press enter to browse everything." ]
+
+        Loading ->
+            p [ class "notice" ] [ text "Searching…" ]
+
+        Failed message ->
+            p [ class "notice error" ] [ text message ]
+
+        Feed feed ->
+            if List.isEmpty feed.items then
+                p [ class "notice" ] [ text "Nothing matched." ]
+
+            else
+                div [ class "results" ]
+                    [ p [ class "tally" ] [ text (tally feed) ]
+                    , div
+                        [ class "list"
+                        , id "results"
+                        , on "scroll" (Decode.map Scrolled Decode.value)
+                        ]
+                        [ InfiniteList.view (listConfig model) model.infiniteList feed.items ]
+                    ]
+
+
+listConfig : Model -> InfiniteList.Config Item Msg
+listConfig model =
+    InfiniteList.config
+        { itemView = \_ _ item -> viewItem model.basePath (canQueryFiles model) item
+        , itemHeight = InfiniteList.withVariableHeight (\_ item -> itemHeight (canQueryFiles model) item)
+        , containerHeight = listHeight model
+        }
+
+
+canQueryFiles : Model -> Bool
+canQueryFiles model =
+    Identity.can (Identity.graphql "torrent" "query") model.identity
+
+
+{-| Told to the virtualizer, so it has to be what the browser actually lays out.
+-}
+itemHeight : Bool -> Item -> Int
+itemHeight canQuery item =
+    if item.expanded then
+        rowHeight + metaHeight item + filesHeight canQuery item
+
+    else
+        rowHeight
+
+
+{-| Counted off `viewFiles`'s own list, so the two cannot disagree.
+-}
+filesHeight : Bool -> Item -> Int
+filesHeight canQuery item =
+    case item.row.filesStatus of
+        Over_threshold ->
+            noticeHeight
+
+        Multi ->
+            if not canQuery then
+                0
+
+            else
+                (fileHeight * List.length (fileEntries item))
+                    + (case item.files of
+                        Fetching ->
+                            noticeHeight
+
+                        FilesFailed _ ->
+                            noticeHeight
+
+                        Open open ->
+                            if open.omission == "" then
+                                0
+
+                            else
+                                noticeHeight
+
+                        Unopened ->
+                            0
+                      )
+
+        _ ->
+            0
+
+
+{-| The tree's rows. Before the files arrive there is still one: the torrent's own folder,
+closed, which is what you click to fetch them.
+-}
+fileEntries : Item -> List FileTree.Entry
+fileEntries item =
+    case item.files of
+        Open open ->
+            FileTree.flatten open.collapsed open.root
+
+        _ ->
+            [ { depth = 0
+              , key = item.row.name
+              , name = item.row.name
+              , size = item.row.size
+              , isFolder = True
+              , collapsed = True
+              }
+            ]
+
+
+{-| The count is an estimate on broad queries and exact on narrow ones, and the response
+says which — so say which, rather than hedging every figure.
+-}
+tally : FeedState -> String
+tally feed =
+    let
+        counted =
+            Format.count feed.total ++ " " ++ Format.plural feed.total "result"
+    in
+    if feed.totalIsEstimate then
+        "about " ++ counted
+
+    else
+        counted
+
+
+viewItem : Route.BasePath -> Bool -> Item -> Html Msg
+viewItem basePath canQuery item =
+    div [ class "item" ]
+        (viewRow basePath item
+            :: (if item.expanded then
+                    viewMeta item ++ viewFiles canQuery item
+
+                else
+                    []
+               )
+        )
+
+
+{-| One line: chevron, name, size, magnet. Everything else is behind the chevron — on a
+real index most rows have no metadata, so a column of it is a column of blanks.
+-}
+viewRow : Route.BasePath -> Item -> Html Msg
+viewRow basePath item =
+    div [ class "row", onRowClick item.row.id ]
+        [ button
+            [ class "twist"
+            , classList [ ( "open", item.expanded ) ]
+            , attribute "aria-expanded"
+                (if item.expanded then
+                    "true"
+
+                 else
+                    "false"
+                )
+            , attribute "aria-label" ("Details for " ++ item.row.title)
+            , type_ "button"
+
+            -- The row already toggles; without stopping here the click would be counted
+            -- twice and cancel itself out. The button stays for the keyboard, and as the
+            -- thing that shows the state.
+            , stopPropagationOn "click" (Decode.succeed ( ToggleExpanded item.row.id, True ))
+            ]
+            [ chevronIcon ]
+        , a
+            [ class "name"
+            , href (Route.toHref basePath (Route.Torrent item.row.infoHash))
+
+            -- Elm installs its own click listener on every anchor, and it runs before
+            -- anything on an ancestor — so the row's handler would fire *as well*, toggling
+            -- twice and appearing to do nothing. The anchor's click is handled entirely by
+            -- `LinkClicked`; this only keeps it from reaching the row.
+            , stopPropagationOn "click" (Decode.succeed ( Ignored, True ))
+            ]
+            [ text item.row.title ]
+        , span [ class "size" ] [ text (Format.bytes item.row.size) ]
+        , a
+            [ class "magnet"
+            , href item.row.magnetUri
+            , attribute "aria-label" ("Magnet link for " ++ item.row.title)
+            , attribute "title" "magnet link"
+
+            -- The one thing in the row that is not "expand": let the click reach the
+            -- browser as an ordinary link, but keep it away from the row's handler.
+            , stopPropagationOn "click" (Decode.succeed ( Ignored, True ))
+            ]
+            [ magnetIcon ]
+        ]
+
+
+{-| A plain click anywhere on the line expands it, including on the name — which is still
+a real link, so the ways of opening a link elsewhere all keep working.
+
+Those are the cases deliberately left alone. A modified click (ctrl, cmd, shift, alt) is
+the browser's "open this somewhere else" and falls through to `Browser.application`, which
+skips modified clicks itself and lets the browser have them. Middle click fires `auxclick`
+rather than `click` and so never arrives here at all.
+
+`stopPropagation` matters as much as `preventDefault`: `Browser.application` listens for
+clicks on the document, and preventing the default alone would not stop it from turning
+this into a navigation.
+
+-}
+onRowClick : String -> Attribute Msg
+onRowClick rowId =
+    Html.Events.custom "click"
+        (Decode.map4
+            (\ctrl meta shift alt ->
+                if ctrl || meta || shift || alt then
+                    { message = Ignored, stopPropagation = False, preventDefault = False }
+
+                else
+                    { message = ToggleExpanded rowId, stopPropagation = True, preventDefault = True }
+            )
+            (Decode.field "ctrlKey" Decode.bool)
+            (Decode.field "metaKey" Decode.bool)
+            (Decode.field "shiftKey" Decode.bool)
+            (Decode.field "altKey" Decode.bool)
+        )
+
+
+viewMeta : Item -> List (Html Msg)
+viewMeta item =
+    let
+        row =
+            item.row
+
+        facts =
+            List.filterMap identity
+                [ Just item.published
+                , Maybe.map (\ct -> String.replace "_" " " (ContentType.toString ct)) row.contentType
+                , Maybe.map (\n -> Format.count n ++ " " ++ Format.plural n "file") row.filesCount
+                , Maybe.map (\n -> Format.count n ++ " " ++ Format.plural n "seeder") row.seeders
+                , Maybe.map (\n -> Format.count n ++ " " ++ Format.plural n "leecher") row.leechers
+                ]
+    in
+    [ div [ class "meta", classList [ ( "with-name", showsRawName item ) ] ]
+        (div [ class "facts" ] [ text (String.join " · " facts) ]
+            :: div [ class "hash" ] [ text row.infoHash ]
+            :: (if showsRawName item then
+                    [ div [ class "rawname" ] [ text row.name ] ]
+
+                else
+                    []
+               )
+        )
+    ]
+
+
+{-| Only `multi` has a file list. The other three all had an expander that simply wasn't
+drawn, which reads as a missing feature rather than as an answer — especially for
+`over_threshold`, which reports a file count and so looks like it is hiding something. So
+that case says why instead. `no_info` has no count to explain away, and `single` is a
+torrent that _is_ its one file, so both stay silent.
+-}
+viewFiles : Bool -> Item -> List (Html Msg)
+viewFiles canQuery item =
+    case item.row.filesStatus of
+        Over_threshold ->
+            [ div [ class "files-notice" ]
+                [ text "Too many files for bitmagnet to index — no list to show." ]
+            ]
+
+        Multi ->
+            if not canQuery then
+                []
+
+            else
+                List.map (viewEntry item) (fileEntries item)
+                    ++ (case item.files of
+                            Unopened ->
+                                []
+
+                            Fetching ->
+                                [ div [ class "files-notice" ] [ text "Loading files…" ] ]
+
+                            FilesFailed message ->
+                                [ div [ class "files-notice error" ] [ text message ] ]
+
+                            Open open ->
+                                if open.omission == "" then
+                                    []
+
+                                else
+                                    [ div [ class "files-notice" ] [ text open.omission ] ]
+                       )
+
+        _ ->
+            []
+
+
+{-| One line of the tree. Folders carry a twist and are clickable; files are inert.
+
+Clicking the root while the files have not been fetched is what fetches them; after that
+the same row just opens and closes like any other folder.
+
+-}
+viewEntry : Item -> FileTree.Entry -> Html Msg
+viewEntry item entry =
+    let
+        indent =
+            -- Matches the stylesheet's own left padding for the panel, plus a step per
+            -- level. Horizontal only, so it cannot disturb the row height.
+            Html.Attributes.style "padding-left"
+                (String.fromFloat (2.6 + toFloat entry.depth * 1.05) ++ "rem")
+
+        opens =
+            case item.files of
+                Unopened ->
+                    ToggleFiles item.row.id
+
+                _ ->
+                    ToggleFolder item.row.id entry.key
+    in
+    if entry.isFolder then
+        div
+            [ class "file folder"
+            , classList [ ( "open", not entry.collapsed ) ]
+            , indent
+            , attribute "role" "button"
+            , attribute "aria-expanded"
+                (if entry.collapsed then
+                    "false"
+
+                 else
+                    "true"
+                )
+            , onClick opens
+            ]
+            [ span [ class "branch" ] [ chevronIcon ]
+            , span [ class "path" ] [ text entry.name ]
+            , span [ class "size" ] [ text (Format.bytes entry.size) ]
+            ]
+
+    else
+        div [ class "file", indent ]
+            [ span [ class "branch" ] []
+            , span [ class "path" ] [ text entry.name ]
+            , span [ class "size" ] [ text (Format.bytes entry.size) ]
+            ]
+
+
+{-| What the list isn't showing, if anything. Returning the sentence itself keeps the
+height calculation and the view reading off one function instead of two conditions that
+can drift apart.
+-}
+omissions : Bitmagnet.FileList -> String
+omissions fileList =
+    let
+        padding =
+            if fileList.hidden == 0 then
+                []
+
+            else
+                [ String.fromInt fileList.hidden ++ " padding " ++ Format.plural fileList.hidden "file" ++ " hidden" ]
+
+        cap =
+            if fileList.capped then
+                [ "first " ++ String.fromInt Bitmagnet.fileLimit ++ " files only" ]
+
+            else
+                []
+    in
+    case padding ++ cap of
+        [] ->
+            ""
+
+        notes ->
+            String.join " · " notes
+
+
+chevronIcon : Html msg
+chevronIcon =
+    Svg.svg
+        [ SvgAttr.viewBox "0 0 24 24"
+        , SvgAttr.width "12"
+        , SvgAttr.height "12"
+        , SvgAttr.fill "currentColor"
+        , attribute "aria-hidden" "true"
+        ]
+        [ Svg.path [ SvgAttr.d "M8 4l10 8-10 8Z" ] [] ]
+
+
+{-| A horseshoe magnet: a filled arch, open at the bottom.
+-}
+magnetIcon : Html msg
+magnetIcon =
+    Svg.svg
+        [ SvgAttr.viewBox "0 0 24 24"
+        , SvgAttr.width "15"
+        , SvgAttr.height "15"
+        , SvgAttr.fill "currentColor"
+        , attribute "aria-hidden" "true"
+        ]
+        [ Svg.path [ SvgAttr.d "M3 20V12a9 9 0 0 1 18 0v8h-5v-8a4 4 0 0 0-8 0v8Z" ] [] ]

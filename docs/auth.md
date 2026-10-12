@@ -403,15 +403,21 @@ baseline: orchestrators poll it, and it reports liveness only.
 
 ## UI deployment and CORS
 
-This fork no longer bundles Angular or redirects `/` to `/webui`. Deploy a browser UI
-separately. `http_server.static.dir` serves a built UI from disk at `/ui` by default;
-`http_server.static.path: /webui` can retain the old URL. Root mounts are refused because
-Gin's static wildcard conflicts with the API routes. Alternatively, serve UI assets and
-proxy `/graphql` under one origin. Remove `webui` from explicit `http_server.options`
-lists when upgrading.
+Release builds bundle the Magnes Elm UI at `/ui/` and redirect `/` there. It uses
+same-origin `/graphql` and the browser cookie contract. Put a TLS-terminating reverse
+proxy in front of the HTTP server and preserve the browser's Host (including its port):
+the Secure cookie and browser-authenticated mutations require HTTPS.
+
+`http_server.static.path` changes the mount; the bundled HTML base and runtime
+configuration follow it automatically. `http_server.static.bundled: false` disables the
+bundle. Plain Go/backend-only builds contain no UI. `http_server.static.dir` overrides
+the bundle with an external UI and preserves that UI's own configuration; this mode has
+no root redirect. `/webui` is a supported mount, but `/` remains refused because Gin's
+static wildcard conflicts with API routes. An explicit `http_server.options` list must
+include `static` to serve either UI; the removed Angular `webui` option is not valid.
 
 Use `self.loginBrowser` for same-origin browser sessions. The HTTP-only cookie contract
-is described above; there is no bundled client storing JWTs in localStorage.
+is described above; Magnes leaves credentials in the HTTP-only cookie.
 
 `http_server.cors.allowed_origins` now defaults to `[]`, withholding permission for
 cross-origin browser reads. Same-origin requests and non-browser API clients need no

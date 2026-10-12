@@ -59,11 +59,13 @@ type CorsConfig struct {
 	Debug bool
 }
 
-// StaticConfig mounts a separately built web UI from disk.
+// StaticConfig mounts the bundled UI or an alternative UI from disk.
 type StaticConfig struct {
-	// Dir is the directory to serve. Empty - the default - disables the mount
-	// entirely, which is why an absent directory is not an error and a configured
-	// one that does not exist is.
+	// Bundled enables the embedded Elm UI when Dir is empty and the executable
+	// was built with the webui tag. Backend-only builds carry no embedded assets.
+	Bundled bool
+	// Dir overrides the bundled UI with a directory on disk. A configured
+	// directory that does not exist is a startup error.
 	Dir string
 	// Path is where it mounts. It cannot be "/": a root wildcard conflicts with
 	// the API routes and makes gin panic at startup.
@@ -88,7 +90,8 @@ func NewDefaultConfig() Config {
 			},
 		},
 		Static: StaticConfig{
-			Path: "/ui",
+			Bundled: true,
+			Path:    "/ui",
 		},
 		Options: []string{"*"},
 	}

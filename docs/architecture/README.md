@@ -26,8 +26,7 @@ infohashes, fetches each torrent's metainfo from peers, writes it to the databas
 enqueues a classification job. A Postgres-backed job queue drives a processor that runs a
 rule engine over each torrent to work out what it _is_ — film, episode, music — and
 writes a searchable `torrent_contents` row. Two APIs read that back out: a
-GraphQL API and a Torznab endpoint for \*arr clients. Browser UIs are built and deployed
-separately. Everything is wired with [`uber-go/fx`](https://github.com/uber-go/fx) and
+GraphQL API and a Torznab endpoint for \*arr clients. Release builds embed the Elm UI from `webui/` and serve it on the API origin. Everything is wired with [`uber-go/fx`](https://github.com/uber-go/fx) and
 run as a set of registered workers.
 
 ```
@@ -88,4 +87,5 @@ run as a set of registered workers.
 | `migrations/`           | Goose SQL migrations, `00001`–`00022`                              |
 | `graphql/`              | Schema and operations — the _source_ for `internal/gql`            |
 
-The optional `static` HTTP component serves a separately built UI from disk.
+The `static` HTTP component serves the bundled Elm UI by default in release builds,
+or an external UI from a configured directory. Backend-only Go builds omit the bundle.

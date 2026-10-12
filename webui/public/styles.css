@@ -1,0 +1,1951 @@
+/* One accent, one typeface, no borders between rows. The list is the page. */
+
+:root {
+  /* Declares that both schemes are supported, which is what makes the browser render
+     *native* UI to match: the scrollbar, the sort dropdown's list, focus rings, and the
+     search field's clear button. Swapping the custom properties below only repaints what
+     this stylesheet draws — without this line the chrome stays in its light default on a
+     dark page, and the scrollbar in particular looks like it belongs to another site. */
+  color-scheme: light dark;
+
+  --bg: #fbfbfa;
+  --fg: #1b1b1a;
+  --dim: #6f6f6a;
+  --faint: #ebebe7;
+  --accent: #a8442a;
+
+  /* The accent at low opacity, spelled out per scheme rather than mixed at use sites, so
+     there is one place to adjust and no dependency on color-mix support. */
+  --accent-soft: rgba(168, 68, 42, 0.13);
+
+  /* A line that reads as an edge rather than as a division: darker than --faint, which
+     is a fill and disappears against the background when asked to be a border. */
+  --edge: #d9d9d3;
+
+  --row-height: 34px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17171a;
+    --fg: #e8e8e4;
+    --dim: #8d8d88;
+    --faint: #232327;
+    --accent: #e0785a;
+    --accent-soft: rgba(224, 120, 90, 0.18);
+    --edge: #3a3a41;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* The list is the only scrolling element on the page. It stretches to the bottom of the
+   window, so its scrollbar sits where the browser's own would — the document itself never
+   scrolls, which is what keeps a second bar from appearing beside it.
+
+   Sizing is done here rather than in Elm: the virtualizer is told the window height, an
+   overestimate it tolerates, instead of a copy of this arithmetic that could go stale. */
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  font:
+    15px/1.5 ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Everything lines up on this column. Rows centre themselves individually rather than
+   sitting in a centred wrapper: the element wrapping them belongs to InfiniteList, which
+   writes `margin: 0` as an inline style and so beats any rule written here. */
+header,
+.tally,
+.notice,
+.item,
+.panel,
+.page {
+  width: 100%;
+  max-width: 62rem;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
+}
+
+header {
+  flex: none;
+  padding-top: 2rem;
+  padding-bottom: 1.5rem;
+}
+
+header .bar {
+  display: flex;
+  align-items: baseline;
+  gap: 1.5rem;
+}
+
+main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.results {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.wordmark {
+  color: inherit;
+  text-decoration: none;
+}
+
+.wordmark h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  color: var(--accent);
+}
+
+/* Who you are, at the end of the bar. Deliberately quiet: the list is the page, and the
+   Identity is only worth looking at when you go looking for it. */
+/* Centred rather than baseline-aligned, unlike its neighbours in the bar. A button whose
+   only content is an SVG has no text baseline, so the browser synthesises one from its
+   bottom edge and the icon sits about 3px above the line everything else is on. */
+.identity {
+  position: relative;
+  flex: none;
+  align-self: center;
+}
+
+/* The Anonymous form: a plain link, no menu behind it. */
+.identity-link {
+  color: var(--dim);
+  text-decoration: none;
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.identity-link:hover {
+  color: var(--fg);
+}
+
+/* Above the backdrop, deliberately. Everything else is covered while the menu is open,
+   but the button that opened it has to stay clickable or the icon cannot close what it
+   opened -- the one gesture every menu owes you. */
+.identity-button {
+  position: relative;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  padding: 0.25rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+
+  /* The icon is drawn with fill: currentColor, so this is what colours it. */
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.identity-button:hover,
+.identity-button[aria-expanded="true"] {
+  background: var(--faint);
+  color: var(--fg);
+}
+
+/* Catches a press anywhere else. Transparent and behind the menu, above everything else --
+   it exists to be clicked, not seen. */
+.identity-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+}
+
+.identity-menu {
+  position: absolute;
+  right: 0;
+  z-index: 11;
+  min-width: 11rem;
+  margin: 0.375rem 0 0;
+  padding: 0.25rem;
+  list-style: none;
+
+  /* The menu floats over the page in the page's own background colour, so it needs an
+     edge of its own or it reads as part of what is behind it. --faint is a fill and
+     vanishes here; the shadow alone is not enough in the light scheme. */
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
+}
+
+.identity-menu li {
+  display: flex;
+}
+
+.identity-menu a,
+.identity-menu button {
+  flex: 1;
+  padding: 0.375rem 0.625rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.875rem;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.identity-menu a:hover,
+.identity-menu button:hover {
+  background: var(--faint);
+}
+
+/* bitmagnet's health, beside the Identity, as one dot (src/Health.elm). Quiet while there
+   is nothing to see: the dot is --dim when bitmagnet is up, and hollow while a check is
+   still pending. A switched-off check leaves it up: bitmagnet counts `inactive` as up
+   overall. Only a down check or no answer at all takes the accent and a word. Centred for
+   the same reason the Identity button is: a dot has no text baseline. */
+.health-indicator {
+  display: flex;
+  flex: none;
+  align-self: center;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem;
+  border-radius: 6px;
+  color: var(--dim);
+  font-size: 0.8125rem;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.health-indicator:hover {
+  background: var(--faint);
+  color: var(--fg);
+}
+
+.health-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.health-pending .health-dot,
+.health-inactive .health-dot,
+.health-unavailable .health-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+
+.health-alarm,
+.health-alarm:hover {
+  color: var(--accent);
+}
+
+/* Signing out is not a page, so it is set apart from the ones that are. */
+.identity-signout {
+  margin-top: 0.25rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--faint);
+}
+
+/* min-width: 0 lets the field give up width when the bar is tight. Without it the form
+   cannot shrink below its contents' natural widths, the input's ~266px included, and the
+   bar pushes past the edge of the window instead. */
+.search {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 0.75rem;
+}
+
+.search-adjust {
+  flex: none;
+  display: flex;
+  gap: 0.75rem;
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--faint);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.search input:focus,
+.search .sort:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.search input::placeholder {
+  color: var(--dim);
+}
+
+/* The syntax reminder. A native tooltip, so the browser places it and nothing here has to
+   manage a popover. Focusable, so it is reachable without a mouse. */
+.search .hint {
+  flex: none;
+  align-self: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--faint);
+  color: var(--dim);
+  font-size: 0.6875rem;
+  line-height: 16px;
+  text-align: center;
+  cursor: help;
+}
+
+.search .hint:hover,
+.search .hint:focus {
+  color: var(--accent);
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* Quieter than the search field: an adjustment to a search, not a second search. */
+.search .sort,
+.search .filters-toggle {
+  flex: none;
+  padding: 0.5rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.search .sort:hover {
+  color: var(--fg);
+}
+
+.search .sort option {
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.search .filters-toggle.open,
+.search .filters-toggle.active {
+  color: var(--accent);
+}
+
+/* The bar on a narrow screen. On one line it needs about 30rem besides the field, so below
+   this width the field would be left with less than 16rem. Instead the wordmark, health and
+   Identity keep the first line and the search takes the next one whole.
+
+   That reorders the bar visually only: the search still comes before the health and Identity
+   in the document, and so in tab order. Keeping that order right on the desktop, where the
+   keyboard gets used, is why this is `order` rather than a rearranged view. */
+@media (max-width: 46rem) {
+  header .bar {
+    flex-wrap: wrap;
+    row-gap: 1rem;
+  }
+
+  .wordmark {
+    margin-right: auto;
+  }
+
+  .search {
+    order: 1;
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+
+  /* The basis decides what shares the field's line. 14rem and the hint fit on a phone, the
+     sort and filters toggle besides them do not, so those two drop under the field together
+     and come back up beside it once the screen is wide enough for all four. */
+  .search input {
+    flex-basis: 14rem;
+  }
+}
+
+/* Facets ------------------------------------------------------------------ */
+
+.facets {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding-top: 1rem;
+}
+
+.facet {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.facet-label {
+  flex: none;
+  width: 3rem;
+  color: var(--dim);
+  font-size: 0.75rem;
+  text-align: right;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--faint);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.chip:hover {
+  color: var(--fg);
+  border-color: var(--dim);
+}
+
+.chip.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.chip-count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.65;
+}
+
+.clear {
+  align-self: flex-start;
+  margin-left: 3.75rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.tally {
+  flex: none;
+  margin-top: 0;
+  margin-bottom: 0.75rem;
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+.notice {
+  color: var(--dim);
+}
+
+.notice.error {
+  color: var(--accent);
+}
+
+/* Rows -------------------------------------------------------------------- */
+
+/* A row carries 0.5rem of its own padding, so the hover highlight has air around the
+   text. That is subtracted here: the text lands on the same 1.5rem column as the header
+   and the tally, and only the highlight bleeds past it. */
+.item {
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+.list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: 2rem;
+
+  /* Reserve the scrollbar's width on both edges. Without this the bar is taken out of
+     one side only, the scrollport is asymmetric, and rows centre a few pixels left of
+     the header they are supposed to line up with. */
+  scrollbar-gutter: stable both-edges;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  height: var(--row-height);
+  padding: 0 0.5rem;
+  border-radius: 4px;
+
+  /* The whole line is the expander, so the whole line looks clickable. */
+  cursor: pointer;
+}
+
+.row:hover {
+  background: var(--faint);
+}
+
+/* The disclosure. Its width is part of the indent every expanded panel lines up with. */
+.twist {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.twist svg {
+  transition: transform 100ms ease-out;
+}
+
+.twist.open svg {
+  transform: rotate(90deg);
+}
+
+.twist:hover {
+  color: var(--accent);
+}
+
+/* min-width:0 is what lets a flex child actually shrink far enough to ellipsis. */
+.row .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: inherit;
+  text-decoration: none;
+}
+
+/* No underline on hover. The name is still an anchor, so middle-click and "open in new
+   tab" reach the torrent's own page — but a plain click expands, and underlining it would
+   promise a navigation that no longer happens. */
+
+.row .size {
+  flex: none;
+  width: 5.5rem;
+  text-align: right;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8125rem;
+}
+
+/* The magnet is the row's actual payload, and the only thing on the line that leaves the
+   page — so it carries the accent, the same one the wordmark uses. */
+.row .magnet {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: var(--accent);
+  transition:
+    transform 120ms ease-out,
+    background-color 120ms ease-out;
+}
+
+/* It is already the accent colour at rest, so hovering has to say something else. The
+   magnet tips and is drawn up out of the line, into a faint field of its own. */
+.row .magnet:hover {
+  transform: scale(1.25) rotate(-10deg);
+  background: var(--accent-soft);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row .magnet {
+    transition: none;
+  }
+
+  .row .magnet:hover {
+    transform: none;
+  }
+}
+
+/* Expansion ---------------------------------------------------------------
+   Every height here is also a constant in Main.elm: the virtualizer positions
+   rows from those numbers, so the two must agree exactly. Nothing in an
+   expanded panel may size itself to its content. */
+
+.meta {
+  height: 48px;
+  padding: 6px 0.5rem 6px 2.6rem;
+  color: var(--dim);
+  font-size: 0.8125rem;
+  line-height: 18px;
+}
+
+/* One more line, drawn only when the raw torrent name differs from the parsed title. */
+.meta.with-name {
+  height: 66px;
+}
+
+.meta .hash,
+.meta .rawname {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.meta .hash {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+}
+
+.files-notice {
+  height: 26px;
+  padding-left: 2.6rem;
+  color: var(--dim);
+  font-size: 0.8125rem;
+  line-height: 26px;
+}
+
+.files-notice.error {
+  color: var(--accent);
+}
+
+/* One line of the directory tree, folder or file. The left padding is set inline, since
+   it carries the indent for the depth; everything else is shared. */
+.file {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 22px;
+  padding-right: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+/* The twist, or the space where a file's would be — so names line up down a level
+   regardless of whether the row can open. */
+.file .branch {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--dim);
+}
+
+.file .branch svg {
+  width: 9px;
+  height: 9px;
+  transition: transform 100ms ease-out;
+}
+
+.file.folder {
+  cursor: pointer;
+}
+
+.file.folder .path {
+  color: var(--fg);
+}
+
+.file.folder.open .branch svg {
+  transform: rotate(90deg);
+}
+
+.file.folder:hover .branch,
+.file.folder:hover .path {
+  color: var(--accent);
+}
+
+.file .path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--dim);
+}
+
+.file .size {
+  flex: none;
+  width: 5.5rem;
+  text-align: right;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Administration ---------------------------------------------------------- */
+
+/* A screen of more than one panel, such as a list with a form, or the User overview with
+   its password change: it takes the full content column and scrolls as one, and each form
+   inside it keeps the narrow fields every other form has. */
+.page {
+  padding-bottom: 2rem;
+  overflow-y: auto;
+}
+
+.page h1 {
+  margin: 0 0 1rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.page h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+/* Anything inside an administration page is already on the column, so it must not take
+   the shared centring padding a second time -- a notice indented 3rem while the heading
+   above it sits at 1.5rem reads as a mistake, because it is one. */
+.page .panel,
+.page .notice {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.page .panel {
+  margin-bottom: 2rem;
+}
+
+.invitations {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.invitation {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--faint);
+}
+
+/* The link is the point of the row -- it is what gets sent to someone -- so it leads, in
+   the monospace that makes a code checkable character by character. */
+.invitation-link a {
+  color: var(--accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.875rem;
+  word-break: break-all;
+}
+
+.invitation-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+.invitation-role {
+  color: var(--fg);
+}
+
+.invitation-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+  font-size: 0.8125rem;
+}
+
+/* Buttons on an administration row: quiet by default, because the row is the content. */
+.page button {
+  padding: 0.25rem 0.625rem;
+  border: 1px solid var(--faint);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.page button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.page button:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+/* Taking access away is the one thing worth colouring. */
+.page button.danger {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.page button.danger:hover {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+/* A danger button that cannot be pressed — an act that cannot be asked about yet, or one
+   waiting while another is on its way — looks like any other disabled button. It outranks
+   `.page button.danger` (0,3,1 against 0,2,1), and ties `.page button.danger:hover`, which it
+   comes after: without it a disabled danger button kept the accent, and its hover filled it. */
+.page button.danger:disabled {
+  border-color: var(--faint);
+  background: transparent;
+  color: var(--faint);
+  cursor: default;
+}
+
+/* The code just minted. It is the only thing on the screen that cannot be recovered by
+   looking again, so it is drawn as an answer rather than as another row. */
+.created {
+  margin: 0.75rem 0 0;
+  padding: 0.75rem;
+  border-radius: 6px;
+  background: var(--accent-soft);
+}
+
+.created p {
+  margin: 0 0 0.25rem;
+  font-size: 0.8125rem;
+}
+
+.created a {
+  color: var(--accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.875rem;
+  word-break: break-all;
+}
+
+.paging {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.paging-count {
+  color: var(--dim);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Users -------------------------------------------------------------------- */
+
+/* The User rows sit on the same skeleton as the Invitations: one row per thing, its name
+   leading, the quiet facts underneath, and the acts that take access away last. */
+.users {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.user {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--faint);
+}
+
+.user-name {
+  font-weight: 600;
+}
+
+.user-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+.user-role {
+  color: var(--fg);
+}
+
+.user-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+/* A plain select like the sort menu: a real form control, sized to sit on the row. */
+.user-role-select {
+  padding: 0.25rem 0.375rem;
+  border: 1px solid var(--faint);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.8125rem;
+}
+
+.user-role-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.user-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+  font-size: 0.8125rem;
+}
+
+.user-search {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin: 0 0 1.25rem;
+}
+
+.user-search label {
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+.user-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--faint);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.user-search input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Roles -------------------------------------------------------------------- */
+
+/* The Role rows sit on the same skeleton as the Users and the Invitations: the name
+   leading, the quiet facts underneath, the acts last. */
+.roles {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.role {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--faint);
+}
+
+.role-name {
+  font-weight: 600;
+}
+
+.role-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+/* A core Role is bitmagnet's, not this instance's: it cannot be deleted, and the badge
+   is what says so before the missing button does. */
+.role-core {
+  padding: 0.0625rem 0.375rem;
+  border: 1px solid var(--faint);
+  border-radius: 999px;
+  color: var(--fg);
+  font-size: 0.75rem;
+}
+
+.role-acts,
+.role-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.role-confirm {
+  font-size: 0.8125rem;
+}
+
+.role-naming {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.375rem;
+  width: 100%;
+}
+
+/* Seventeen checkboxes need grouping to be read at all, so each namespace is its own
+   block and they wrap into as many columns as the width allows.
+
+   `max-width` undoes the panel's own `22rem`, which is the right width for a field to be
+   typed into and far too narrow for a grid: capped there, the namespaces stack into one
+   column instead of sitting side by side. `align-items` keeps each group as tall as its
+   own contents, so the one-item namespace can sit beside the three-item one rather than
+   being pushed below the thirteen-item one's line. */
+.permissions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 1.25rem 2.5rem;
+  width: 100%;
+  margin: 0.75rem 0;
+}
+
+/* `.panel > *` caps every child at the 22rem a field wants to be typed into. On this form
+   only the name field is that; the grid, the notices and the ask are layout and prose, and
+   the cap squeezes them into a third of the panel while the grid beside them spans it all.
+   Qualified with `.panel` on purpose: `.panel > *` is written later in this file, so a
+   selector that merely ties it on specificity — `.role-editor > *` — loses on order and
+   the grid silently collapses back into one column. */
+.panel.role-editor > * {
+  max-width: none;
+}
+
+/* Prose still wants a measure — just not a form field's. */
+.panel.role-editor > .notice,
+.panel.role-editor > .role-confirm,
+.panel.role-editor > .role-naming {
+  max-width: 48rem;
+}
+
+/* The one child that really is a form field. */
+.panel.role-editor .role-naming input {
+  max-width: 22rem;
+}
+
+/* The ask that stands where the save button was: it is the screen's most consequential
+   sentence, so it reads as a warning rather than as another quiet notice. */
+.panel.role-editor > .role-confirm {
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent-soft);
+}
+
+.permission-group h3 {
+  margin: 0 0 0.375rem;
+  color: var(--dim);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.permission-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+}
+
+.permission {
+  display: flex;
+  align-items: center;
+  gap: 0.4375rem;
+  font-size: 0.8125rem;
+}
+
+/* `.panel label` paints every label in the muted colour a field label wants and pushes it
+   down half a line. A permission is a line of a grid, not a field label: it takes the
+   page's own colour, so that dimming can mean the one thing it is meant to mean, and no
+   extra space, so thirteen of them do not drift apart. Written under `.panel` because
+   `.panel label` is more specific than `.permission` on its own. */
+.panel .permission {
+  margin-top: 0;
+  color: var(--fg);
+}
+
+/* A box that cannot be unticked is bitmagnet's own grant. Dimming it says so at a glance;
+   the notice under the grid says why. Keyed on the Role's own grant rather than on
+   `:disabled`, because every box is disabled while an act is in flight and dimming all
+   seventeen then would say something about the Role that is not true. */
+.permission input:disabled {
+  cursor: not-allowed;
+}
+
+.panel .permission-fixed span {
+  color: var(--dim);
+}
+
+/* Forms ------------------------------------------------------------------- */
+
+/* A form sits on the same column as everything else: centred in the window with the
+   header and the list, its fields starting where their text starts.
+
+   The centring comes from the shared rule at the top. Without it the panel was laid out
+   at the window's left edge while everything around it was centred in 62rem, so on a wide
+   window a form drifted a long way left of the page it belongs to.
+
+   What is narrow is the fields, not the column. A text input stretched to 62rem is
+   unreadable, and implies the answer wants to be long. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.375rem;
+  padding-bottom: 2rem;
+}
+
+.panel > * {
+  width: 100%;
+  max-width: 22rem;
+}
+
+.panel h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.panel label {
+  margin-top: 0.5rem;
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+.panel input {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--faint);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.panel input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.panel .submit {
+  margin-top: 1rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.panel .submit:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+/* Not-yet-ready, rather than refused: the fields are simply incomplete, so this stays
+   quiet instead of reading as an error. */
+.panel .submit:disabled {
+  border-color: var(--faint);
+  background: transparent;
+  color: var(--dim);
+  cursor: default;
+}
+
+/* Term and value on one line each, the terms in a column of their own so the values line
+   up. A definition list rather than a table: these are labelled facts about one thing, not
+   rows of anything. */
+.panel .facts {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.panel .fact {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.panel .fact dt {
+  flex: none;
+  width: 8rem;
+  color: var(--dim);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+.panel .fact dd {
+  margin: 0;
+}
+
+/* Sits directly under the field it is about. */
+.panel .field-error {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+}
+
+/* The password-entropy meter. It sits directly under the password field, and its reading
+   is drawn as well as its bar: the bar says "not yet", the numbers say how far short. */
+.panel .entropy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.375rem;
+}
+
+/* A real <progress>, so the platform draws it. Only the box needs sizing; the fill is
+   the browser's, which is also what keeps it correct in both colour schemes. */
+.panel .entropy progress {
+  width: 100%;
+  height: 0.375rem;
+}
+
+.panel .entropy-reading {
+  margin: 0;
+  color: var(--dim);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A refused sign-out is about the whole page rather than about a field, so it sits above
+   the button it is going to be tried from again. */
+.panel .signed-out-refusal {
+  margin: 1rem 0 0;
+  font-size: 0.8125rem;
+}
+
+/* Throttling is a wait, not a wrong answer, so it is drawn above the fields in the
+   neutral colour rather than beside them in the accent. So is the reason the login form
+   gives after a password change: nothing went wrong, and it must not read as though the
+   change had failed. */
+.panel .wait,
+.panel .because {
+  margin: 0 0 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  background: var(--faint);
+  font-size: 0.875rem;
+}
+
+/* What a password change will do, said before it is asked for: two short paragraphs read
+   as one warning, so they sit together rather than a paragraph's margin apart. */
+.panel .password-change-warning {
+  margin: 0 0 0.25rem;
+  font-size: 0.875rem;
+}
+
+/* API keys ---------------------------------------------------------------- */
+
+/* The create form carries the same permission grid as the Role editor, so it needs the
+   same escape from `.panel > *`'s 22rem field cap — and the same `.panel` qualifier, for
+   the same reason: `.panel > *` is written later in this file, so `.api-key-form > *`
+   would tie on specificity and lose on source order, collapsing the grid into one column
+   with nothing to show for it. */
+.panel.api-key-form > * {
+  max-width: none;
+}
+
+.panel.api-key-form > .notice {
+  max-width: 48rem;
+}
+
+/* The one child that really is a form field. */
+.panel.api-key-form > input,
+.panel.api-key-form > select {
+  max-width: 22rem;
+}
+
+/* The key's value, in the one render it exists in. It is deliberately the loudest thing on
+   the page: this is the only moment it can be copied, and a reader who scrolls past it has
+   lost it for good. */
+.panel.api-key-reveal {
+  padding: 0.875rem 1rem 1.25rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent-soft);
+}
+
+.panel.api-key-reveal > * {
+  max-width: none;
+}
+
+.api-key-warning {
+  margin: 0 0 0.5rem;
+  max-width: 48rem;
+}
+
+/* Wrapping rather than scrolling: a value half out of view reads as fully copied when it
+   is not. `user-select: all` makes one click take the whole thing. */
+.api-key-reveal-value code {
+  display: block;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--faint);
+  border-radius: 4px;
+  background: var(--bg);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.api-keys {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.api-key {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--faint);
+}
+
+.api-key-name {
+  font-weight: 600;
+}
+
+.api-key-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+.api-key-actions {
+  margin: 0.25rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.375rem;
+}
+
+.api-key-action {
+  padding: 0.0625rem 0.375rem;
+  border: 1px solid var(--faint);
+  border-radius: 999px;
+  font-size: 0.75rem;
+}
+
+/* An Object action the owner's Role no longer grants. Struck through rather than hidden:
+   it is still part of the key and comes back when the Role does, but it is not authority
+   the key has now. */
+.api-key-action-suspended {
+  color: var(--dim);
+  text-decoration: line-through;
+}
+
+.api-key-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent-soft);
+}
+
+/* Charts, drawn by src/Charts.elm (ADR 0007). Every mark, label and gridline is coloured
+   in Elm with a var() token, so nothing here colours the drawing; this is the figure
+   around it. */
+
+.chart {
+  margin: 1.5rem 0 2rem;
+}
+
+/* A chart is layout, not a field, so it takes the panel's whole width rather than the
+   22rem `.panel > *` gives a field. Two classes, so it wins on specificity wherever it is
+   written. */
+.panel > .chart {
+  max-width: none;
+}
+
+.chart h2 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+/* The drawing scales rather than reflows, so below this width its labels would shrink out
+   of reading. A narrow screen scrolls it sideways instead. */
+.chart-plot {
+  overflow-x: auto;
+}
+
+.chart-plot > * {
+  min-width: 44rem;
+}
+
+/* A bar chart is drawn as wide as its bars need, and src/Charts.elm sets how far it may shrink,
+   so one of a few bars fits a phone and only one of many scrolls. */
+.chart-bars > * {
+  min-width: 0;
+}
+
+/* A timeline is read for its right-hand end, now. On a phone it is wider than the box and
+   scrolls, so the box opens at that end: a box that scrolls right-to-left starts there, and
+   the chart inside it is put back left-to-right. */
+.chart-timeline {
+  direction: rtl;
+}
+
+.chart-timeline > * {
+  direction: ltr;
+}
+
+.chart-empty {
+  margin: 0;
+  color: var(--dim);
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--dim);
+  font-size: 0.85rem;
+}
+
+/* Drawn by Elm with the same paint as the series it names, so the two cannot drift. Overflow
+   is visible so a bordered swatch keeps its edge. */
+.chart-swatch {
+  width: 1.25rem;
+  height: 0.625rem;
+  margin-right: 0.4rem;
+  overflow: visible;
+  vertical-align: middle;
+}
+
+/* Out of sight but not out of the accessibility tree: the chart's numbers, for a screen
+   reader. `display: none` would hide them from it too. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The status page (src/Health.elm). Its tables are layout and prose, not fields, so they
+   take a reading measure rather than the 22rem `.panel > *` gives a field. */
+.panel.health > * {
+  max-width: 48rem;
+}
+
+.panel.health h2 {
+  margin: 1.25rem 0 0.375rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.health-summary {
+  margin: 0;
+}
+
+/* No rules between rows, as everywhere else: spacing does the separating. */
+.health-checks,
+.health-workers {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.health-checks th,
+.health-checks td,
+.health-workers th,
+.health-workers td {
+  padding: 0.25rem 1.5rem 0.25rem 0;
+  text-align: left;
+  vertical-align: baseline;
+}
+
+.health-checks thead th,
+.health-workers thead th {
+  color: var(--dim);
+  font-size: 0.8125rem;
+  font-weight: normal;
+}
+
+.health-checks tbody th,
+.health-workers tbody th {
+  font-weight: 500;
+}
+
+/* Only a down check: pending and inactive are states, not faults. */
+.health-failing td:first-of-type {
+  color: var(--accent);
+}
+
+/* bitmagnet's own words, under the status they explain. Errors can be long and carry no
+   spaces worth breaking at, such as a URL, so they wrap anywhere. */
+.health-error {
+  display: block;
+  color: var(--dim);
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
+/* Keep the health and Identity links visible on a narrow screen. Search takes its own
+   row rather than pushing those links beyond the viewport. */
+@media (max-width: 44rem) {
+  header .bar {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  header .wordmark {
+    margin-right: auto;
+  }
+
+  header .search {
+    order: 1;
+    flex-basis: 100%;
+    min-width: 0;
+  }
+
+  header .search input {
+    width: 0;
+  }
+}
+
+/* The queue's jobs (src/QueueJobs.elm) ------------------------------------- */
+
+/* The search's chips, on a page whose buttons are otherwise drawn as `.page button`. */
+.page button.chip {
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  align-self: auto;
+}
+
+.page button.chip.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.queue-jobs .facets {
+  padding-top: 0;
+  margin-bottom: 1.25rem;
+}
+
+.job-order {
+  padding: 0.15rem 0.25rem;
+  border: 1px solid var(--faint);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.8125rem;
+}
+
+.job-order option {
+  background: var(--bg);
+  color: var(--fg);
+}
+
+/* While the next page is on its way the old one stays, quieter, rather than vanishing. */
+.jobs-refreshing {
+  opacity: 0.55;
+}
+
+/* Seven columns do not fit a phone. The table scrolls sideways inside its own box rather
+   than widening the page. Positioned, so the visually hidden column heading, which is
+   absolutely positioned, is held by the box rather than by the page. */
+.jobs-scroll {
+  position: relative;
+  overflow-x: auto;
+}
+
+.jobs-table {
+  width: 100%;
+  min-width: 40rem;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.jobs-table th,
+.jobs-table td {
+  padding: 0.35rem 1.25rem 0.35rem 0;
+  text-align: left;
+  vertical-align: baseline;
+}
+
+.jobs-table thead th {
+  color: var(--dim);
+  font-size: 0.8125rem;
+  font-weight: normal;
+}
+
+.jobs-table .job-time,
+.jobs-table .job-number {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.job-failing td:first-child {
+  color: var(--accent);
+}
+
+/* A glance at the error in the row; the whole of it is in the details. */
+.job-error-line {
+  display: block;
+  max-width: 16rem;
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 0.8125rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-details > td {
+  padding: 0.25rem 0 1rem;
+}
+
+/* On a phone the row is wider than the screen. Its details stay in view and wrap at the
+   screen's width, wherever the table has been scrolled to, so a payload is read by scrolling
+   down rather than sideways. 3rem is the page's side padding. */
+.job-details > td > * {
+  position: sticky;
+  left: 0;
+  max-width: min(100%, calc(100vw - 3rem));
+  box-sizing: border-box;
+}
+
+.job-details h2 {
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.job-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.5rem;
+  margin: 0;
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+.job-facts dt {
+  display: inline;
+  margin-right: 0.4rem;
+}
+
+.job-facts dd {
+  display: inline;
+  margin: 0;
+  color: var(--fg);
+}
+
+.job-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Read in full, so they wrap rather than scroll; a long token with nothing to break at
+   still breaks. */
+.job-payload,
+.job-error {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  background: var(--faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8125rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.paging-link {
+  color: var(--accent);
+  font-size: 0.875rem;
+}
+
+.paging-link[aria-disabled="true"] {
+  color: var(--faint);
+}
+
+.operations ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.operations a {
+  color: var(--accent);
+}
+
+/* The statistics pages ---------------------------------------------------- */
+
+/* src/TorrentStats.elm and src/QueueStats.elm, with src/StatsControls.elm and
+   src/StatsLook.elm. */
+
+/* The same rows of chips the jobs page has, with longer labels ("timeframe",
+   "resolution") than its "queue" and "status" to make room for. */
+.stats-controls {
+  padding-top: 0;
+  margin-bottom: 1.25rem;
+}
+
+.stats-controls .facet-label {
+  width: 5.5rem;
+}
+
+/* A number the way the order menu is a menu: a real control, drawn small beside the chips. */
+.stats-every {
+  width: 4.5rem;
+  padding: 0.15rem 0.35rem;
+  border: 1px solid var(--faint);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.8125rem;
+}
+
+.stats-every:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* While another look is on its way the old chart stays, quieter, rather than vanishing. */
+.stats-refreshing {
+  opacity: 0.55;
+}
+
+.stats-note {
+  max-width: 40rem;
+  margin: 0.5rem 0 0;
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+/* Queue administration (src/QueueAdmin.elm) -------------------------------- */
+
+/* Two panels of choices, each ending in an act. The chips, the options and the question are
+   layout and prose rather than fields to type into, so they get a measure of their own in
+   place of `.panel > *`'s 22rem; the two size fields keep the field width. Qualified with
+   `.panel` for the reason the Role editor's rule is. */
+.panel.queue-admin-panel > * {
+  max-width: 40rem;
+}
+
+.panel.queue-admin-panel h2 {
+  margin-bottom: 0;
+}
+
+.queue-admin-intro {
+  margin: 0 0 0.25rem;
+  color: var(--dim);
+  font-size: 0.875rem;
+}
+
+.queue-admin .facets {
+  padding-top: 0.25rem;
+}
+
+.queue-admin-match {
+  margin: 0.5rem 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.queue-admin-match.notice {
+  padding: 0;
+}
+
+/* A count that failed, and the way to ask for it again, on one line where they fit. */
+.queue-admin-count-failed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.375rem 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.queue-admin-count-failed .notice {
+  margin: 0;
+}
+
+.queue-admin-review,
+.queue-admin-outcome a {
+  color: var(--accent);
+  font-size: 0.875rem;
+}
+
+/* The act's button sits under the prose rather than beside it. */
+.panel.queue-admin-panel > button {
+  width: auto;
+  margin-top: 0.75rem;
+}
+
+/* The question stands where the act's button was. It is the page's most consequential
+   sentence, so it reads as a warning, as the Role editor's ask does. */
+.queue-admin-confirm {
+  margin-top: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent-soft);
+}
+
+.queue-admin-confirm .queue-admin-question {
+  margin: 0 0 0.375rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.queue-admin-facts {
+  margin: 0 0 0.625rem;
+  padding-left: 1.125rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
+}
+
+.queue-admin-answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* What bitmagnet answered. Good news is drawn as an answer, as a minted Invitation is. */
+.queue-admin-outcome {
+  margin: 0.75rem 0 0;
+  padding: 0.625rem 0.75rem;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  font-size: 0.875rem;
+}
+
+.queue-admin-choice {
+  margin: 0.5rem 0 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.queue-admin-choice legend {
+  padding: 0;
+  margin-bottom: 0.25rem;
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+.queue-admin-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  margin-top: 0.5rem;
+}
+
+/* `.panel label` dims a label and pushes it down for a field under it. A box or a radio
+   carries its label on its own line, in the page's colour, as a permission does. */
+.panel .queue-admin-option {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-top: 0;
+  color: var(--fg);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+/* `.panel input` pads and borders a text field; a box or a radio wants neither. */
+.panel .queue-admin-option input {
+  flex: none;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+.panel .queue-admin-option span {
+  min-width: 0;
+}
+
+.panel .queue-admin-field > input {
+  max-width: 10rem;
+}
+
+.queue-admin-hint {
+  margin: 0;
+  color: var(--dim);
+  font-size: 0.8125rem;
+}
+
+/* A box's hint lines up with its label, not with the box. */
+.queue-admin-option + .queue-admin-hint {
+  padding-left: 1.5rem;
+}
+
+.queue-admin-types {
+  margin: 0.25rem 0 0 1.5rem;
+}

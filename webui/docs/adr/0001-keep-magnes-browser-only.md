@@ -1,0 +1,3 @@
+# Keep Magnes browser-only and make bitmagnet the protection boundary
+
+Magnes remains a static Elm browser client that talks to bitmagnet's GraphQL API; production serves the bundle through bitmagnet's `http_server.static` mount and uses a same-origin `/graphql` endpoint. bitmagnet enforces Object actions on every request, while Magnes uses the returned Permissions only to present reachable controls. A separate Magnes server should be introduced only for state bitmagnet does not own or for an independent-origin requirement, because adding one solely for access control would duplicate policy and create another deployment boundary.

@@ -1,0 +1,396 @@
+# The account and auth API
+
+Everything Magnes needs to know about bitmagnet's authentication surface. Transcribed
+from `../bitmagnet/graphql/schema/*.graphqls` and `../bitmagnet/internal/auth/` at `trunk`
+`77fdb9de7`, and re-checked on 2026-08-24 against a live instance running that exact
+commit. Updated on 2026-10-05 and 2026-10-06, from `trunk` at `0b6feb025`, by reading the
+source only. The updates cover password change, session revocation, and Anonymous access
+becoming a deny-override over a stored `anon` Role. See
+[serving-and-testing.md](serving-and-testing.md) for what an instance needs to have before
+any of this is reachable.
+
+**[verified]** marks a claim checked by request against that instance. Registration,
+login, sign-out and API keys have since been exercised by the credentialed end-to-end suite
+(`e2e/README.md`) against a disposable bitmagnet. The rest of the `auth` namespace is
+read off the source.
+
+Vocabulary is fixed in `../bitmagnet/CONTEXT.md`. Identity, User, API key, Invitation,
+Object action, Permission, Role, Anonymous access. Do not write "guest", "session",
+"scope" or "account" in code or comments.
+
+## The shape of it
+
+`auth.anonymous_access` defaults to `true`. Since bitmagnet #82 (`77d726345`,
+2026-10-05) it is a **deny-override over the `anon` Role**:
+
+- `true`: anonymous callers get exactly what the `anon` Role holds in the database.
+- `false`: they get nothing, whatever it holds.
+
+A new installation seeds `anon` once, at first start, with the registered read actions
+(verb `query`), except on `auth`, `pprof` and `metrics`. After that an administrator
+changes it with `putRole`, like any other Role. Before #82 the grant was computed in memory
+from the setting: every action except `auth` until `11764a54c`, then the read actions.
+Magnes supports both configurations of the fork:
+
+1. **Anonymous access on** — `self.identity` returns `user: null` with the anonymous
+   permissions. Login exists but search does not require it.
+2. **Anonymous access off** — an unauthenticated caller reaches `self`, `health`, and
+   `version`; search requires a User.
+
+## Types
+
+```graphql
+type Self {
+  user: User # null for anonymous; the owning User for an API-key identity
+  apiKey: APIKey # non-null only when the credential was an API key
+  permissions: [AuthObjectAction!]!
+}
+
+type User {
+  id: Int!
+  username: String!
+  role: String! # a role NAME, not an object
+  email: String
+  lastLoginAt: DateTime
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type Role {
+  name: String!
+  core: Boolean! # admin/editor/user/anon are core and cannot be deleted
+  permissions: [Permission!]!
+}
+
+type AuthObjectAction {
+  namespace: String!
+  object: String!
+  action: String!
+}
+type AuthSubject {
+  type: AuthSubjectType!
+  name: String!
+} # type is only `role`
+type Permission {
+  subject: AuthSubject!
+  objectAction: AuthObjectAction!
+  core: Boolean!
+}
+
+type APIKey {
+  id: Int!
+  name: String!
+  userId: Int!
+  user: User!
+  expiresAt: DateTime
+  createdAt: DateTime!
+}
+
+type Invitation {
+  code: String!
+  role: String!
+  email: String
+  createdBy: User
+  claimedBy: User
+  expiresAt: DateTime
+  createdAt: DateTime!
+}
+```
+
+**`User` has no `enabled` field**, even though `setUserEnabled` exists and the column does.
+A UI therefore cannot show whether an account is disabled, or reflect the result of
+disabling one. Closing that needs a schema change in bitmagnet.
+
+## Queries
+
+```graphql
+query {
+  self {
+    identity: Self!
+    passwordEntropy(password: String!): PasswordEntropyResult!   # { entropy, minEntropy, valid }
+    apiKeys: [APIKey!]!
+  }
+  auth {
+    listUsers(input: ListUsersInput): ListUsersResult!           # { users, totalCount }
+    listRoles: [Role!]!
+    listObjectActions: [AuthObjectAction!]!
+    listInvitations(input: ListInvitationsInput): ListInvitationsResult!
+  }
+}
+
+input ListUsersInput       { pagination: PaginationInput  usernameLike: String }
+input ListInvitationsInput { pagination: PaginationInput }
+input PaginationInput      { limit: Int  page: Int  offset: Int }
+```
+
+`passwordEntropy` is a **server round trip per keystroke** if used the way the Angular UI
+uses it. Debounce it. **[verified]** it answers anonymously, and reports `minEntropy: 70`
+— the default — so the meter can be drawn before anyone has logged in.
+
+## Mutations
+
+```graphql
+mutation {
+  self {
+    register(input: RegisterInput!): RegisterResult!    # { user }
+    login(username: String!, password: String!): LoginResult!   # non-browser: returns the token
+    loginBrowser(username: String!, password: String!): Void   # sets the HttpOnly cookie
+    logoutBrowser: Void                                        # ends every session, expires it
+    createAPIKey(input: CreateAPIKeyInput!): CreateAPIKeyResult!
+    deleteAPIKey(id: Int!): Void
+    updatePassword(input: UpdatePasswordInput!): Void         # ends every session too
+  }
+  auth {
+    setUserRole(userId: Int!, roleName: String!): User!
+    setUserEnabled(userId: Int!, enabled: Boolean!): User!
+    deleteUser(userId: Int!): Void
+    putRole(role: String!, objectActions: [AuthObjectActionInput!]!): Role!
+    deleteRole(role: String!): Void
+    invite(input: InviteInput!): Invitation!
+    deleteInvitation(code: String!): Void
+  }
+}
+
+input RegisterInput    { invitationCode: String  username: String!  password: String!  email: String }
+input CreateAPIKeyInput{ name: String!  permissions: [AuthObjectActionInput!]!  expiry: Duration }
+input InviteInput      { email: String  role: String  expiry: Duration }
+input UpdatePasswordInput { currentPassword: String!  newPassword: String! }
+
+type LoginResult       { token: String!  user: User!  permissions: [Permission!]! }
+type CreateAPIKeyResult{ id: Int!  apiKey: String!  name: String!  expiresAt: DateTime }
+```
+
+**Ending a session ends all of them.** Since `77f3fd9e3` (2026-09-14), every JWT carries a
+per-User epoch, and authentication refuses a token whose epoch is behind the User's row.
+`logoutBrowser` and `updatePassword` both increment it, so either one ends **every** session
+for that User: every device, both cookie and bearer. bitmagnet keeps no per-session record,
+so "sign out of this device only" cannot be expressed (bitmagnet ADR 0003). A revoked token
+falls through to Anonymous like any other dead credential, and the response expires a
+revoked cookie. API keys are not affected.
+
+`updatePassword` checks `currentPassword` and holds `newPassword` to
+`auth.password_min_entropy`. It requires a User-authenticated Identity, so Anonymous and
+API-key Identities are refused. It does not re-issue a credential: the Identity is Anonymous
+afterwards, and the User has to sign in again. The Angular UI does not call it; Magnes calls it from
+`/account` (ticket 20).
+
+`putRole` is a **replace, not a merge**: the object actions given become the role's entire
+permission set. Read the role first, or an edit silently revokes everything unlisted. It
+also **upserts on the name**, so there is no rename: saving a role under a different name
+leaves the original where it was and creates a second beside it.
+
+`Role.permissions` merges two sources, and `Permission.core` is what tells them apart. A
+core permission is held **in memory** by `mergeCoreRolePermissions` — admin's `**/**/**`
+and the `anon`/`user` baseline — and has no row in `role_permissions`. `putRole` writes
+only the stored set, so it can neither grant nor revoke a core permission, and sending one
+back merely writes a row for something that was already answering. The schema reports one
+flag for both, so a stored row that duplicates a core permission cannot be told apart from
+the core permission alone.
+
+**Deleting a role is three foreign keys**, none of them visible in the GraphQL schema
+(`migrations/00022_auth.sql`):
+
+| Table              | Reference           | What deleting a role does                                     |
+| ------------------ | ------------------- | ------------------------------------------------------------- |
+| `role_permissions` | `on delete cascade` | its permissions go with it                                    |
+| `invitations`      | `on delete cascade` | **every invitation issued for it is deleted**, claimed or not |
+| `users`            | no cascade          | Postgres **refuses** the delete while any user holds the role |
+
+So a role in use cannot be deleted, and the refusal arrives as an opaque database error
+rather than a coded one; and a role nobody holds can still take invitations with it
+silently. The cascade draws no claimed/unclaimed distinction — `invitations.claimed_by` is
+just another column — so the record of invitations already used goes as well. `deleteRole` additionally refuses the four core role names before touching the
+database at all (`rbac.service.DeleteRole`).
+
+`Duration` is gqlgen's `graphql.Duration` — an **ISO 8601** duration, `"PT24H"` or `"P7D"`,
+parsed by `graphql.UnmarshalDuration` through `sosodev/duration`. Not seconds, and **not** a
+Go duration string: `"24h0m0s"` is refused, and not politely — the response is
+`INTERNAL_SERVER_ERROR` with the offending input in the error path. **[verified]** against a
+running instance on 2026-09-03, for both `self.createAPIKey` and `auth.invite`.
+
+## Two shapes for the same idea
+
+`Self.permissions` is `[AuthObjectAction!]!` — flat triples. `LoginResult.permissions` is
+`[Permission!]!` — triples wrapped with a subject and a `core` flag. The same information
+arrives in two shapes depending on which call produced it. Normalise to the flat form at
+the boundary; the subject is always the caller's own role and carries nothing.
+
+## Authorization
+
+An **object action** is `namespace/object/action`. Three namespaces exist, fifteen
+actions in total:
+
+- `graphql` (11) — derived from the `@auth` directives in the schema, not listed anywhere
+  by hand: `auth::query`, `auth::mutate`, `version::query`, `health::query`,
+  `workers::query`, `queue::query`, `queue::mutate`, `torrent::query`, `torrent::mutate`,
+  `torrent::delete`, `torrentContent::query`. `Query.self` and `Mutation.self` carry no
+  `@auth` since `5d8ef2697` (2026-08-24). They are a recovery boundary outside the
+  object-action model, and the Identity kind is enforced by their child resolvers.
+- `http` (3) — `import::mutate`, `pprof::query`, `metrics::query`, for the non-GraphQL
+  endpoints.
+- `torznab` (1) — `torznab::query`, registered by
+  `../bitmagnet/internal/torznab/httpserver/auth.go`.
+
+Only the `graphql` ones are reachable from a browser, but **all fifteen appear in
+`listObjectActions`**, and therefore in any role editor or API-key scoping form. Scoping a
+key to Torznab and nothing else is the case that makes the last one matter.
+
+**[verified 2026-08-24]** on a live instance, the anonymous identity held every action
+except `graphql::auth::query` and `graphql::auth::mutate`, and `{auth{…}}` returned
+`"unauthorized"`. **That is no longer the rule.** Since `11764a54c` and #82 (both
+2026-10-05), Anonymous holds whatever the `anon` Role stores. A new installation seeds that
+Role from an allow-list on the verb: only `query` actions, and none on `auth`, `pprof` or
+`metrics`. The reason is that CORS defaults to `*`, so any page the operator visited could
+issue an anonymous `torrent::delete` cross-origin. Read off the source and not yet observed
+live, a freshly seeded `anon` holds `version`, `health`, `workers`, `queue`, `torrent` and
+`torrentContent` `::query`, plus `torznab::torznab::query`. It holds no write action. An
+administrator can still grant one; that is now a choice, not a default.
+
+Enforcement is per **top-level field**. `Mutation.torrent` is gated by
+`torrent::mutate`, and every field beneath it inherits that, with `delete` additionally
+gated by `torrent::delete`. There is no per-argument or per-row authorization.
+
+### Roles
+
+`admin`, `editor`, `user`, `anon` are core and seeded by migration `00022_auth.sql`, with
+**no permissions rows**. Since #82, `anon` gets rows from a one-time startup seed, guarded
+by the `auth.anon_role_translated` key in `key_values`. What each actually gets:
+
+| Role     | Where its permissions come from                                                       |
+| -------- | ------------------------------------------------------------------------------------- |
+| `admin`  | An in-memory core permission of `**/**/**`. Everything, always.                       |
+| `user`   | The baseline below, plus `torrent::query` and `torrentContent::query`.                |
+| `anon`   | The baseline below, plus its stored rows, honoured only while anonymous access is on. |
+| `editor` | **Nothing.** It is a name with no grants until an admin uses `putRole`.               |
+
+The baseline granted to `anon` and `user` regardless of the anonymous-access setting is
+`health::query` and `version::query`, which a client shell reads before anyone can log in.
+Logging in needs no grant at all, because `self` is outside the object-action model. That
+is what keeps enabling authentication from being a permanent lockout.
+
+Permissions match by **glob**, not equality: admin's `**` is a pattern. Server-side this
+is casbin with `globMatch` over three fields — the subject as `role::<name>`, the object as
+`<namespace>::<object>`, and the action on its own
+(`../bitmagnet/internal/auth/rbac/service.go`, `casbin_model.conf`). A client only ever
+sees the flat triple, so it matches component by component.
+
+**A client-side enforcer has to glob-match too, or it will deny an admin everything** —
+admin's sole permission is `**/**/**`. The Angular UI uses picomatch for this; an Elm
+implementation needs the equivalent, and the only patterns the server actually emits today
+are `**` and literals.
+
+Revocation takes up to `auth.rbac_cache_ttl` (default 1 minute) to take effect.
+
+## Credentials
+
+**JWT**: sent as `Authorization: Bearer <token>`. HS256, pinned. Its
+lifetime is `auth.jwt_duration`, default 24h. If `auth.jwt_secret` is unset the server
+generates one per process, so **every restart invalidates every token** — expect this
+constantly in development.
+
+**API key**: 22 base62 characters, sent as `?apikey=` or `X-Api-Key`, and used by \*arr
+clients over Torznab. An API-key Identity reports both the key and its owning User, but it
+is not a User-authenticated Identity and cannot use operations that require one. Torznab
+**refuses a JWT** in the apikey slot and ignores the bearer middleware entirely, so a
+browser credential is never a Torznab credential. A UI creates and deletes keys; it never
+authenticates with one.
+
+The current API-key enforcement first requires the owning User's Role to permit an Object
+action, then requires either the key's stored action list or the Anonymous identity to
+permit it. Disabling the owning User makes the key unusable.
+
+The two contract gaps recorded here were corrected in trunk on 2026-09-02, in PR #68, and
+are live on the homeserver (`v0.10.1-beta.1-261-ga3c59b428`). `createAPIKey` now validates
+its permissions against the registered Object actions by exact membership, so an
+unregistered or wildcard string is refused rather than stored. `Self.permissions` is now
+the key's selection intersected with the owning User's Role, computed through casbin
+rather than by comparing lists in Go, so what it reports is what enforcement allows. The
+`APIKey` type gained `permissions`: the actions the key was scoped to, a property of the
+key that does not change when its owner's Role does. **A client reads both** — scoped-to
+from `apiKey.permissions`, currently-reachable from `self.identity.permissions` — and they
+legitimately differ once a Role narrows.
+
+**Invitation**: a single-use 128-bit code. `auth.invitation_required` defaults to `true`,
+so registration normally needs one. The first administrator's invitation is minted by a
+startup worker and **logged, not displayed** — an operator reads it out of the journal.
+
+## The failure mode that decides the client design
+
+The authenticator chain is JWT → API key → anonymous, and its invariant is:
+
+> A revoked, expired, unparseable, deleted or disabled credential reports **no match** and
+> falls through to anonymous. Only an infrastructure failure reports an error.
+
+So **a dead token does not produce an error.** It produces a successful `self.identity`
+with `user: null`. **[verified]** both halves: `Authorization: Bearer not.a.jwt` and a
+well-formed JWT with a bogus signature each returned `200` with the full anonymous
+identity and no error at all. That is deliberate — a credential path that aborted the chain left the
+request with no identity at all, which refused `self.identity` and `self.login`, the two
+calls a client needs to notice its token is dead and recover. The identity then stayed
+wedged across reloads until the operator cleared browser storage by hand.
+
+**The client-side consequence, and it is not optional:** holding a token while the server
+reports `user: null` means the token is stale. Detect that and clear it. Nothing else will
+tell you.
+
+## Anonymous abuse controls a client will hit
+
+- **Login is throttled and refuses rather than queues.** Buckets are keyed by
+  `(account, source)` and by source alone. An attempt that cannot be served immediately is
+  refused immediately with `too many login requests`. Defaults are 30/minute, burst 5.
+- **Registration validates the invitation before hashing.** A bad code fails fast; a good
+  one costs a bcrypt.
+- **Login compares against a decoy hash when the account does not exist**, so timing does
+  not disclose whether a username is taken. Do not build a "username available?" check on
+  top of login latency.
+
+## Error codes
+
+Errors arrive as ordinary GraphQL errors carrying a stable `extensions.code`, emitted by
+the `errorPresenter` in `../bitmagnet/internal/gql/httpserver/error_presenter.go`. The code
+is the contract; the message is presentation and may be reworded. **Never match on message
+text.**
+
+An authorization refusal also carries the refused Object action **[verified 2026-08-24
+against the homeserver on trunk]**:
+
+```json
+{"errors":[{"message":"unauthorized","path":["auth"],"locations":[...],
+  "extensions":{"code":"UNAUTHORIZED","namespace":"graphql","object":"auth","action":"query"}}],
+ "data":null}
+```
+
+`path` still names the top-level field (`["auth"]`, `["self","login"]`) and remains useful
+for telling which of several fields failed, but it is no longer the only signal.
+
+| Code                                    | Means                                                 |
+| --------------------------------------- | ----------------------------------------------------- |
+| `INVALID_CREDENTIALS`                   | Login miss — covers "no such user" too                |
+| `USER_DISABLED`                         | Login against a disabled User                         |
+| `LOGIN_THROTTLED`                       | Throttled; back off, do not retry immediately         |
+| `USER_ALREADY_EXISTS`                   | Registration, username or email taken                 |
+| `USERNAME_INVALID`                      | Registration validation                               |
+| `INVITATION_REQUIRED`                   | `invitation_required` is on and none was given        |
+| `INVITATION_INVALID`                    | Registration, no such code                            |
+| `INVITATION_EXPIRED`                    | Registration, code past its expiry                    |
+| `INVITATION_CLAIMED`                    | Registration, code already used                       |
+| `PASSWORD_INSUFFICIENT_ENTROPY`         | Below `auth.password_min_entropy` (default 70)        |
+| `PASSWORD_INCORRECT`                    | `updatePassword`, wrong `currentPassword`             |
+| `EMAIL_REQUIRED`                        | `auth.email_required` is on and no address was given  |
+| `EMAIL_INVALID`                         | Registration or invitation, malformed address         |
+| `UNAUTHORIZED`                          | Refusal; carries `namespace`, `object`, `action`      |
+| `USER_SESSION_REQUIRED`                 | Operation needs a User-authenticated Identity         |
+| `API_KEY_MANAGEMENT_FORBIDDEN`          | An API-key Identity may not manage API keys           |
+| `AUTHENTICATION_INFRASTRUCTURE_FAILURE` | Authentication service unavailable                    |
+| `INTERNAL_SERVER_ERROR`                 | Unknown internal error; details deliberately withheld |
+
+Codes without a case in `src/ApiError.elm` fall back to the server's own message, so a
+newer bitmagnet stays legible without a client change.
+
+The two email codes are read from `error_presenter.go` and its
+`auth_error_codes_integration_test.go`, **not observed live** — Magnes collects no email
+address, so it can provoke neither. `EMAIL_REQUIRED` is mapped anyway, because an instance
+with `auth.email_required` on (it defaults off) cannot be registered with from Magnes at
+all, and saying which setting is in the way beats a bare refusal. `EMAIL_INVALID` is
+deliberately left unmapped: Magnes sends no address that could be malformed, so a case for
+it would be unreachable.

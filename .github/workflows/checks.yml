@@ -65,6 +65,40 @@ jobs:
         env:
           TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/postgres
 
+  ui:
+    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request')
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: bitmagnet_ui_smoke
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v5
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build the default executable and test the Elm UI
+        run: |
+          nix develop --ignore-environment --keep HOME . --command task build
+          nix develop --ignore-environment --keep HOME . --command task test-ui
+          nix develop --ignore-environment --keep HOME . --command go test -tags webui ./internal/httpserver/static ./internal/app/appfx
+      - name: Install browser
+        # Playwright invokes the runner's sudo/apt to install system libraries.
+        run: nix develop --ignore-environment --keep HOME --keep PATH . --command sh -c 'cd webui && npx playwright install --with-deps chromium'
+      - name: Test the packaged UI in a browser
+        run: nix develop --ignore-environment --keep HOME --keep BUNDLED_UI_POSTGRES_DSN . --command sh -c 'cd webui && npm run test:e2e:bundled'
+        env:
+          BUNDLED_UI_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/bitmagnet_ui_smoke
+
   # Regenerate Go code and schemas to check that everything is committed.
   generated:
     if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request')

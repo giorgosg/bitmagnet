@@ -1,0 +1,390 @@
+module ApiErrorTest exposing (suite)
+
+import ApiError
+import Dict
+import Expect
+import Graphql.Http
+import Graphql.Http.GraphqlError as GraphqlError
+import Identity
+import Json.Encode as Encode
+import Test exposing (Test, describe, test)
+
+
+{-| A GraphQL error carrying the extensions bitmagnet's error presenter emits.
+-}
+coded : String -> List ( String, Encode.Value ) -> GraphqlError.GraphqlError
+coded code extras =
+    withPath [] (codedAt code extras)
+
+
+codedAt : String -> List ( String, Encode.Value ) -> GraphqlError.GraphqlError
+codedAt code extras =
+    { message = "some human-readable message"
+    , locations = Nothing
+    , details =
+        Dict.fromList
+            [ ( "extensions"
+              , Encode.object (( "code", Encode.string code ) :: extras)
+              )
+            ]
+    }
+
+
+withPath : List String -> GraphqlError.GraphqlError -> GraphqlError.GraphqlError
+withPath path error =
+    { error
+        | details =
+            Dict.insert "path" (Encode.list Encode.string path) error.details
+    }
+
+
+unrefused : ApiError.Refusal
+unrefused =
+    { field = Nothing, objectAction = Nothing }
+
+
+bare : String -> GraphqlError.GraphqlError
+bare message =
+    { message = message, locations = Nothing, details = Dict.empty }
+
+
+from : List GraphqlError.GraphqlError -> ApiError.Failure
+from errors =
+    ApiError.fromError (Graphql.Http.GraphqlError (GraphqlError.UnparsedData Encode.null) errors)
+
+
+graphqlAuthQuery : List ( String, Encode.Value )
+graphqlAuthQuery =
+    [ ( "namespace", Encode.string "graphql" )
+    , ( "object", Encode.string "auth" )
+    , ( "action", Encode.string "query" )
+    ]
+
+
+suite : Test
+suite =
+    describe "ApiError"
+        [ describe "fromError"
+            [ test "invalid credentials are their own outcome" <|
+                \_ ->
+                    from [ coded "INVALID_CREDENTIALS" [] ]
+                        |> Expect.equal ApiError.InvalidCredentials
+            , test "throttling is not reported as an invalid password" <|
+                \_ ->
+                    from [ coded "LOGIN_THROTTLED" [] ]
+                        |> Expect.equal ApiError.LoginThrottled
+            , test "a disabled User is distinguishable from a wrong password" <|
+                \_ ->
+                    from [ coded "USER_DISABLED" [] ]
+                        |> Expect.equal ApiError.UserDisabled
+            , test "each Invitation failure keeps its own outcome" <|
+                \_ ->
+                    List.map (\code -> from [ coded code [] ])
+                        [ "INVITATION_REQUIRED"
+                        , "INVITATION_INVALID"
+                        , "INVITATION_EXPIRED"
+                        , "INVITATION_CLAIMED"
+                        ]
+                        |> Expect.equal
+                            [ ApiError.InvitationRequired
+                            , ApiError.InvitationInvalid
+                            , ApiError.InvitationExpired
+                            , ApiError.InvitationClaimed
+                            ]
+            , test "duplicate Users and weak passwords are distinct" <|
+                \_ ->
+                    List.map (\code -> from [ coded code [] ])
+                        [ "USER_ALREADY_EXISTS", "PASSWORD_INSUFFICIENT_ENTROPY", "USERNAME_INVALID" ]
+                        |> Expect.equal
+                            [ ApiError.UserAlreadyExists
+                            , ApiError.PasswordInsufficientEntropy
+                            , ApiError.UsernameInvalid
+                            ]
+            , test "a wrong current password is its own outcome, not a failed sign-in" <|
+                \_ ->
+                    -- updatePassword's refusal. It says the password offered as the current one
+                    -- is wrong; it says nothing about the username, which was never asked for.
+                    from [ coded "PASSWORD_INCORRECT" [] ]
+                        |> Expect.equal ApiError.PasswordIncorrect
+            , test "an instance that requires an email says so rather than refusing barely" <|
+                \_ ->
+                    from [ coded "EMAIL_REQUIRED" [] ]
+                        |> Expect.equal ApiError.EmailRequired
+            , test "an authorization refusal carries the refused Object action" <|
+                \_ ->
+                    from
+                        [ coded "UNAUTHORIZED"
+                            [ ( "namespace", Encode.string "graphql" )
+                            , ( "object", Encode.string "auth" )
+                            , ( "action", Encode.string "query" )
+                            ]
+                        ]
+                        |> Expect.equal
+                            (ApiError.Unauthorized
+                                { field = Nothing
+                                , objectAction =
+                                    Just { namespace = "graphql", object = "auth", action = "query" }
+                                }
+                            )
+            , test "an authorization refusal without an Object action is still unauthorized" <|
+                \_ ->
+                    from [ coded "UNAUTHORIZED" [] ]
+                        |> Expect.equal (ApiError.Unauthorized unrefused)
+            , test "a refusal records the top-level field from the error path" <|
+                \_ ->
+                    from [ withPath [ "self", "login" ] (codedAt "UNAUTHORIZED" []) ]
+                        |> Expect.equal
+                            (ApiError.Unauthorized { unrefused | field = Just "self" })
+            , test "the refused Object action feeds Identity.can unchanged" <|
+                \_ ->
+                    case from [ coded "UNAUTHORIZED" graphqlAuthQuery ] of
+                        ApiError.Unauthorized { objectAction } ->
+                            objectAction
+                                |> Maybe.map
+                                    (\refused ->
+                                        Identity.can refused
+                                            (Identity.Anonymous [ Identity.graphql "auth" "query" ])
+                                    )
+                                |> Expect.equal (Just True)
+
+                        _ ->
+                            Expect.fail "expected an authorization refusal"
+            , test "a refusal to Anonymous is its own outcome, carrying the refused Object action" <|
+                \_ ->
+                    -- bitmagnet 4efaae142 split these out of UNAUTHORIZED: an Anonymous Identity,
+                    -- refused, is told to authenticate.
+                    from
+                        [ withPath [ "queue" ]
+                            (codedAt "AUTHENTICATION_REQUIRED"
+                                [ ( "namespace", Encode.string "graphql" )
+                                , ( "object", Encode.string "queue" )
+                                , ( "action", Encode.string "mutate" )
+                                ]
+                            )
+                        ]
+                        |> Expect.equal
+                            (ApiError.AuthenticationRequired
+                                { field = Just "queue"
+                                , objectAction =
+                                    Just { namespace = "graphql", object = "queue", action = "mutate" }
+                                }
+                            )
+            , test "the authentication service being down is not an internal fault" <|
+                \_ ->
+                    from [ coded "AUTHENTICATION_INFRASTRUCTURE_FAILURE" [] ]
+                        |> Expect.equal ApiError.ServiceUnavailable
+            , test "an internal server error is a server fault" <|
+                \_ ->
+                    from [ coded "INTERNAL_SERVER_ERROR" [] ]
+                        |> Expect.equal ApiError.ServerFault
+            , test "the first coded error wins over an earlier uncoded one" <|
+                \_ ->
+                    from [ bare "something vague", coded "USER_DISABLED" [] ]
+                        |> Expect.equal ApiError.UserDisabled
+            , test "an unrecognized code falls back to the server's message" <|
+                \_ ->
+                    from [ coded "SOME_FUTURE_CODE" [] ]
+                        |> Expect.equal (ApiError.ServerRejected "some human-readable message")
+            , test "an uncoded error falls back to the server's message" <|
+                \_ ->
+                    from [ bare "user: login failed: something odd" ]
+                        |> Expect.equal (ApiError.ServerRejected "user: login failed: something odd")
+            , test "an empty error list still produces a failure" <|
+                \_ ->
+                    from []
+                        |> Expect.equal (ApiError.ServerRejected "The server rejected the query.")
+            , test "transport failures are not confused with server outcomes" <|
+                \_ ->
+                    ApiError.fromError (Graphql.Http.HttpError Graphql.Http.NetworkError)
+                        |> Expect.equal ApiError.Unreachable
+            , test "a request bitmagnet could not validate is refused as written, in a 200 too" <|
+                \_ ->
+                    -- gqlgen answers these with 422, but nothing in the code depends on the status.
+                    List.map (\code -> from [ coded code [] ])
+                        [ "GRAPHQL_VALIDATION_FAILED", "GRAPHQL_PARSE_FAILED" ]
+                        |> Expect.equal
+                            [ ApiError.RequestInvalid "some human-readable message"
+                            , ApiError.RequestInvalid "some human-readable message"
+                            ]
+            , test "a 403 whose body cannot be read is still a refusal" <|
+                \_ ->
+                    ApiError.fromError (Graphql.Http.HttpError (badStatus 403 "<html>Forbidden</html>"))
+                        |> Expect.equal (ApiError.Forbidden "")
+            , test "a 422 whose body cannot be read is only a status" <|
+                \_ ->
+                    -- Without gqlgen's code there is nothing to say what refused it.
+                    ApiError.fromError (Graphql.Http.HttpError (badStatus 422 "unprocessable"))
+                        |> Expect.equal (ApiError.BadStatus 422)
+            , test "a bad gateway is only a status, whatever its body" <|
+                \_ ->
+                    ApiError.fromError (Graphql.Http.HttpError (badStatus 502 """{"errors":[{"message":"upstream"}]}"""))
+                        |> Expect.equal (ApiError.BadStatus 502)
+            , test "a bad status keeps its status code" <|
+                \_ ->
+                    ApiError.fromError
+                        (Graphql.Http.HttpError
+                            (Graphql.Http.BadStatus
+                                { url = "/graphql"
+                                , statusCode = 502
+                                , statusText = "Bad Gateway"
+                                , headers = Dict.empty
+                                }
+                                ""
+                            )
+                        )
+                        |> Expect.equal (ApiError.BadStatus 502)
+            ]
+        , describe "isUnauthorized"
+            [ test "an UNAUTHORIZED refusal triggers an Identity refresh" <|
+                \_ ->
+                    ApiError.isUnauthorized (ApiError.Unauthorized unrefused)
+                        |> Expect.equal True
+            , test "an operation needing a User-authenticated Identity means the Identity is stale" <|
+                \_ ->
+                    ApiError.isUnauthorized ApiError.UserAuthenticationRequired
+                        |> Expect.equal True
+            , test "a refusal to Anonymous means the Identity may be stale" <|
+                \_ ->
+                    -- A credential revoked elsewhere leaves the browser Anonymous: bitmagnet falls
+                    -- through to the anonymous authenticator for a revoked token.
+                    ApiError.isUnauthorized (ApiError.AuthenticationRequired unrefused)
+                        |> Expect.equal True
+            , test "an invalid password says nothing about the current Identity" <|
+                \_ ->
+                    ApiError.isUnauthorized ApiError.InvalidCredentials
+                        |> Expect.equal False
+            , test "a message the mapping does not recognize is not an authorization refusal" <|
+                \_ ->
+                    ApiError.isUnauthorized (ApiError.ServerRejected "unauthorized-looking text")
+                        |> Expect.equal False
+            ]
+        , describe "mayHaveActed"
+            [ test "bitmagnet's refusals say nothing was done" <|
+                \_ ->
+                    [ ApiError.InvalidCredentials
+                    , ApiError.UserDisabled
+                    , ApiError.LoginThrottled
+                    , ApiError.UserAlreadyExists
+                    , ApiError.UsernameInvalid
+                    , ApiError.InvitationRequired
+                    , ApiError.InvitationInvalid
+                    , ApiError.InvitationExpired
+                    , ApiError.InvitationClaimed
+                    , ApiError.PasswordInsufficientEntropy
+                    , ApiError.PasswordIncorrect
+                    , ApiError.EmailRequired
+                    , ApiError.Unauthorized unrefused
+                    , ApiError.AuthenticationRequired unrefused
+                    , ApiError.UserAuthenticationRequired
+                    , ApiError.ApiKeyManagementForbidden
+                    , ApiError.ServiceUnavailable
+                    , ApiError.ServerRejected "x"
+                    ]
+                        |> List.filter ApiError.mayHaveActed
+                        |> Expect.equal []
+            , test "a request refused before anything ran says nothing was done" <|
+                \_ ->
+                    [ ApiError.RequestInvalid "x", ApiError.Forbidden "x", ApiError.BadUrl "nope" ]
+                        |> List.filter ApiError.mayHaveActed
+                        |> Expect.equal []
+            , test "no answer, an unreadable one, or a bare failing status leaves it open" <|
+                \_ ->
+                    [ ApiError.Unreachable
+                    , ApiError.Timeout
+                    , ApiError.BadStatus 502
+                    , ApiError.SchemaMismatch
+                    ]
+                        |> List.filter (not << ApiError.mayHaveActed)
+                        |> Expect.equal []
+            , test "a fault inside bitmagnet leaves it open" <|
+                \_ ->
+                    -- A connection lost during COMMIT surfaces as INTERNAL_SERVER_ERROR, and
+                    -- Postgres may have committed all the same.
+                    ApiError.mayHaveActed ApiError.ServerFault
+                        |> Expect.equal True
+            ]
+        , describe "toMessage"
+            [ test "every outcome has a non-empty message" <|
+                \_ ->
+                    [ ApiError.InvalidCredentials
+                    , ApiError.UserDisabled
+                    , ApiError.LoginThrottled
+                    , ApiError.UserAlreadyExists
+                    , ApiError.UsernameInvalid
+                    , ApiError.InvitationRequired
+                    , ApiError.InvitationInvalid
+                    , ApiError.InvitationExpired
+                    , ApiError.InvitationClaimed
+                    , ApiError.PasswordInsufficientEntropy
+                    , ApiError.PasswordIncorrect
+                    , ApiError.Unauthorized unrefused
+                    , ApiError.UserAuthenticationRequired
+                    , ApiError.AuthenticationRequired unrefused
+                    , ApiError.ApiKeyManagementForbidden
+                    , ApiError.ServiceUnavailable
+                    , ApiError.ServerFault
+                    , ApiError.ServerRejected "x"
+                    , ApiError.Unreachable
+                    , ApiError.Timeout
+                    , ApiError.BadStatus 502
+                    , ApiError.BadUrl "nope"
+                    , ApiError.SchemaMismatch
+                    , ApiError.RequestInvalid "x"
+                    , ApiError.Forbidden ""
+                    ]
+                        |> List.filter (String.isEmpty << ApiError.toMessage)
+                        |> Expect.equal []
+            , test "names a disabled User as a User, the word the rest of Magnes uses" <|
+                \_ ->
+                    ApiError.toMessage ApiError.UserDisabled
+                        |> Expect.equal "That User is disabled."
+            , test "throttling reads as a wait, not a credential problem" <|
+                \_ ->
+                    ApiError.toMessage ApiError.LoginThrottled
+                        |> String.toLower
+                        |> String.contains "password"
+                        |> Expect.equal False
+            , test "a refusal to Anonymous without an Object action still says to sign in" <|
+                \_ ->
+                    ApiError.toMessage (ApiError.AuthenticationRequired unrefused)
+                        |> Expect.equal "Sign in first: Anonymous is not allowed to do that."
+            , test "a refusal to Anonymous says to sign in, and what was refused" <|
+                \_ ->
+                    ApiError.toMessage
+                        (ApiError.AuthenticationRequired
+                            { unrefused | objectAction = Just { namespace = "graphql", object = "queue", action = "mutate" } }
+                        )
+                        |> Expect.equal "Sign in first: Anonymous is not allowed to mutate queue."
+            , test "a wrong current password is not worded as a failed sign-in" <|
+                \_ ->
+                    -- Nobody is signing in: the User is, and stays, signed in. Reading
+                    -- "username and password" here would point at a field that is not there.
+                    ApiError.toMessage ApiError.PasswordIncorrect
+                        |> Expect.notEqual (ApiError.toMessage ApiError.InvalidCredentials)
+            , test "a refusal of the request as written keeps bitmagnet's words" <|
+                \_ ->
+                    ApiError.toMessage (ApiError.RequestInvalid "Cannot query field \"x\".")
+                        |> String.contains "Cannot query field \"x\"."
+                        |> Expect.equal True
+            , test "a 403 says bitmagnet refused, with its reason when it gave one" <|
+                \_ ->
+                    ( ApiError.toMessage (ApiError.Forbidden "browser session request must be same-origin")
+                    , ApiError.toMessage (ApiError.Forbidden "")
+                    )
+                        |> Expect.equal
+                            ( "bitmagnet refused the request: browser session request must be same-origin."
+                            , "bitmagnet refused the request."
+                            )
+            , test "an unrecognized error keeps the server's own words" <|
+                \_ ->
+                    ApiError.toMessage (ApiError.ServerRejected "user: register failed: nope")
+                        |> Expect.equal "user: register failed: nope"
+            ]
+        ]
+
+
+badStatus : Int -> String -> Graphql.Http.HttpError
+badStatus status body =
+    Graphql.Http.BadStatus
+        { url = "/graphql", statusCode = status, statusText = "", headers = Dict.empty }
+        body
