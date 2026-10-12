@@ -71,6 +71,10 @@ smoke test starts only the HTTP worker and stops it afterwards; the database rem
 the caller to drop. It does not exercise sign-in over HTTP. Credentialed browser tests
 use the HTTPS proxy and an isolated fixture clone instead.
 
+When installing Chromium with `--with-deps` inside a sanitized Nix shell, retain the
+host `PATH` (`--keep PATH`): Playwright calls the runner's `sudo` and `apt-get` to install
+system libraries. The UI CI job keeps it for that installation step.
+
 The bundled mount defaults to `/ui/` and can be disabled with
 `http_server.static.bundled: false`. `http_server.static.dir` overrides it with an
 external UI. Cross-origin browser deployments must set

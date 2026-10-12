@@ -92,7 +92,8 @@ jobs:
           nix develop --ignore-environment --keep HOME . --command task test-ui
           nix develop --ignore-environment --keep HOME . --command go test -tags webui ./internal/httpserver/static ./internal/app/appfx
       - name: Install browser
-        run: nix develop --ignore-environment --keep HOME . --command sh -c 'cd webui && npx playwright install --with-deps chromium'
+        # Playwright invokes the runner's sudo/apt to install system libraries.
+        run: nix develop --ignore-environment --keep HOME --keep PATH . --command sh -c 'cd webui && npx playwright install --with-deps chromium'
       - name: Test the packaged UI in a browser
         run: nix develop --ignore-environment --keep HOME --keep BUNDLED_UI_POSTGRES_DSN . --command sh -c 'cd webui && npm run test:e2e:bundled'
         env:
