@@ -66,8 +66,16 @@ enforcement requires both. The two differ whenever a User's Role is narrowed aft
 their keys was created.
 _Avoid_: Actual permissions, real permissions, granted scope
 
+### Moderation
+
+**Moderation identifier**:
+A torrent's membership identifier used when sharing moderation decisions without its
+usable magnet or private filenames. Different magnet representations of the same torrent
+have the same moderation identifier.
+_Avoid_: Banned magnet, double-hashed magnet, anonymous hash
+
 ---
 
-Only the authentication vocabulary is settled so far. The indexing terms — torrent,
-torrent source, content, classification — are used loosely across the codebase and docs
+The authentication vocabulary and moderation identifier are settled so far. The indexing
+terms — torrent, torrent source, content, classification — are used loosely across the codebase and docs
 and have not been reconciled; add them here when they are.
