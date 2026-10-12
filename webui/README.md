@@ -1,10 +1,11 @@
 # Magnes
 
-An alternative web UI for [bitmagnet](https://bitmagnet.io), written in
-[Elm](https://elm-lang.org).
+The default web UI for this bitmagnet fork, written in [Elm](https://elm-lang.org).
 
-Bitmagnet is a self-hosted BitTorrent DHT crawler and indexer. It ships with
-its own UI; Magnes is a second one, built against the same GraphQL API.
+Magnes was developed in a separate repository and imported here with its history.
+Backend and UI development now happen together. From the repository root, `task build`
+builds both into one executable; Docker images and releases include the same UI at `/ui/`.
+Use `task build-backend` when only the backend is needed.
 
 ## Status
 
@@ -12,7 +13,7 @@ Runs. Search, sort, facet filters, infinite scroll, row expansion down to a file
 `/torrent/<hash>` are built.
 
 Identity and permissions are in, against
-[the bitmagnet fork](https://github.com/giorgosg/bitmagnet)'s browser-cookie contract. That
+[the bitmagnet fork](https://github.com/giorgosg/magnes)'s browser-cookie contract. That
 covers registration through an Invitation, sign-in, a User overview with sign-out and a
 password change, API-key management, and administration of Users, Invitations and Roles.
 Changing a password signs the User out everywhere, this browser included, which the form says
@@ -56,7 +57,8 @@ are in [docs/](docs/README.md).
 ## Running it
 
 ```
-npm install
+cd webui   # from the repository root
+npm ci
 BITMAGNET_URL=http://your-bitmagnet:3333 npm run dev
 ```
 
@@ -66,10 +68,11 @@ in production. It creates a self-signed localhost certificate on first use; acce
 in the development browser. The API address and static mount path remain runtime values,
 so one compiled bundle works against any instance.
 
-The fork can also serve Magnes itself, from the API's own origin, which removes CORS from
-the picture entirely. Point `http_server.static.dir` at a build of `public/`, set the
-deployed HTML base and `window.MAGNES_BASE_PATH` to the mount path, and set
-`window.MAGNES_API_URL = "/graphql"`.
+Default builds serve Magnes on the API origin at `/ui/`, with `/` redirecting there.
+The bundled HTML base and runtime mount configuration follow `http_server.static.path`
+automatically, and the API URL is `/graphql`. Set `http_server.static.bundled: false` to
+turn it off. For an external deployment, `http_server.static.dir` can serve a separately
+built `public/`; set that HTML base and `window.MAGNES_BASE_PATH` to its mount path.
 
 **That mount has to be reached over HTTPS.** bitmagnet cannot serve TLS itself, and its
 browser credential is a cookie marked `Secure`, which a browser on an insecure origin
@@ -140,8 +143,8 @@ That seems like the right thing to give up.
 
 Because scanning means long scroll sessions, the list is virtualized from the
 start rather than as a later optimization: only visible rows exist in the DOM.
-Retrofitting that is awkward, since the code that decides *what to render* and
-the code that decides *when to fetch more* both want to own the scroll handler.
+Retrofitting that is awkward, since the code that decides _what to render_ and
+the code that decides _when to fetch more_ both want to own the scroll handler.
 
 ### Rows expand in place
 
@@ -170,12 +173,12 @@ and "open in new tab" work, and a torrent can be shared without sharing the
 search that found it. It renders the same expanded row the list does, standalone,
 fetching that one torrent when opened cold.
 
-A plain left-click on that link does *not* follow it: it expands the row where it
+A plain left-click on that link does _not_ follow it: it expands the row where it
 is. Browsing an index means opening many rows in passing, and a page load for
 each one is the wrong default — so the ordinary click is the cheap thing and the
 address is what the deliberate gestures reach.
 
-Expansion itself is *not* in the URL. Scanning means expanding several rows in
+Expansion itself is _not_ in the URL. Scanning means expanding several rows in
 passing, and if each one pushed a history entry the back button would fill with
 them — the same problem `replaceUrl` solves for filter churn. So expansion is
 local state, and the route is an address you can navigate to deliberately. The

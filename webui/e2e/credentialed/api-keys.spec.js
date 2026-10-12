@@ -16,7 +16,9 @@ test.describe("API-key management", () => {
     await expect(page.getByRole("heading", { name: "API keys" })).toBeVisible();
   });
 
-  test("makes a key, shows its value once, and lists it afterwards", async ({ page }) => {
+  test("makes a key, shows its value once, and lists it afterwards", async ({
+    page,
+  }) => {
     const name = `probe-${Date.now()}`;
 
     await page.getByLabel("Name").fill(name);
@@ -26,7 +28,9 @@ test.describe("API-key management", () => {
     await page.getByRole("button", { name: "Make key" }).click();
 
     // The key's value exists in this render and nowhere afterwards.
-    const reveal = page.getByRole("alert").filter({ hasText: "only time it is shown" });
+    const reveal = page
+      .getByRole("alert")
+      .filter({ hasText: "only time it is shown" });
     await expect(reveal).toBeVisible();
     const value = await reveal.locator("code").innerText();
     expect(value.length).toBeGreaterThan(0);
@@ -40,7 +44,9 @@ test.describe("API-key management", () => {
     await expect(row).toContainText("graphql::version::query");
   });
 
-  test("the key's value is not offered as retrievable later", async ({ page }) => {
+  test("the key's value is not offered as retrievable later", async ({
+    page,
+  }) => {
     const name = `once-${Date.now()}`;
 
     await page.getByLabel("Name").fill(name);
@@ -61,11 +67,17 @@ test.describe("API-key management", () => {
   }) => {
     // The admin holds the wildcard, so the offer is the whole registry — including http and
     // torznab, which a browser cannot reach but an automated client is precisely for.
-    await expect(page.getByRole("checkbox", { name: "torznab::query" })).toBeVisible();
-    await expect(page.getByRole("checkbox", { name: "import::mutate" })).toBeVisible();
+    await expect(
+      page.getByRole("checkbox", { name: "torznab::query" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("checkbox", { name: "import::mutate" }),
+    ).toBeVisible();
   });
 
-  test("will not make a key with no name or nothing chosen", async ({ page }) => {
+  test("will not make a key with no name or nothing chosen", async ({
+    page,
+  }) => {
     const submit = page.getByRole("button", { name: "Make key" });
     await expect(submit).toBeDisabled();
 
@@ -93,6 +105,8 @@ test.describe("API-key management", () => {
     await row.getByRole("button", { name: "Revoke" }).click();
 
     // Gone from the list after the server confirmed it, not optimistically.
-    await expect(page.getByRole("listitem").filter({ hasText: name })).toHaveCount(0);
+    await expect(
+      page.getByRole("listitem").filter({ hasText: name }),
+    ).toHaveCount(0);
   });
 });

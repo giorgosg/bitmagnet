@@ -41,15 +41,15 @@ Magnes supports both configurations of the fork:
 
 ```graphql
 type Self {
-  user: User            # null for anonymous; the owning User for an API-key identity
-  apiKey: APIKey        # non-null only when the credential was an API key
+  user: User # null for anonymous; the owning User for an API-key identity
+  apiKey: APIKey # non-null only when the credential was an API key
   permissions: [AuthObjectAction!]!
 }
 
 type User {
   id: Int!
   username: String!
-  role: String!         # a role NAME, not an object
+  role: String! # a role NAME, not an object
   email: String
   lastLoginAt: DateTime
   createdAt: DateTime!
@@ -58,23 +58,42 @@ type User {
 
 type Role {
   name: String!
-  core: Boolean!        # admin/editor/user/anon are core and cannot be deleted
+  core: Boolean! # admin/editor/user/anon are core and cannot be deleted
   permissions: [Permission!]!
 }
 
-type AuthObjectAction { namespace: String!  object: String!  action: String! }
-type AuthSubject      { type: AuthSubjectType!  name: String! }   # type is only `role`
-type Permission       { subject: AuthSubject!  objectAction: AuthObjectAction!  core: Boolean! }
+type AuthObjectAction {
+  namespace: String!
+  object: String!
+  action: String!
+}
+type AuthSubject {
+  type: AuthSubjectType!
+  name: String!
+} # type is only `role`
+type Permission {
+  subject: AuthSubject!
+  objectAction: AuthObjectAction!
+  core: Boolean!
+}
 
 type APIKey {
-  id: Int!  name: String!  userId: Int!  user: User!
-  expiresAt: DateTime  createdAt: DateTime!
+  id: Int!
+  name: String!
+  userId: Int!
+  user: User!
+  expiresAt: DateTime
+  createdAt: DateTime!
 }
 
 type Invitation {
-  code: String!  role: String!  email: String
-  createdBy: User  claimedBy: User
-  expiresAt: DateTime  createdAt: DateTime!
+  code: String!
+  role: String!
+  email: String
+  createdBy: User
+  claimedBy: User
+  expiresAt: DateTime
+  createdAt: DateTime!
 }
 ```
 
@@ -171,11 +190,11 @@ the core permission alone.
 **Deleting a role is three foreign keys**, none of them visible in the GraphQL schema
 (`migrations/00022_auth.sql`):
 
-| Table | Reference | What deleting a role does |
-| --- | --- | --- |
-| `role_permissions` | `on delete cascade` | its permissions go with it |
-| `invitations` | `on delete cascade` | **every invitation issued for it is deleted**, claimed or not |
-| `users` | no cascade | Postgres **refuses** the delete while any user holds the role |
+| Table              | Reference           | What deleting a role does                                     |
+| ------------------ | ------------------- | ------------------------------------------------------------- |
+| `role_permissions` | `on delete cascade` | its permissions go with it                                    |
+| `invitations`      | `on delete cascade` | **every invitation issued for it is deleted**, claimed or not |
+| `users`            | no cascade          | Postgres **refuses** the delete while any user holds the role |
 
 So a role in use cannot be deleted, and the refusal arrives as an opaque database error
 rather than a coded one; and a role nobody holds can still take invitations with it
@@ -237,11 +256,11 @@ gated by `torrent::delete`. There is no per-argument or per-row authorization.
 **no permissions rows**. Since #82, `anon` gets rows from a one-time startup seed, guarded
 by the `auth.anon_role_translated` key in `key_values`. What each actually gets:
 
-| Role     | Where its permissions come from                                                     |
-| -------- | ------------------------------------------------------------------------------------ |
+| Role     | Where its permissions come from                                                       |
+| -------- | ------------------------------------------------------------------------------------- |
 | `admin`  | An in-memory core permission of `**/**/**`. Everything, always.                       |
 | `user`   | The baseline below, plus `torrent::query` and `torrentContent::query`.                |
-| `anon`   | The baseline below, plus its stored rows, honoured only while anonymous access is on.  |
+| `anon`   | The baseline below, plus its stored rows, honoured only while anonymous access is on. |
 | `editor` | **Nothing.** It is a name with no grants until an admin uses `putRole`.               |
 
 The baseline granted to `anon` and `user` regardless of the anonymous-access setting is
@@ -344,26 +363,26 @@ against the homeserver on trunk]**:
 `path` still names the top-level field (`["auth"]`, `["self","login"]`) and remains useful
 for telling which of several fields failed, but it is no longer the only signal.
 
-| Code | Means |
-| ---- | ----- |
-| `INVALID_CREDENTIALS` | Login miss — covers "no such user" too |
-| `USER_DISABLED` | Login against a disabled User |
-| `LOGIN_THROTTLED` | Throttled; back off, do not retry immediately |
-| `USER_ALREADY_EXISTS` | Registration, username or email taken |
-| `USERNAME_INVALID` | Registration validation |
-| `INVITATION_REQUIRED` | `invitation_required` is on and none was given |
-| `INVITATION_INVALID` | Registration, no such code |
-| `INVITATION_EXPIRED` | Registration, code past its expiry |
-| `INVITATION_CLAIMED` | Registration, code already used |
-| `PASSWORD_INSUFFICIENT_ENTROPY` | Below `auth.password_min_entropy` (default 70) |
-| `PASSWORD_INCORRECT` | `updatePassword`, wrong `currentPassword` |
-| `EMAIL_REQUIRED` | `auth.email_required` is on and no address was given |
-| `EMAIL_INVALID` | Registration or invitation, malformed address |
-| `UNAUTHORIZED` | Refusal; carries `namespace`, `object`, `action` |
-| `USER_SESSION_REQUIRED` | Operation needs a User-authenticated Identity |
-| `API_KEY_MANAGEMENT_FORBIDDEN` | An API-key Identity may not manage API keys |
-| `AUTHENTICATION_INFRASTRUCTURE_FAILURE` | Authentication service unavailable |
-| `INTERNAL_SERVER_ERROR` | Unknown internal error; details deliberately withheld |
+| Code                                    | Means                                                 |
+| --------------------------------------- | ----------------------------------------------------- |
+| `INVALID_CREDENTIALS`                   | Login miss — covers "no such user" too                |
+| `USER_DISABLED`                         | Login against a disabled User                         |
+| `LOGIN_THROTTLED`                       | Throttled; back off, do not retry immediately         |
+| `USER_ALREADY_EXISTS`                   | Registration, username or email taken                 |
+| `USERNAME_INVALID`                      | Registration validation                               |
+| `INVITATION_REQUIRED`                   | `invitation_required` is on and none was given        |
+| `INVITATION_INVALID`                    | Registration, no such code                            |
+| `INVITATION_EXPIRED`                    | Registration, code past its expiry                    |
+| `INVITATION_CLAIMED`                    | Registration, code already used                       |
+| `PASSWORD_INSUFFICIENT_ENTROPY`         | Below `auth.password_min_entropy` (default 70)        |
+| `PASSWORD_INCORRECT`                    | `updatePassword`, wrong `currentPassword`             |
+| `EMAIL_REQUIRED`                        | `auth.email_required` is on and no address was given  |
+| `EMAIL_INVALID`                         | Registration or invitation, malformed address         |
+| `UNAUTHORIZED`                          | Refusal; carries `namespace`, `object`, `action`      |
+| `USER_SESSION_REQUIRED`                 | Operation needs a User-authenticated Identity         |
+| `API_KEY_MANAGEMENT_FORBIDDEN`          | An API-key Identity may not manage API keys           |
+| `AUTHENTICATION_INFRASTRUCTURE_FAILURE` | Authentication service unavailable                    |
+| `INTERNAL_SERVER_ERROR`                 | Unknown internal error; details deliberately withheld |
 
 Codes without a case in `src/ApiError.elm` fall back to the server's own message, so a
 newer bitmagnet stays legible without a client change.

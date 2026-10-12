@@ -1,6 +1,9 @@
 import { expect, test } from "@playwright/test";
 
-import { recordCredentialStores, storedCredentials } from "./support/credential-store.js";
+import {
+  recordCredentialStores,
+  storedCredentials,
+} from "./support/credential-store.js";
 
 // A username that cannot exist, and a code that is nobody's invitation. Every assertion
 // here is about being refused or about the form itself, so the suite stays unattended and
@@ -27,7 +30,9 @@ test.describe("the registration form", () => {
     await expect(page.locator('input[type="email"]')).toHaveCount(0);
   });
 
-  test("offers no submission until a username and password are filled", async ({ page }) => {
+  test("offers no submission until a username and password are filled", async ({
+    page,
+  }) => {
     await page.goto("/register");
     const submit = page.getByRole("button", { name: "Register" });
 
@@ -45,10 +50,14 @@ test.describe("an invitation link", () => {
   test("arrives with its code already in the form", async ({ page }) => {
     await page.goto(`/register?code=${NOT_AN_INVITATION}`);
 
-    await expect(page.getByLabel("Invitation code")).toHaveValue(NOT_AN_INVITATION);
+    await expect(page.getByLabel("Invitation code")).toHaveValue(
+      NOT_AN_INVITATION,
+    );
   });
 
-  test("leaves the field empty when the link carries no code", async ({ page }) => {
+  test("leaves the field empty when the link carries no code", async ({
+    page,
+  }) => {
     await page.goto("/register");
 
     await expect(page.getByLabel("Invitation code")).toHaveValue("");
@@ -81,7 +90,9 @@ test.describe("the password-entropy meter", () => {
     await expect(page.getByRole("button", { name: "Register" })).toBeEnabled();
   });
 
-  test("stops describing a password that is no longer typed", async ({ page }) => {
+  test("stops describing a password that is no longer typed", async ({
+    page,
+  }) => {
     await page.goto("/register");
     const password = page.getByLabel("Password", { exact: true });
 
@@ -95,7 +106,9 @@ test.describe("the password-entropy meter", () => {
 });
 
 test.describe("the password manager", () => {
-  test("is offered nothing by a registration that was refused", async ({ page }) => {
+  test("is offered nothing by a registration that was refused", async ({
+    page,
+  }) => {
     // Only a User that exists is worth saving a password for. The success path needs a
     // real Invitation and belongs to the credentialed harness — see e2e/README.md.
     await recordCredentialStores(page);
@@ -156,12 +169,20 @@ test.describe("a refused registration", () => {
     // And it is marked on the invitation, not scattered across fields it is not about.
     const invitation = page.getByLabel("Invitation code");
     await expect(invitation).toHaveAttribute("aria-invalid", "true");
-    await expect(invitation).toHaveAttribute("aria-describedby", "register-rejection");
+    await expect(invitation).toHaveAttribute(
+      "aria-describedby",
+      "register-rejection",
+    );
 
-    await expect(page.getByLabel("Username")).toHaveAttribute("aria-invalid", "false");
+    await expect(page.getByLabel("Username")).toHaveAttribute(
+      "aria-invalid",
+      "false",
+    );
   });
 
-  test("stays on the registration route rather than navigating anywhere", async ({ page }) => {
+  test("stays on the registration route rather than navigating anywhere", async ({
+    page,
+  }) => {
     await page.goto(`/register?code=${NOT_AN_INVITATION}`);
 
     await page.getByLabel("Username").fill(NO_SUCH_USER);
@@ -172,7 +193,9 @@ test.describe("a refused registration", () => {
     expect(new URL(page.url()).pathname).toBe("/register");
   });
 
-  test("is dismissed by typing, which is no longer what it described", async ({ page }) => {
+  test("is dismissed by typing, which is no longer what it described", async ({
+    page,
+  }) => {
     await page.goto(`/register?code=${NOT_AN_INVITATION}`);
 
     await page.getByLabel("Username").fill(NO_SUCH_USER);

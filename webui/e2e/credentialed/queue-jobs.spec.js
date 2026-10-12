@@ -6,7 +6,13 @@
 // The tests still count what bitmagnet answers rather than the seed's numbers, so a
 // change to the seed does not read as a defect here.
 
-import { registerUser, signIn, signInAt, expect, test } from "../support/credentialed.js";
+import {
+  registerUser,
+  signIn,
+  signInAt,
+  expect,
+  test,
+} from "../support/credentialed.js";
 
 // The chip for a facet value, by its label alone: its accessible name also carries the count.
 function chip(page, label) {
@@ -19,7 +25,10 @@ async function chipCount(page, label) {
 }
 
 function jobRows(page) {
-  return page.getByRole("table").getByRole("row").filter({ has: page.getByRole("button", { name: "Details" }) });
+  return page
+    .getByRole("table")
+    .getByRole("row")
+    .filter({ has: page.getByRole("button", { name: "Details" }) });
 }
 
 test("an administrator finds the jobs from the status page, filters them by status, and the link keeps it", async ({
@@ -50,7 +59,8 @@ test("an administrator finds the jobs from the status page, filters them by stat
   expect(await chipCount(page, "failed")).toBe(failed);
   await expect(chip(page, "pending")).toHaveAttribute("aria-pressed", "false");
   const byQueue =
-    (await chipCount(page, "process_torrent")) + (await chipCount(page, "process_torrent_batch"));
+    (await chipCount(page, "process_torrent")) +
+    (await chipCount(page, "process_torrent_batch"));
   expect(byQueue).toBe(failed);
 
   // The filtered list is a link: opened afresh, it is the same list.
@@ -59,7 +69,10 @@ test("an administrator finds the jobs from the status page, filters them by stat
   await expect(jobRows(page)).toHaveCount(Math.min(failed, 20));
 });
 
-test("a job opens to show its whole payload and error", async ({ page, credentials }) => {
+test("a job opens to show its whole payload and error", async ({
+  page,
+  credentials,
+}) => {
   await signInAt(page, credentials, "/queue/jobs?status=failed", "Queue jobs");
 
   const row = jobRows(page).first();
@@ -69,10 +82,14 @@ test("a job opens to show its whole payload and error", async ({ page, credentia
   await expect(details).toHaveAttribute("aria-expanded", "true");
 
   // The details row is the one the button controls.
-  const opened = page.locator(`#${await details.getAttribute("aria-controls")}`);
+  const opened = page.locator(
+    `#${await details.getAttribute("aria-controls")}`,
+  );
   await expect(opened.getByRole("heading", { name: "Payload" })).toBeVisible();
   // The seed's payloads are compact JSON; shown, they are indented one key to a line.
-  await expect(opened.locator(".job-payload")).toHaveText(/^\{\n {2}"run": \d+,\n {2}"seed": \d+\n\}$/);
+  await expect(opened.locator(".job-payload")).toHaveText(
+    /^\{\n {2}"run": \d+,\n {2}"seed": \d+\n\}$/,
+  );
   await expect(opened.locator(".job-error")).toHaveText(
     "seeded failure, so the error column has something to show",
   );
@@ -81,18 +98,27 @@ test("a job opens to show its whole payload and error", async ({ page, credentia
   await expect(opened).toHaveCount(0);
 });
 
-test("ordering and paging are in the URL too", async ({ page, credentials }) => {
+test("ordering and paging are in the URL too", async ({
+  page,
+  credentials,
+}) => {
   await signInAt(page, credentials, "/queue/jobs", "Queue jobs");
 
-  await page.getByLabel("Order jobs").selectOption({ label: "priority, highest number first" });
+  await page
+    .getByLabel("Order jobs")
+    .selectOption({ label: "priority, highest number first" });
   await expect(page).toHaveURL(/\/queue\/jobs\?order=priority&direction=desc$/);
   await expect(page.getByLabel("Order jobs")).toHaveValue("priority-desc");
 
   // Past the last page, the page says how many there are rather than showing nothing.
   await page.goto("/queue/jobs?order=priority&direction=desc&page=99");
-  await expect(page.getByText(/^There (is|are) only \d+ pages? of jobs\.$/)).toBeVisible();
+  await expect(
+    page.getByText(/^There (is|are) only \d+ pages? of jobs\.$/),
+  ).toBeVisible();
   await page.getByRole("link", { name: "Previous" }).click();
-  await expect(page).toHaveURL(/\/queue\/jobs\?order=priority&direction=desc(&page=\d+)?$/);
+  await expect(page).toHaveURL(
+    /\/queue\/jobs\?order=priority&direction=desc(&page=\d+)?$/,
+  );
   await expect(jobRows(page).first()).toBeVisible();
   await expect(page.getByLabel("Order jobs")).toHaveValue("priority-desc");
 });
@@ -111,6 +137,8 @@ test("an Identity without queue::query is refused, and not offered the page", as
   await expect(page.getByRole("link", { name: "Queue jobs" })).toHaveCount(0);
 
   await page.goto("/queue/jobs?status=failed");
-  await expect(page.getByText("Your Identity does not permit reading bitmagnet's queue.")).toBeVisible();
+  await expect(
+    page.getByText("Your Identity does not permit reading bitmagnet's queue."),
+  ).toBeVisible();
   await expect(page.getByRole("table")).toHaveCount(0);
 });

@@ -24,9 +24,53 @@ target worth knowing that AGENTS.md doesn't list:
 task serve-docsite   # the Jekyll site under bitmagnet.io/
 ```
 
-The fork ships no bundled frontend. Serve a separately built UI with
-`http_server.static.dir`, or deploy it behind the same reverse proxy as the API.
-Cross-origin browser deployments must set `http_server.cors.allowed_origins` explicitly.
+## Building and testing the UI
+
+The default `task`, or `task build`, installs `webui/package-lock.json` dependencies with
+`npm ci`, builds optimized Elm JavaScript, and compiles Go with the `webui` tag. The
+executable embeds the HTML, JavaScript, CSS and favicon; no asset directory is needed at
+runtime. Docker builds the UI on the build host before cross-compiling Go, and GoReleaser
+builds it once before compiling its platform binaries.
+
+`task build-backend` and plain `go build ./...` omit the bundle. This keeps generators,
+backend development and database tests independent of Elm. Building Go directly with
+`-tags webui` requires `task build-ui` first; a missing bundle fails compilation.
+Generated bundles and runtime configuration stay ignored.
+
+```bash
+task install-tools       # root Prettier and UI tools
+task build               # one executable, including the optimized UI
+task test-ui             # Elm tests
+task lint-ui             # Elm formatting and static review
+task test-bundled-ui     # build the UI and test the bundled HTTP routes/fx wiring
+cd webui
+BITMAGNET_URL=http://localhost:3333 npm run dev  # HTTPS development proxy
+```
+
+`task test` runs the Go, bundled HTTP and Elm tests. `task lint` includes elm-format and
+elm-review alongside Go lint and root Prettier 3.3.3. UI source and browser tests live in
+`webui/`; its [documentation](../webui/docs/README.md) and
+[browser test guide](../webui/e2e/README.md) explain the existing tests.
+
+CI also drives the built executable in Chromium: `/` redirects to `/ui/`, the optimized
+Elm app reads the same-origin API, and navigation/reloading a login deep link works. To
+run that smoke test after `task build`:
+
+```bash
+cd webui
+npx playwright install chromium
+BUNDLED_UI_POSTGRES_DSN='postgres://postgres:postgres@localhost:5432/ui_smoke' npm run test:e2e:bundled
+```
+
+Create a disposable database for this command: the executable runs its migrations. The
+smoke test starts only the HTTP worker and stops it afterwards; the database remains for
+the caller to drop. It does not exercise sign-in over HTTP. Credentialed browser tests
+use the HTTPS proxy and an isolated fixture clone instead.
+
+The bundled mount defaults to `/ui/` and can be disabled with
+`http_server.static.bundled: false`. `http_server.static.dir` overrides it with an
+external UI. Cross-origin browser deployments must set
+`http_server.cors.allowed_origins` explicitly.
 
 ## CI cost controls
 

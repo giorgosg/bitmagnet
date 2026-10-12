@@ -34,12 +34,18 @@ function graphqlQuery(request) {
 // The page's count of the queue: two looks at `jobs` that ask for no job.
 function isCount(request) {
   const query = graphqlQuery(request);
-  return query !== null && query.includes("jobs(input: {limit: 0, facets:") && query.includes("totalCount: true");
+  return (
+    query !== null &&
+    query.includes("jobs(input: {limit: 0, facets:") &&
+    query.includes("totalCount: true")
+  );
 }
 
 function isMutation(request, field) {
   const query = graphqlQuery(request);
-  return query !== null && query.startsWith("mutation") && query.includes(field);
+  return (
+    query !== null && query.startsWith("mutation") && query.includes(field)
+  );
 }
 
 // bitmagnet's count, as the page was given it. elm-graphql aliases both `jobs` fields and the
@@ -48,8 +54,12 @@ function tallyOf(body) {
   expect(body.errors).toBeUndefined();
   const looks = Object.values(body.data.queue);
   const scoped = looks.find((look) => look.aggregations);
-  const valueOf = (bucket) => bucket[Object.keys(bucket).find((key) => key.startsWith("value"))];
-  const counts = (buckets) => Object.fromEntries((buckets ?? []).map((bucket) => [valueOf(bucket), bucket.count]));
+  const valueOf = (bucket) =>
+    bucket[Object.keys(bucket).find((key) => key.startsWith("value"))];
+  const counts = (buckets) =>
+    Object.fromEntries(
+      (buckets ?? []).map((bucket) => [valueOf(bucket), bucket.count]),
+    );
   return {
     queues: counts(scoped.aggregations.queue),
     statuses: counts(scoped.aggregations.status),
@@ -60,7 +70,10 @@ function tallyOf(body) {
 // The next count the page is answered, whose query `asks` approves.
 function nextCount(page, asks = () => true) {
   return page
-    .waitForResponse((response) => isCount(response.request()) && asks(graphqlQuery(response.request())))
+    .waitForResponse(
+      (response) =>
+        isCount(response.request()) && asks(graphqlQuery(response.request())),
+    )
     .then(async (response) => tallyOf(await response.json()));
 }
 
@@ -74,7 +87,9 @@ function mutationsSent(page) {
 }
 
 function nextMutation(page, field) {
-  return page.waitForResponse((response) => isMutation(response.request(), field));
+  return page.waitForResponse((response) =>
+    isMutation(response.request(), field),
+  );
 }
 
 function sum(counts) {
@@ -87,7 +102,9 @@ async function openAdministration(page, credentials) {
   await signIn(page, credentials);
   const counted = nextCount(page);
   await page.goto("/admin/queue");
-  await expect(page.getByRole("heading", { name: "Queue administration" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Queue administration" }),
+  ).toBeVisible();
   return counted;
 }
 
@@ -105,7 +122,10 @@ function reprocessPanel(page) {
 }
 
 function jobRows(page) {
-  return page.getByRole("table").getByRole("row").filter({ has: page.getByRole("button", { name: "Details" }) });
+  return page
+    .getByRole("table")
+    .getByRole("row")
+    .filter({ has: page.getByRole("button", { name: "Details" }) });
 }
 
 function jobsMatch(n) {
@@ -121,11 +141,17 @@ test("an Identity without queue::mutate is neither offered the page nor let in",
 }) => {
   // The administrator is offered it on the status page, and in the Identity menu.
   await signInAt(page, credentials, "/status", "Status");
-  await expect(page.getByRole("link", { name: "Queue administration" })).toHaveAttribute("href", "/admin/queue");
+  await expect(
+    page.getByRole("link", { name: "Queue administration" }),
+  ).toHaveAttribute("href", "/admin/queue");
   await page.goto("/admin/roles");
-  await expect(page.getByRole("heading", { name: "Create a Role" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Create a Role" }),
+  ).toBeVisible();
   await page.getByRole("button", { name: credentials.username }).click();
-  await expect(page.getByRole("link", { name: "Queue administration" })).toHaveAttribute("href", "/admin/queue");
+  await expect(
+    page.getByRole("link", { name: "Queue administration" }),
+  ).toHaveAttribute("href", "/admin/queue");
 
   // A Role that may read the queue, and bitmagnet's health, and not change the queue.
   const reading = uniqueName("e2e-qread");
@@ -140,34 +166,56 @@ test("an Identity without queue::mutate is neither offered the page nor let in",
 
     // The Role took: the queue's jobs may be read.
     await them.goto("/queue/jobs");
-    await expect(them.getByRole("heading", { name: "Queue jobs" })).toBeVisible();
+    await expect(
+      them.getByRole("heading", { name: "Queue jobs" }),
+    ).toBeVisible();
     await expect(jobRows(them).first()).toBeVisible();
 
     // But neither the status page nor the menu offers its administration, and the page
     // refuses it.
     await them.goto("/status");
     await expect(them.getByRole("link", { name: "Queue jobs" })).toBeVisible();
-    await expect(them.getByRole("link", { name: "Queue administration" })).toHaveCount(0);
+    await expect(
+      them.getByRole("link", { name: "Queue administration" }),
+    ).toHaveCount(0);
     await them.getByRole("button", { name: reader.username }).click();
     await expect(them.getByRole("link", { name: "Your User" })).toBeVisible();
-    await expect(them.getByRole("link", { name: "Queue administration" })).toHaveCount(0);
+    await expect(
+      them.getByRole("link", { name: "Queue administration" }),
+    ).toHaveCount(0);
 
     await them.goto("/admin/queue");
-    await expect(them.getByText("Your Identity does not permit changing bitmagnet's queue.")).toBeVisible();
+    await expect(
+      them.getByText(
+        "Your Identity does not permit changing bitmagnet's queue.",
+      ),
+    ).toBeVisible();
     await expect(them.getByRole("button", { name: "Purge…" })).toHaveCount(0);
-    await expect(them.getByRole("button", { name: "Reprocess…" })).toHaveCount(0);
+    await expect(them.getByRole("button", { name: "Reprocess…" })).toHaveCount(
+      0,
+    );
   });
 
   // Anonymous, which the fixture grants every read action and nothing that changes anything, is
   // refused too, and not sent to sign in instead.
   await inAnotherBrowser(browser, async (anonymous) => {
     await anonymous.goto("/status");
-    await expect(anonymous.getByRole("link", { name: "Queue jobs" })).toBeVisible();
-    await expect(anonymous.getByRole("link", { name: "Queue administration" })).toHaveCount(0);
+    await expect(
+      anonymous.getByRole("link", { name: "Queue jobs" }),
+    ).toBeVisible();
+    await expect(
+      anonymous.getByRole("link", { name: "Queue administration" }),
+    ).toHaveCount(0);
     await anonymous.goto("/admin/queue");
-    await expect(anonymous.getByText("Your Identity does not permit changing bitmagnet's queue.")).toBeVisible();
+    await expect(
+      anonymous.getByText(
+        "Your Identity does not permit changing bitmagnet's queue.",
+      ),
+    ).toBeVisible();
     expect(new URL(anonymous.url()).pathname).toBe("/admin/queue");
-    await expect(anonymous.getByRole("button", { name: "Purge…" })).toHaveCount(0);
+    await expect(anonymous.getByRole("button", { name: "Purge…" })).toHaveCount(
+      0,
+    );
   });
 });
 
@@ -179,13 +227,19 @@ test("purges the jobs chosen, only after asking, and the jobs table shows what b
 
   // Nothing chosen is every job, and the page says how many bitmagnet counted.
   expect(sum(before.statuses)).toBe(before.everything);
-  await expect(purgePanel(page).getByText(jobsMatch(before.everything))).toBeVisible();
+  await expect(
+    purgePanel(page).getByText(jobsMatch(before.everything)),
+  ).toBeVisible();
 
   // Failed jobs in process_torrent. Each choice is counted afresh.
-  let counted = nextCount(page, (query) => query.includes('queue: {aggregate: true, filter: ["process_torrent"]}'));
+  let counted = nextCount(page, (query) =>
+    query.includes('queue: {aggregate: true, filter: ["process_torrent"]}'),
+  );
   await chip(page, "process_torrent").click();
   await counted;
-  counted = nextCount(page, (query) => query.includes("status: {aggregate: true, filter: [failed]}"));
+  counted = nextCount(page, (query) =>
+    query.includes("status: {aggregate: true, filter: [failed]}"),
+  );
   await chip(page, "failed").click();
   const chosen = await counted;
   const failed = chosen.statuses.failed;
@@ -196,8 +250,12 @@ test("purges the jobs chosen, only after asking, and the jobs table shows what b
   const sent = mutationsSent(page);
   await page.getByRole("button", { name: "Purge…" }).click();
   const question = purgePanel(page).getByRole("group", { name: "Confirm" });
-  await expect(question).toContainText("Purge every job in process_torrent with status failed?");
-  await expect(question).toContainText(`${failed} job${failed === 1 ? "" : "s"} matched when last counted.`);
+  await expect(question).toContainText(
+    "Purge every job in process_torrent with status failed?",
+  );
+  await expect(question).toContainText(
+    `${failed} job${failed === 1 ? "" : "s"} matched when last counted.`,
+  );
   await question.getByRole("button", { name: "Keep them" }).click();
   await expect(question).toHaveCount(0);
   expect(sent).toEqual([]);
@@ -208,7 +266,9 @@ test("purges the jobs chosen, only after asking, and the jobs table shows what b
   await question.getByRole("button", { name: "Purge", exact: true }).click();
 
   const answer = await purged;
-  expect(graphqlQuery(answer.request())).toContain('purgeJobs(input: {queues: ["process_torrent"], statuses: [failed]})');
+  expect(graphqlQuery(answer.request())).toContain(
+    'purgeJobs(input: {queues: ["process_torrent"], statuses: [failed]})',
+  );
   expect(await answer.json()).toEqual({ data: { queue: { purgeJobs: null } } });
   expect(sent).toHaveLength(1);
 
@@ -226,14 +286,20 @@ test("purges the jobs chosen, only after asking, and the jobs table shows what b
 
   // The jobs table, opened from the page, lists none of them; the failed jobs of the other
   // queue are still there.
-  await purgePanel(page).getByRole("link", { name: "See them in the jobs table" }).click();
-  await expect(page).toHaveURL(/\/queue\/jobs\?queue=process_torrent&status=failed$/);
+  await purgePanel(page)
+    .getByRole("link", { name: "See them in the jobs table" })
+    .click();
+  await expect(page).toHaveURL(
+    /\/queue\/jobs\?queue=process_torrent&status=failed$/,
+  );
   await expect(page.getByText("No jobs match these filters.")).toBeVisible();
 
   await page.goto("/queue/jobs?status=failed");
   await expect(jobRows(page).first()).toBeVisible();
   for (const row of await jobRows(page).all()) {
-    await expect(row.getByRole("cell").nth(1)).toHaveText("process_torrent_batch");
+    await expect(row.getByRole("cell").nth(1)).toHaveText(
+      "process_torrent_batch",
+    );
   }
 });
 
@@ -244,7 +310,9 @@ test("queues a reprocessing batch only after asking, as the form said, and point
   const before = await openAdministration(page, credentials);
   const form = reprocessPanel(page);
 
-  await form.getByLabel("Only torrents whose content record is of these types").check();
+  await form
+    .getByLabel("Only torrents whose content record is of these types")
+    .check();
   await form.getByRole("button", { name: "movie", exact: true }).click();
   await form.getByRole("button", { name: "unclassified", exact: true }).click();
   await form.getByLabel("Classify from scratch").check();
@@ -254,10 +322,18 @@ test("queues a reprocessing batch only after asking, as the form said, and point
   const sent = mutationsSent(page);
   await form.getByRole("button", { name: "Reprocess…" }).click();
   const question = form.getByRole("group", { name: "Confirm" });
-  await expect(question).toContainText("Queue a batch that reprocesses every torrent whose content record is movie or unclassified?");
-  await expect(question).toContainText("queues a process_torrent job for every 50 of them; after 2,000 torrents it hands the rest on to a new batch job.");
-  await expect(question).toContainText("Each torrent is classified from scratch");
-  await expect(question).toContainText("No external API such as TMDB is asked.");
+  await expect(question).toContainText(
+    "Queue a batch that reprocesses every torrent whose content record is movie or unclassified?",
+  );
+  await expect(question).toContainText(
+    "queues a process_torrent job for every 50 of them; after 2,000 torrents it hands the rest on to a new batch job.",
+  );
+  await expect(question).toContainText(
+    "Each torrent is classified from scratch",
+  );
+  await expect(question).toContainText(
+    "No external API such as TMDB is asked.",
+  );
   await expect(question).not.toContainText("Delete");
   await question.getByRole("button", { name: "Don't queue it" }).click();
   await expect(question).toHaveCount(0);
@@ -272,7 +348,9 @@ test("queues a reprocessing batch only after asking, as the form said, and point
   expect(graphqlQuery(answer.request())).toContain(
     "enqueueReprocessTorrentsBatch(input: {purge: false, batchSize: 50, chunkSize: 2000, contentTypes: [movie, null], orphans: false, classifierRematch: true, apisDisabled: true, localSearchDisabled: true})",
   );
-  expect(await answer.json()).toEqual({ data: { queue: { enqueueReprocessTorrentsBatch: null } } });
+  expect(await answer.json()).toEqual({
+    data: { queue: { enqueueReprocessTorrentsBatch: null } },
+  });
 
   // It added exactly one job, and took nothing away.
   const after = await recounted;
@@ -282,15 +360,23 @@ test("queues a reprocessing batch only after asking, as the form said, and point
   // The page points to the jobs table, where the newest job is the batch, holding what was asked.
   const outcome = form.getByRole("status");
   await expect(outcome).toContainText("bitmagnet queued the batch.");
-  await outcome.getByRole("link", { name: "Watch it in the queue's jobs" }).click();
+  await outcome
+    .getByRole("link", { name: "Watch it in the queue's jobs" })
+    .click();
   await expect(page).toHaveURL(/\/queue\/jobs$/);
   const newest = jobRows(page).first();
   await expect(newest.getByRole("cell").nth(0)).toHaveText("pending");
-  await expect(newest.getByRole("cell").nth(1)).toHaveText("process_torrent_batch");
+  await expect(newest.getByRole("cell").nth(1)).toHaveText(
+    "process_torrent_batch",
+  );
 
   const details = newest.getByRole("button", { name: "Details" });
   await details.click();
-  const payload = JSON.parse(await page.locator(`#${await details.getAttribute("aria-controls")} .job-payload`).textContent());
+  const payload = JSON.parse(
+    await page
+      .locator(`#${await details.getAttribute("aria-controls")} .job-payload`)
+      .textContent(),
+  );
   expect(payload).toMatchObject({
     BatchSize: 50,
     ChunkSize: 2000,
@@ -323,16 +409,24 @@ test("purging first empties the whole queue before the batch is queued, and says
   const recounted = nextCount(page);
   await question.getByRole("button", { name: "Queue the batch" }).click();
   const answer = await queued;
-  expect(graphqlQuery(answer.request())).toContain("enqueueReprocessTorrentsBatch(input: {purge: true,");
-  expect(await answer.json()).toEqual({ data: { queue: { enqueueReprocessTorrentsBatch: null } } });
+  expect(graphqlQuery(answer.request())).toContain(
+    "enqueueReprocessTorrentsBatch(input: {purge: true,",
+  );
+  expect(await answer.json()).toEqual({
+    data: { queue: { enqueueReprocessTorrentsBatch: null } },
+  });
 
   // bitmagnet emptied the queue, then queued the batch into it: one job is left.
   const after = await recounted;
   expect(after.everything).toBe(1);
   expect(after.statuses).toEqual({ pending: 1 });
-  await expect(form.getByRole("status")).toContainText("bitmagnet emptied the queue and queued the batch.");
+  await expect(form.getByRole("status")).toContainText(
+    "bitmagnet emptied the queue and queued the batch.",
+  );
 
   await page.goto("/queue/jobs");
   await expect(jobRows(page)).toHaveCount(1);
-  await expect(jobRows(page).first().getByRole("cell").nth(1)).toHaveText("process_torrent_batch");
+  await expect(jobRows(page).first().getByRole("cell").nth(1)).toHaveText(
+    "process_torrent_batch",
+  );
 });

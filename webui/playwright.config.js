@@ -30,7 +30,9 @@ const credentialed = process.env.MAGNES_E2E_CREDENTIALED === "1";
 
 // A port of its own, so a credentialed run does not adopt — or evict — a dev server someone
 // already has open against their own instance.
-const port = Number(process.env.MAGNES_E2E_PORT || (credentialed ? 8444 : 8443));
+const port = Number(
+  process.env.MAGNES_E2E_PORT || (credentialed ? 8444 : 8443),
+);
 const baseURL = `https://localhost:${port}`;
 
 // Where e2e/harness/serve.js writes this run's credentials and the test fixture reads them.
@@ -47,7 +49,7 @@ const credentialFree = {
   testDir: "e2e",
   // The credentialed specs live under e2e/ too, and would fail here for the honest reason
   // that there is no User — which is not a failure worth reporting.
-  testIgnore: "credentialed/**",
+  testIgnore: ["credentialed/**", "bundled/**"],
   use: { ...devices["Desktop Chrome"] },
 };
 
@@ -99,7 +101,9 @@ export default defineConfig({
     ignoreHTTPSErrors: true,
     trace: "on-first-retry",
   },
-  projects: credentialed ? [withCredentials, changesTheQueue, changesAnonymous] : [credentialFree],
+  projects: credentialed
+    ? [withCredentials, changesTheQueue, changesAnonymous]
+    : [credentialFree],
   // Only the credentialed run has anything to take down. See e2e/harness/teardown.js for
   // why Playwright's own web-server teardown is not enough.
   globalTeardown: credentialed ? "./e2e/harness/teardown.js" : undefined,

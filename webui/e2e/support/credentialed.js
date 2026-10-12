@@ -29,7 +29,9 @@ export const test = base.extend({
       // The file is the harness's handshake, not a record for tests: it also carries the
       // pid that e2e/harness/teardown.js stops. A spec has no business with that, so it is
       // not handed one.
-      const { username, password, graphqlEndpoint } = JSON.parse(fs.readFileSync(file, "utf8"));
+      const { username, password, graphqlEndpoint } = JSON.parse(
+        fs.readFileSync(file, "utf8"),
+      );
 
       await use({ username, password, graphqlEndpoint });
     },
@@ -96,7 +98,9 @@ export async function signIn(page, credentials) {
   await page.getByLabel("Password").fill(credentials.password);
   await page.getByRole("button", { name: "Sign in" }).click();
 
-  await expect(page.getByRole("button", { name: credentials.username })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: credentials.username }),
+  ).toBeVisible();
 }
 
 // Signs `user` in, then opens `path` and waits for `heading`: the screen has loaded.
@@ -160,7 +164,9 @@ export async function setRole(page, username, role) {
 export async function createRole(page, name, objectActions) {
   await page.getByLabel("Name").fill(name);
   for (const objectAction of objectActions) {
-    await page.getByRole("checkbox", { name: objectAction, exact: true }).check();
+    await page
+      .getByRole("checkbox", { name: objectAction, exact: true })
+      .check();
   }
   await page.getByRole("button", { name: "Create Role" }).click();
   await expect(page.getByRole("status")).toHaveText(`Saved the Role ${name}.`);
@@ -176,7 +182,8 @@ export async function createRole(page, name, objectActions) {
 // e2e/harness/serve.js claimed it to create the issuer — so there is no other way to get one.
 export async function mintInvitation(request, issuer, role) {
   const login = await call(request, issuer.graphqlEndpoint, {
-    query: "mutation Login($username: String!, $password: String!) { self { login(username: $username, password: $password) { token } } }",
+    query:
+      "mutation Login($username: String!, $password: String!) { self { login(username: $username, password: $password) { token } } }",
     variables: { username: issuer.username, password: issuer.password },
   });
 
@@ -184,7 +191,8 @@ export async function mintInvitation(request, issuer, role) {
     request,
     issuer.graphqlEndpoint,
     {
-      query: "mutation Invite($input: InviteInput!) { auth { invite(input: $input) { code } } }",
+      query:
+        "mutation Invite($input: InviteInput!) { auth { invite(input: $input) { code } } }",
       variables: { input: role ? { role } : {} },
     },
     login.self.login.token,
@@ -201,7 +209,9 @@ async function call(request, graphqlEndpoint, body, token) {
 
   const answered = await response.json();
   if (answered.errors) {
-    throw new Error(`the fixture server refused a harness request: ${JSON.stringify(answered.errors)}`);
+    throw new Error(
+      `the fixture server refused a harness request: ${JSON.stringify(answered.errors)}`,
+    );
   }
 
   return answered.data;

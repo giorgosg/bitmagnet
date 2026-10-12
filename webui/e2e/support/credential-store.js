@@ -22,7 +22,10 @@ export async function recordCredentialStores(page) {
       configurable: true,
       value: {
         store: (credential) => {
-          window.__stored.push({ id: credential.id, password: credential.password });
+          window.__stored.push({
+            id: credential.id,
+            password: credential.password,
+          });
           return Promise.resolve(credential);
         },
       },

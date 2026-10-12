@@ -30,6 +30,7 @@ code.
 | [docs/forks/](docs/forks/README.md)                      | Choosing which downstream repo a change should come from                              |
 | [docs/upstream-status.md](docs/upstream-status.md)       | Sending a change upstream, or weighing whether the `next` rewrite makes it moot       |
 | [docs/integration-status.md](docs/integration-status.md) | Checking whether a candidate is already merged, queued, or rejected                   |
+| [webui/docs/](webui/docs/README.md)                      | Working on the Elm UI, its generated client, or browser tests                         |
 | [docs/auth.md](docs/auth.md)                             | Configuring or deploying authentication, or running behind a reverse proxy            |
 | [docs/adr/](docs/adr/)                                   | A decision constrains future changes and the reason will not be obvious from the code |
 | `docs/agents/`                                           | Filing an issue, applying a triage label, or looking for domain docs — **local only** |
@@ -191,7 +192,16 @@ task migrate          # needs a running PostgreSQL; docker-compose.yml brings on
 go build ./... && go vet ./...   # quickest Go sanity check
 ```
 
-The fork ships an API backend. Build and test separately served UIs in their own projects.
+The fork ships the Elm UI in `webui/`. `task build` (also the default `task`) installs its
+locked npm dependencies, builds the optimized bundle, and embeds it with the `webui` Go
+build tag. Docker and GoReleaser do the same. Plain `go build` and `task build-backend`
+remain backend-only; `go build -tags webui` requires `task build-ui` first. Never commit
+`webui/public/main.js` or machine-specific `webui/public/config.js`.
+
+`task install-tools` installs both root formatting tools and UI tools. `task test-ui`
+runs Elm tests; `task lint-ui` runs elm-format and elm-review. Before implementing an Elm
+feature, read [webui/docs/elm-development.md](webui/docs/elm-development.md) for package
+discovery. Use the terms in [webui/CONTEXT.md](webui/CONTEXT.md) for identity and permissions.
 
 `flake.nix` supplies Go, go-task, Node 22, golangci-lint, and protoc;
 reach for `nix develop` or `direnv allow` when the host lacks them. PostgreSQL and `goose`

@@ -28,10 +28,16 @@ test("an Identity without administration is refused every administration screen"
 
   for (const screen of screens) {
     await page.goto(screen);
-    await expect(page.getByText("Your Identity does not permit administration.")).toBeVisible();
+    await expect(
+      page.getByText("Your Identity does not permit administration."),
+    ).toBeVisible();
     await expect(page.getByLabel("Find a User")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Create Invitation" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Create Role" })).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Create Invitation" }),
+    ).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Create Role" })).toHaveCount(
+      0,
+    );
   }
 });
 
@@ -55,21 +61,31 @@ test("an Identity that may read administration but not change it is offered no c
     // The listings are there, so reading is allowed; every act on them is not offered.
     await them.goto("/admin/users");
     await them.getByLabel("Find a User").fill(reader.username);
-    await expect(them.getByRole("listitem").filter({ hasText: reader.username })).toBeVisible();
-    await expect(them.getByRole("listitem").getByRole("combobox")).toHaveCount(0);
+    await expect(
+      them.getByRole("listitem").filter({ hasText: reader.username }),
+    ).toBeVisible();
+    await expect(them.getByRole("listitem").getByRole("combobox")).toHaveCount(
+      0,
+    );
     for (const act of ["Disable", "Enable", "Delete"]) {
       await expect(them.getByRole("button", { name: act })).toHaveCount(0);
     }
 
     await them.goto("/admin/invitations");
-    await expect(them.getByRole("heading", { name: "Invitations" })).toBeVisible();
+    await expect(
+      them.getByRole("heading", { name: "Invitations" }),
+    ).toBeVisible();
     await expect(them.getByRole("listitem").first()).toBeVisible();
-    await expect(them.getByRole("button", { name: "Create Invitation" })).toHaveCount(0);
+    await expect(
+      them.getByRole("button", { name: "Create Invitation" }),
+    ).toHaveCount(0);
     await expect(them.getByRole("button", { name: "Withdraw" })).toHaveCount(0);
 
     await them.goto("/admin/roles");
     await expect(them.getByText(readOnly, { exact: true })).toBeVisible();
-    await expect(them.getByRole("button", { name: "Create Role" })).toHaveCount(0);
+    await expect(them.getByRole("button", { name: "Create Role" })).toHaveCount(
+      0,
+    );
     await expect(them.getByRole("button", { name: "Delete" })).toHaveCount(0);
   });
 });

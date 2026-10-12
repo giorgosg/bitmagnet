@@ -12,6 +12,7 @@ on:
       - "ci.Dockerfile"
       - "go.mod"
       - "go.sum"
+      - "webui/**"
       - ".github/workflows/docker-checks.yml"
   pull_request:
     paths:
@@ -20,6 +21,7 @@ on:
       - "ci.Dockerfile"
       - "go.mod"
       - "go.sum"
+      - "webui/**"
       - ".github/workflows/docker-checks.yml"
   schedule:
     - cron: "17 3 * * 0"

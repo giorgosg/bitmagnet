@@ -1,6 +1,20 @@
 bitmagnet.io/schemas/**/*.*
 # Legacy local Angular build cache (absent in a fresh checkout).
 webui/.angular
+webui/elm-stuff
+webui/review/elm-stuff
+webui/.dev
+webui/public/main.js
+webui/public/config.js
+webui/test-results
+webui/playwright-report
+webui/blob-report
+webui/.scratch
+# Generator-owned metadata; preserve elm-graphql's output verbatim.
+webui/src/Magnes/Api/elm-graphql-metadata.json
+# elm-review rewrites these files using its own canonical formatting.
+webui/review/suppressed/*.json
+/.scratch
 
 # Untracked local files. These are gitignored, but Prettier reads .prettierignore
 # rather than .gitignore, so without these rules `task lint` fails on whatever the

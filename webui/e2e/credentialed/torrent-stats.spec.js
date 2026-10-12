@@ -27,7 +27,15 @@ import {
   expect,
   test,
 } from "../support/credentialed.js";
-import { afterFrames, answeredLooks, chip, drawn, holdLooks, quietMoment, setHidden } from "../support/stats.js";
+import {
+  afterFrames,
+  answeredLooks,
+  chip,
+  drawn,
+  holdLooks,
+  quietMoment,
+  setHidden,
+} from "../support/stats.js";
 
 // Resolves with bitmagnet's next answer to the timeline's query, as the page was given it,
 // and the query that asked for it. The predicate says which question is waited for, so an
@@ -53,7 +61,10 @@ function nextMetrics(page, predicate = () => true) {
 }
 
 function isTorrentMetrics(request) {
-  return new URL(request.url()).pathname === "/graphql" && (request.postData() ?? "").includes("metrics");
+  return (
+    new URL(request.url()).pathname === "/graphql" &&
+    (request.postData() ?? "").includes("metrics")
+  );
 }
 
 // Every look the page asks for, as it is asked.
@@ -74,7 +85,9 @@ async function chartedCounts(page) {
   const headings = await table.locator("thead th").allTextContents();
   const rows = await table.locator("tbody tr").all();
 
-  const totals = Object.fromEntries(headings.slice(1).map((heading) => [heading, 0]));
+  const totals = Object.fromEntries(
+    headings.slice(1).map((heading) => [heading, 0]),
+  );
   for (const row of rows) {
     const cells = await row.locator("td").allTextContents();
     cells.forEach((cell, index) => {
@@ -89,7 +102,9 @@ function sum(counts) {
 }
 
 function total(buckets, predicate = () => true) {
-  return buckets.filter(predicate).reduce((all, bucket) => all + bucket.count, 0);
+  return buckets
+    .filter(predicate)
+    .reduce((all, bucket) => all + bucket.count, 0);
 }
 
 function sourcesWithData(buckets) {
@@ -102,27 +117,42 @@ function sourcesWithData(buckets) {
 // added together.
 function expectedLines(buckets, sources, event = "both") {
   const listed = sources.map((source) => source.key);
-  const order = [...listed, ...sourcesWithData(buckets).filter((key) => !listed.includes(key))];
-  const nameOf = (key) => sources.find((source) => source.key === key)?.name ?? key;
+  const order = [
+    ...listed,
+    ...sourcesWithData(buckets).filter((key) => !listed.includes(key)),
+  ];
+  const nameOf = (key) =>
+    sources.find((source) => source.key === key)?.name ?? key;
 
   const limit = event === "both" ? 3 : 6;
   const groups =
     order.length <= limit
       ? order.map((key) => ({ name: nameOf(key), members: [key] }))
       : [
-          ...order.slice(0, limit - 1).map((key) => ({ name: nameOf(key), members: [key] })),
+          ...order
+            .slice(0, limit - 1)
+            .map((key) => ({ name: nameOf(key), members: [key] })),
           { name: "Other sources", members: order.slice(limit - 1) },
         ];
 
   const lines = {};
   for (const group of groups) {
     const counted = buckets.filter(
-      (bucket) => group.members.includes(bucket.source) &&
+      (bucket) =>
+        group.members.includes(bucket.source) &&
         (event === "both" || bucket.updated === (event === "updated")),
     );
     if (counted.length > 0) {
-      if (event !== "updated") lines[`${group.name}: new`] = total(counted, (bucket) => !bucket.updated);
-      if (event !== "new") lines[`${group.name}: updated`] = total(counted, (bucket) => bucket.updated);
+      if (event !== "updated")
+        lines[`${group.name}: new`] = total(
+          counted,
+          (bucket) => !bucket.updated,
+        );
+      if (event !== "new")
+        lines[`${group.name}: updated`] = total(
+          counted,
+          (bucket) => bucket.updated,
+        );
     }
   }
   return lines;
@@ -133,7 +163,14 @@ const staleAnswer = {
   data: {
     torrent: {
       metrics: {
-        buckets: [{ source: "stale", bucket: new Date().toISOString(), updated: false, count: 777 }],
+        buckets: [
+          {
+            source: "stale",
+            bucket: new Date().toISOString(),
+            updated: false,
+            count: 777,
+          },
+        ],
       },
       listSources: { sources: [{ key: "stale", name: "Stale source" }] },
     },
@@ -143,7 +180,12 @@ const staleAnswer = {
 // Holds back the page's next look, answered when let go with a source nobody else would answer
 // with.
 function holdLook(page) {
-  return holdLooks(page, { count: 1, isLook: isTorrentMetrics, stale: staleAnswer, marker: "Stale source" });
+  return holdLooks(page, {
+    count: 1,
+    isLook: isTorrentMetrics,
+    stale: staleAnswer,
+    marker: "Stale source",
+  });
 }
 
 test("an administrator finds the timeline from the status page, and it draws what bitmagnet counted", async ({
@@ -154,14 +196,21 @@ test("an administrator finds the timeline from the status page, and it draws wha
 
   const answered = nextMetrics(page);
   await page.getByRole("link", { name: "Torrent statistics" }).click();
-  await expect(page.getByRole("heading", { name: "Torrent statistics" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Torrent statistics" }),
+  ).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/stats/torrents");
 
   // The default is the last hour, a bucket a minute.
   const { buckets, sources, query } = await answered;
   await expect(page.getByRole("figure")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Torrents per minute" })).toBeVisible();
-  expect(total(buckets), "the fixture seeds torrent sources into the last hour").toBeGreaterThan(0);
+  await expect(
+    page.getByRole("heading", { name: "Torrents per minute" }),
+  ).toBeVisible();
+  expect(
+    total(buckets),
+    "the fixture seeds torrent sources into the last hour",
+  ).toBeGreaterThan(0);
 
   // The first column is whole: the look begins on the minute, not part way through one.
   expect(query).toMatch(/startTime: "[^"]*T\d\d:\d\d:00\.000Z"/);
@@ -177,17 +226,24 @@ test("an administrator finds the timeline from the status page, and it draws wha
   expect(sum(charted)).toBe(total(buckets));
 
   // Sources are named as bitmagnet names them, not by key.
-  const legend = page.getByRole("listitem").filter({ hasText: /: (new|updated)$/ });
+  const legend = page
+    .getByRole("listitem")
+    .filter({ hasText: /: (new|updated)$/ });
   for (const key of sourcesWithData(buckets).slice(0, 3)) {
     const name = sources.find((source) => source.key === key)?.name ?? key;
     await expect(legend.filter({ hasText: `${name}: new` })).toHaveCount(1);
     if (name !== key) {
-      await expect(legend.filter({ hasText: new RegExp(`^${key}: `) })).toHaveCount(0);
+      await expect(
+        legend.filter({ hasText: new RegExp(`^${key}: `) }),
+      ).toHaveCount(0);
     }
   }
 });
 
-test("events filter the answer without refetching, and survive reload and browser history", async ({ page, credentials }) => {
+test("events filter the answer without refetching, and survive reload and browser history", async ({
+  page,
+  credentials,
+}) => {
   const asked = metricsRequests(page);
   let answered = nextMetrics(page);
   await signInAt(page, credentials, "/stats/torrents", "Torrent statistics");
@@ -199,11 +255,17 @@ test("events filter the answer without refetching, and survive reload and browse
   const before = asked.length;
   for (const event of ["new", "updated"]) {
     await chip(page, event).click();
-    await expect(page).toHaveURL(new RegExp(`/stats/torrents\\?event=${event}$`));
+    await expect(page).toHaveURL(
+      new RegExp(`/stats/torrents\\?event=${event}$`),
+    );
     await expect(chip(page, event)).toHaveAttribute("aria-pressed", "true");
-    await expect.poll(() => chartedCounts(page)).toEqual(expectedLines(buckets, sources, event));
+    await expect
+      .poll(() => chartedCounts(page))
+      .toEqual(expectedLines(buckets, sources, event));
     const legend = page.getByRole("figure").getByRole("listitem");
-    await expect(legend).toHaveText(Object.keys(expectedLines(buckets, sources, event)));
+    await expect(legend).toHaveText(
+      Object.keys(expectedLines(buckets, sources, event)),
+    );
     await quietMoment(page);
     expect(asked).toHaveLength(before);
   }
@@ -213,77 +275,119 @@ test("events filter the answer without refetching, and survive reload and browse
   ({ buckets, sources } = await answered);
   await drawn(page);
   await expect(chip(page, "updated")).toHaveAttribute("aria-pressed", "true");
-  expect(await chartedCounts(page)).toEqual(expectedLines(buckets, sources, "updated"));
+  expect(await chartedCounts(page)).toEqual(
+    expectedLines(buckets, sources, "updated"),
+  );
 
   const afterReload = asked.length;
   await page.goBack();
   await expect(page).toHaveURL(/event=new$/);
-  await expect.poll(() => chartedCounts(page)).toEqual(expectedLines(buckets, sources, "new"));
+  await expect
+    .poll(() => chartedCounts(page))
+    .toEqual(expectedLines(buckets, sources, "new"));
   await page.goForward();
   await expect(page).toHaveURL(/event=updated$/);
-  await expect.poll(() => chartedCounts(page)).toEqual(expectedLines(buckets, sources, "updated"));
+  await expect
+    .poll(() => chartedCounts(page))
+    .toEqual(expectedLines(buckets, sources, "updated"));
   await chip(page, "both").click();
   await expect(page).toHaveURL(/\/stats\/torrents$/);
-  await expect.poll(() => chartedCounts(page)).toEqual(expectedLines(buckets, sources));
+  await expect
+    .poll(() => chartedCounts(page))
+    .toEqual(expectedLines(buckets, sources));
   await quietMoment(page);
   expect(asked).toHaveLength(afterReload);
 });
 
-test("Anonymous is offered the timeline on the status page and may open it", async ({ page }) => {
+test("Anonymous is offered the timeline on the status page and may open it", async ({
+  page,
+}) => {
   // The fixture is served with --anonymous-access, which grants the anon Role every read
   // action but auth, pprof and metrics (bitmagnet's `AnonymousReadSurface`), torrent::query
   // among them. A new installation grants none, and an administrator chooses.
   await page.goto("/status");
   await expect(page.getByRole("heading", { name: "Status" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Torrent statistics" })).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Torrent statistics" }),
+  ).toBeVisible();
 
   const answered = nextMetrics(page);
   await page.getByRole("link", { name: "Torrent statistics" }).click();
   const { buckets, sources } = await answered;
   await drawn(page);
-  expect(total(buckets), "the fixture seeds torrent sources into the last hour").toBeGreaterThan(0);
+  expect(
+    total(buckets),
+    "the fixture seeds torrent sources into the last hour",
+  ).toBeGreaterThan(0);
   expect(await chartedCounts(page)).toEqual(expectedLines(buckets, sources));
 });
 
-test("every control is in the URL, and the link opens the same look", async ({ page, credentials }) => {
+test("every control is in the URL, and the link opens the same look", async ({
+  page,
+  credentials,
+}) => {
   const asked = metricsRequests(page);
-  await signInAt(page, credentials, "/stats/torrents?timeframe=1w", "Torrent statistics");
+  await signInAt(
+    page,
+    credentials,
+    "/stats/torrents?timeframe=1w",
+    "Torrent statistics",
+  );
   await drawn(page);
 
   // A week by the default resolution is drawn in hours, and bitmagnet is asked for hours:
   // minutes, a week of them, would be merged into hours here anyway.
-  await expect(page.getByRole("heading", { name: "Torrents per hour" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Torrents per hour" }),
+  ).toBeVisible();
   expect(asked[0].postDataJSON().query).toContain("bucketDuration: hour");
   await expect(chip(page, "1 week")).toHaveAttribute("aria-pressed", "true");
 
   // The timeframe.
-  let answered = nextMetrics(page, (query) => query.includes("bucketDuration: minute"));
+  let answered = nextMetrics(page, (query) =>
+    query.includes("bucketDuration: minute"),
+  );
   await chip(page, "6 hours").click();
   await expect(page).toHaveURL(/\/stats\/torrents\?timeframe=6h$/);
   const { buckets, sources } = await answered;
-  expect(total(buckets), "the fixture seeds torrent sources into the last hour").toBeGreaterThan(0);
+  expect(
+    total(buckets),
+    "the fixture seeds torrent sources into the last hour",
+  ).toBeGreaterThan(0);
   await drawn(page);
 
   // The resolution: a unit, and a multiplier typed into its own field.
-  answered = nextMetrics(page, (query) => query.includes("bucketDuration: hour"));
+  answered = nextMetrics(page, (query) =>
+    query.includes("bucketDuration: hour"),
+  );
   await chip(page, "hours").click();
-  await expect(page).toHaveURL(/\/stats\/torrents\?timeframe=6h&resolution=hour$/);
+  await expect(page).toHaveURL(
+    /\/stats\/torrents\?timeframe=6h&resolution=hour$/,
+  );
   await answered;
   await drawn(page);
-  await expect(page.getByRole("heading", { name: "Torrents per hour" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Torrents per hour" }),
+  ).toBeVisible();
 
   // Something that is not a number is "pick for me", which is what the page already says, so the
   // address does not change and the field must not go on showing what was typed.
   const field = page.getByLabel("Buckets of how many");
   await field.fill("e");
   await field.press("Enter");
-  await expect(page).toHaveURL(/\/stats\/torrents\?timeframe=6h&resolution=hour$/);
+  await expect(page).toHaveURL(
+    /\/stats\/torrents\?timeframe=6h&resolution=hour$/,
+  );
   await expect(field).toHaveValue("");
 
   await field.fill("2");
   await field.press("Enter");
-  await expect(page).toHaveURL(/\/stats\/torrents\?timeframe=6h&resolution=hour&every=2$/);
-  await expect(page.getByRole("heading", { name: "Torrents per 2 hours" })).toBeVisible();
+  await expect(page).toHaveURL(
+    /\/stats\/torrents\?timeframe=6h&resolution=hour&every=2$/,
+  );
+  await expect(
+    page.getByRole("heading", { name: "Torrents per 2 hours" }),
+  ).toBeVisible();
   await drawn(page);
 
   // A number that is not whole comes to the whole one nearest. Here that is the multiplier
@@ -291,18 +395,24 @@ test("every control is in the URL, and the link opens the same look", async ({ p
   // does, not what was typed into it.
   await field.fill("2.2");
   await field.press("Enter");
-  await expect(page).toHaveURL(/\/stats\/torrents\?timeframe=6h&resolution=hour&every=2$/);
+  await expect(page).toHaveURL(
+    /\/stats\/torrents\?timeframe=6h&resolution=hour&every=2$/,
+  );
   await expect(page.getByLabel("Buckets of how many")).toHaveValue("2");
 
   // Nothing below 1 is a multiplier, so it comes to 1, and that is in the address.
   await page.getByLabel("Buckets of how many").fill("0");
   await page.getByLabel("Buckets of how many").press("Enter");
-  await expect(page).toHaveURL(/\/stats\/torrents\?timeframe=6h&resolution=hour&every=1$/);
+  await expect(page).toHaveURL(
+    /\/stats\/torrents\?timeframe=6h&resolution=hour&every=1$/,
+  );
   await expect(page.getByLabel("Buckets of how many")).toHaveValue("1");
   await drawn(page);
   await page.getByLabel("Buckets of how many").fill("2");
   await page.getByLabel("Buckets of how many").press("Enter");
-  await expect(page).toHaveURL(/\/stats\/torrents\?timeframe=6h&resolution=hour&every=2$/);
+  await expect(page).toHaveURL(
+    /\/stats\/torrents\?timeframe=6h&resolution=hour&every=2$/,
+  );
   await drawn(page);
 
   // A source with something counted, so the filter has something to show: bitmagnet is asked
@@ -312,16 +422,24 @@ test("every control is in the URL, and the link opens the same look", async ({ p
     sourcesWithData(buckets).length,
     "the seed counts more than one source (see the note at the top of this file)",
   ).toBeGreaterThan(1);
-  const chosen = sources.find((source) => buckets.some((bucket) => bucket.source === source.key));
+  const chosen = sources.find((source) =>
+    buckets.some((bucket) => bucket.source === source.key),
+  );
   expect(chosen, "a listed source with something counted").toBeTruthy();
-  answered = nextMetrics(page, (query) => query.includes(`sources: ["${chosen.key}"]`));
+  answered = nextMetrics(page, (query) =>
+    query.includes(`sources: ["${chosen.key}"]`),
+  );
   await chip(page, chosen.name).click();
   await expect(page).toHaveURL(
-    new RegExp(`/stats/torrents\\?timeframe=6h&resolution=hour&every=2&source=${chosen.key}$`),
+    new RegExp(
+      `/stats/torrents\\?timeframe=6h&resolution=hour&every=2&source=${chosen.key}$`,
+    ),
   );
   const only = await answered;
   expect(only.buckets.length).toBeGreaterThan(0);
-  expect(only.buckets.every((bucket) => bucket.source === chosen.key)).toBe(true);
+  expect(only.buckets.every((bucket) => bucket.source === chosen.key)).toBe(
+    true,
+  );
   await expect
     .poll(async () => Object.keys(await chartedCounts(page)))
     .toEqual([`${chosen.name}: new`, `${chosen.name}: updated`]);
@@ -329,7 +447,9 @@ test("every control is in the URL, and the link opens the same look", async ({ p
   // Auto-refresh is in the URL too, and does not ask for anything by itself.
   await chip(page, "5 minutes").click();
   await expect(page).toHaveURL(
-    new RegExp(`/stats/torrents\\?timeframe=6h&resolution=hour&every=2&refresh=5m&source=${chosen.key}$`),
+    new RegExp(
+      `/stats/torrents\\?timeframe=6h&resolution=hour&every=2&refresh=5m&source=${chosen.key}$`,
+    ),
   );
 
   // Opened afresh, the link is the same look.
@@ -339,11 +459,15 @@ test("every control is in the URL, and the link opens the same look", async ({ p
   await expect(page.getByLabel("Buckets of how many")).toHaveValue("2");
   await expect(chip(page, "5 minutes")).toHaveAttribute("aria-pressed", "true");
   await expect(chip(page, chosen.name)).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("heading", { name: "Torrents per 2 hours" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Torrents per 2 hours" }),
+  ).toBeVisible();
 
   // Choosing it again takes it away.
   await chip(page, chosen.name).click();
-  await expect(page).toHaveURL(/\/stats\/torrents\?timeframe=6h&resolution=hour&every=2&refresh=5m$/);
+  await expect(page).toHaveURL(
+    /\/stats\/torrents\?timeframe=6h&resolution=hour&every=2&refresh=5m$/,
+  );
 });
 
 test.describe("auto-refresh", () => {
@@ -411,7 +535,9 @@ test.describe("auto-refresh", () => {
     expect(asked.length).toBe(2);
   });
 
-  test("does not pile a look on one that is still on its way", async ({ page }) => {
+  test("does not pile a look on one that is still on its way", async ({
+    page,
+  }) => {
     const asked = metricsRequests(page);
     const answered = await answeredLooks(page, "metrics");
     await page.goto("/stats/torrents?refresh=10s");
@@ -440,14 +566,23 @@ test("an answer that comes back after the controls moved on does not replace the
   // on, with a source nobody else would answer with.
   const looks = await holdLook(page);
   await page.goto("/stats/torrents");
-  await expect(page.getByRole("heading", { name: "Torrent statistics" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Torrent statistics" }),
+  ).toBeVisible();
 
-  const newer = nextMetrics(page, (query) => query.includes("bucketDuration: hour"));
+  const newer = nextMetrics(page, (query) =>
+    query.includes("bucketDuration: hour"),
+  );
   await chip(page, "1 week").click();
   const { buckets, sources } = await newer;
-  expect(total(buckets), "the fixture seeds torrent sources into the last hour").toBeGreaterThan(0);
+  expect(
+    total(buckets),
+    "the fixture seeds torrent sources into the last hour",
+  ).toBeGreaterThan(0);
   await drawn(page);
-  await expect(page.getByRole("heading", { name: "Torrents per hour" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Torrents per hour" }),
+  ).toBeVisible();
 
   const delivered = looks.delivered();
   looks.release();
@@ -487,7 +622,11 @@ test("asking for a look at once gives up on one that is not answered, and its an
   await expect(page.locator('.stats[aria-busy="false"]')).toBeVisible();
 });
 
-test("an ordinary User is offered the page and may open it", async ({ page, request, issuer }) => {
+test("an ordinary User is offered the page and may open it", async ({
+  page,
+  request,
+  issuer,
+}) => {
   // The core `user` Role holds torrent::query, so this is the one statistics page most
   // Identities can open. It holds health::query too, which is what lists the page; it holds
   // queue::query no more than it did for the jobs.
@@ -500,10 +639,15 @@ test("an ordinary User is offered the page and may open it", async ({ page, requ
 
   const answered = nextMetrics(page);
   await page.getByRole("link", { name: "Torrent statistics" }).click();
-  await expect(page.getByRole("heading", { name: "Torrent statistics" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Torrent statistics" }),
+  ).toBeVisible();
   const { buckets, sources } = await answered;
   await drawn(page);
-  expect(total(buckets), "the fixture seeds torrent sources into the last hour").toBeGreaterThan(0);
+  expect(
+    total(buckets),
+    "the fixture seeds torrent sources into the last hour",
+  ).toBeGreaterThan(0);
   expect(await chartedCounts(page)).toEqual(expectedLines(buckets, sources));
 });
 
@@ -526,10 +670,16 @@ test("an Identity without torrent::query is refused the page, and not offered it
 
     await them.goto("/status");
     await expect(them.getByRole("heading", { name: "Status" })).toBeVisible();
-    await expect(them.getByRole("link", { name: "Torrent statistics" })).toHaveCount(0);
+    await expect(
+      them.getByRole("link", { name: "Torrent statistics" }),
+    ).toHaveCount(0);
 
     await them.goto("/stats/torrents");
-    await expect(them.getByText("Your Identity does not permit reading bitmagnet's torrents.")).toBeVisible();
+    await expect(
+      them.getByText(
+        "Your Identity does not permit reading bitmagnet's torrents.",
+      ),
+    ).toBeVisible();
     await expect(them.getByRole("figure")).toHaveCount(0);
   });
 });

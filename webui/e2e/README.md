@@ -2,7 +2,12 @@
 
 The real Elm bundle, in a real browser, against a real bitmagnet.
 
-There are two suites, because they need different things to exist.
+The existing development-proxy suites remain available alongside a packaged-build smoke
+test. Run npm commands below from `webui/`. The smoke test uses the actual executable
+built by root `task build`, requires `BUNDLED_UI_POSTGRES_DSN` naming a disposable database,
+and runs with `npm run test:e2e:bundled`; see [the build guide](../../docs/hacking.md#building-and-testing-the-ui).
+
+The two development-proxy suites need different things to exist.
 
 ```bash
 npm run test:e2e                 # credential-free: no password, no database
@@ -36,7 +41,7 @@ about the runtime.
 
 ## No credentials, by construction
 
-Every assertion here is about being *refused*, so the suite runs unattended and no
+Every assertion here is about being _refused_, so the suite runs unattended and no
 password exists in the repository, the environment, or CI. The refusals are real: the
 rejection message is bitmagnet's `INVALID_CREDENTIALS` mapped through `ApiError`, so the
 path from `extensions.code` to the rendered sentence is genuinely exercised.
@@ -49,8 +54,8 @@ only for that run. Nothing is asked of a person and nothing is left behind.
 What happens, in order, from `e2e/harness/serve.js`:
 
 1. **A fixture server starts.** `dev fixture serve` — built there as of 2026-09-03 — from
-   the `../bitmagnet` checkout, serving the real Gin, auth middleware and gqlgen stack over a
-   clone of the `../btm-testdb` seed template, built there as of 2026-08-29. So the index has
+   the parent backend checkout (`..`), serving the real Gin, auth middleware and gqlgen stack over a
+   clone of the `../../btm-testdb` seed template, built there as of 2026-08-29. So the index has
    ~100k real torrents in it, not three rows. It announces its address and a freshly minted
    bootstrap Invitation as one line of JSON on stdout. bitmagnet documents that line as the
    only thing there, but since bitmagnet #82 its logger writes to stdout as well, ahead of
@@ -187,11 +192,10 @@ If the database is not up, the harness says so and stops before building anythin
 `nothing is listening at 127.0.0.1:5434 … Is the test database up?` — rather than letting
 the fixture server panic with a connection error buried in a stack trace.
 
-
-- `../bitmagnet` — a checkout, and a Go toolchain to build it. Overridable with
+- `..` — the parent backend checkout, and a Go toolchain to build it. Overridable with
   `MAGNES_E2E_BITMAGNET`. The harness builds whatever branch is checked out there, not
   necessarily `trunk`, so check that before reading much into a result.
-- `../btm-testdb` — up, with a seed template loaded (`bin/testdb status`). Overridable with
+- `../../btm-testdb` — up, with a seed template loaded (`bin/testdb status`). Overridable with
   `MAGNES_E2E_TESTDB`, or bypassed entirely by setting `TEST_POSTGRES_TEMPLATE_DSN`.
 
 Neither is needed by `npm run test:e2e`, which is why the two suites do not run together.

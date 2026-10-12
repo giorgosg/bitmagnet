@@ -1,24 +1,28 @@
 # Magnes — working notes
 
-Reference for building Magnes, an alternative web UI for a
-[fork of bitmagnet](https://github.com/giorgosg/bitmagnet) that has authentication and
-accounts. These pages are written **for agents**: they carry the facts a change needs,
+Reference for building Magnes, this fork's bundled Elm UI. Development now takes place
+in `webui/` alongside the backend. These pages are written **for agents**: they carry the facts a change needs,
 with the file paths and the reasoning, so the same investigation is not repeated.
 
 The user-facing description of the project is [../README.md](../README.md). It describes
 where Magnes is going; these pages describe what is actually true today.
 
+The root [AGENTS.md](../../AGENTS.md) owns repository instructions. Build and release
+integration is in [docs/hacking.md](../../docs/hacking.md); UI-specific behavior and
+historical design notes remain here.
+
 ## Which page, and when
 
-| Read                                                   | When                                                                              |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| [plan.md](plan.md)                                     | Understanding phase 1 — the UI with no server, which is what currently runs       |
-| [bitmagnet-api.md](bitmagnet-api.md)                   | Writing any query at all — the schema, transcribed; bitmagnet publishes no reference |
-| [auth-api.md](auth-api.md)                             | Writing any query or mutation that touches identity, users, roles, keys           |
-| [bitmagnet-ui-audit.md](bitmagnet-ui-audit.md)         | Deciding what Magnes should do — what the Angular UI does, and what it never did  |
-| [accounts-plan.md](accounts-plan.md)                   | Implementing accounts in Magnes: the work items, in order, with the decisions     |
-| [serving-and-testing.md](serving-and-testing.md)       | Running Magnes against a real instance, same-origin or cross-origin               |
-| `environment.local.md`                                 | Which instances exist here, and how to reach them — gitignored, may be absent     |
+| Read                                             | When                                                                                 |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| [elm-development.md](elm-development.md)         | Discovering Elm packages before designing a UI feature                               |
+| [plan.md](plan.md)                               | Understanding phase 1 — the UI with no server, which is what currently runs          |
+| [bitmagnet-api.md](bitmagnet-api.md)             | Writing any query at all — the schema, transcribed; bitmagnet publishes no reference |
+| [auth-api.md](auth-api.md)                       | Writing any query or mutation that touches identity, users, roles, keys              |
+| [bitmagnet-ui-audit.md](bitmagnet-ui-audit.md)   | Deciding what Magnes should do — what the Angular UI does, and what it never did     |
+| [accounts-plan.md](accounts-plan.md)             | Implementing accounts in Magnes: the work items, in order, with the decisions        |
+| [serving-and-testing.md](serving-and-testing.md) | Running Magnes against a real instance, same-origin or cross-origin                  |
+| `environment.local.md`                           | Which instances exist here, and how to reach them — gitignored, may be absent        |
 
 ## Which instance to point at
 
@@ -43,16 +47,16 @@ it matches. Regenerate it only when the fork's schema changes; see
 ## Where the truth lives
 
 Magnes has no server of its own yet, so almost every fact these pages state is a fact
-about the bitmagnet fork. Its checkout is `../bitmagnet` (branch `trunk`), and it carries
-its own working notes:
+about the bitmagnet fork. The backend is now the parent directory (`..` from `webui/`), and its working notes
+remain under the root `docs/`:
 
-| bitmagnet path                    | What it holds                                                        |
-| ---------------------------------- | -------------------------------------------------------------------- |
-| `graphql/schema/*.graphqls`       | The schema — the source of truth for every type quoted here          |
-| `docs/auth.md`                    | The operator's page: config keys, defaults, deployment requirements  |
+| bitmagnet path                    | What it holds                                                         |
+| --------------------------------- | --------------------------------------------------------------------- |
+| `graphql/schema/*.graphqls`       | The schema — the source of truth for every type quoted here           |
+| `docs/auth.md`                    | The operator's page: config keys, defaults, deployment requirements   |
 | `docs/architecture/auth.md`       | Why each auth control is shaped the way it is; the four failure modes |
-| `docs/architecture/interfaces.md` | HTTP surface, the `static` option, CORS                              |
-| `CONTEXT.md`                      | The auth glossary — **use its words**: Identity, User, Object action |
+| `docs/architecture/interfaces.md` | HTTP surface, the `static` option, CORS                               |
+| `CONTEXT.md`                      | The auth glossary — **use its words**: Identity, User, Object action  |
 
 Read `CONTEXT.md` before naming anything. "Guest", "session", "scope" and "account" are
 listed there as words to avoid, and Magnes should not reintroduce them.
@@ -82,4 +86,4 @@ those days. Since 2026-09-03, trunk has:
 - made sign-out end every session for the account;
 - narrowed Anonymous access to read actions;
 - made Anonymous access a deny-override over a stored `anon` Role. `auth-api.md` records all three, and the spec's
-"Cross-repository state" section records what each one means for Magnes.
+  "Cross-repository state" section records what each one means for Magnes.

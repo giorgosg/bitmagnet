@@ -61,7 +61,7 @@ Commit the result — a checkout builds without reaching an instance, and that s
 
 ### 2. Map the scalars that accounts need
 
-`Magnes/Api/ScalarCodecs.elm` is generated *to be* edited and survives regeneration.
+`Magnes/Api/ScalarCodecs.elm` is generated _to be_ edited and survives regeneration.
 Accounts introduce `Duration` (API-key and invitation expiry), which is an **ISO 8601
 duration** — `"PT24H"`, `"P7D"` — not seconds and not a Go duration string. This document
 said the opposite until 2026-09-03; see `auth-api.md` for what a running instance does. `DateTime` is already used by the

@@ -20,8 +20,9 @@ const os = require("os");
 const path = require("path");
 
 const root = path.join(__dirname, "..", "..");
-const bitmagnet = process.env.MAGNES_E2E_BITMAGNET || path.join(root, "..", "bitmagnet");
-const testdb = process.env.MAGNES_E2E_TESTDB || path.join(root, "..", "btm-testdb");
+const bitmagnet = process.env.MAGNES_E2E_BITMAGNET || path.join(root, "..");
+const testdb =
+  process.env.MAGNES_E2E_TESTDB || path.join(bitmagnet, "..", "btm-testdb");
 const credentialsPath = process.env.MAGNES_E2E_CREDENTIALS;
 
 // The instance this suite expects, stated rather than inherited: the defaults these match
@@ -47,7 +48,9 @@ let shuttingDown = false;
 
 async function main() {
   if (!credentialsPath) {
-    throw new Error("MAGNES_E2E_CREDENTIALS must name where to write the credentials");
+    throw new Error(
+      "MAGNES_E2E_CREDENTIALS must name where to write the credentials",
+    );
   }
 
   buildBundle();
@@ -85,13 +88,17 @@ async function main() {
 // because npm does not forward SIGTERM to the script it runs: with it in the middle, this
 // process is never told to stop, and the fixture server's database is never dropped.
 function buildBundle() {
-  childProcess.execFileSync("npm", ["run", "build"], { cwd: root, stdio: "inherit" });
+  childProcess.execFileSync("npm", ["run", "build"], {
+    cwd: root,
+    stdio: "inherit",
+  });
 }
 
 // The connection string for the instance holding the seed template. bitmagnet's dbtest
 // clones from it; provisioning it is btm-testdb's job and not this suite's.
 function seedTemplateDSN() {
-  if (process.env.TEST_POSTGRES_TEMPLATE_DSN) return process.env.TEST_POSTGRES_TEMPLATE_DSN;
+  if (process.env.TEST_POSTGRES_TEMPLATE_DSN)
+    return process.env.TEST_POSTGRES_TEMPLATE_DSN;
 
   const testdbCommand = path.join(testdb, "bin", "testdb");
   if (!fs.existsSync(testdbCommand)) {
@@ -102,7 +109,9 @@ function seedTemplateDSN() {
   }
 
   try {
-    return childProcess.execFileSync(testdbCommand, ["url"], { encoding: "utf8" }).trim();
+    return childProcess
+      .execFileSync(testdbCommand, ["url"], { encoding: "utf8" })
+      .trim();
   } catch (error) {
     throw new Error(
       `could not ask btm-testdb for its connection string (${error.message}). ` +
@@ -152,11 +161,15 @@ async function requireReachable(dsn) {
 // leaves the other serving — with a cloned database it will now never drop.
 function buildFixtureServer() {
   if (!fs.existsSync(path.join(bitmagnet, "go.mod"))) {
-    throw new Error(`no bitmagnet checkout at ${bitmagnet}. See e2e/README.md.`);
+    throw new Error(
+      `no bitmagnet checkout at ${bitmagnet}. See e2e/README.md.`,
+    );
   }
 
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "magnes-e2e-"));
-  shutdownSteps.push(() => fs.rmSync(directory, { recursive: true, force: true }));
+  shutdownSteps.push(() =>
+    fs.rmSync(directory, { recursive: true, force: true }),
+  );
 
   const binary = path.join(directory, "fixture-server");
   childProcess.execFileSync("go", ["build", "-o", binary, "./internal/dev"], {
@@ -179,13 +192,7 @@ function buildFixtureServer() {
 function startFixtureServer(binary, templateDSN) {
   const child = childProcess.spawn(
     binary,
-    [
-      "fixture",
-      "serve",
-      "--address",
-      "127.0.0.1:0",
-      ...fixtureFlags,
-    ],
+    ["fixture", "serve", "--address", "127.0.0.1:0", ...fixtureFlags],
     {
       cwd: bitmagnet,
       env: { ...process.env, TEST_POSTGRES_TEMPLATE_DSN: templateDSN },
@@ -207,7 +214,11 @@ function startFixtureServer(binary, templateDSN) {
     // the path measured to be faster than the fixture server's database drop. Failing here
     // instead keeps the cleanup ours.
     const deadline = setTimeout(() => {
-      reject(new Error("the fixture server did not announce itself within 60 seconds"));
+      reject(
+        new Error(
+          "the fixture server did not announce itself within 60 seconds",
+        ),
+      );
     }, 60_000);
 
     child.stdout.setEncoding("utf8");
@@ -232,7 +243,11 @@ function startFixtureServer(binary, templateDSN) {
 
     child.on("exit", (code) => {
       clearTimeout(deadline);
-      reject(new Error(`the fixture server exited with ${code} before announcing itself`));
+      reject(
+        new Error(
+          `the fixture server exited with ${code} before announcing itself`,
+        ),
+      );
     });
     child.on("error", reject);
   });
@@ -278,14 +293,18 @@ async function registerAdministrator(announcement) {
 
   const body = await response.json();
   if (body.errors) {
-    throw new Error(`registering the throwaway administrator: ${JSON.stringify(body.errors)}`);
+    throw new Error(
+      `registering the throwaway administrator: ${JSON.stringify(body.errors)}`,
+    );
   }
 
   const role = body.data?.self?.register?.user?.role;
   if (role !== "admin") {
     // Every credentialed spec assumes administration is reachable. Finding out here says
     // which assumption broke; finding out in a test says only that a screen was refused.
-    throw new Error(`the bootstrap Invitation produced a ${role}, not an admin`);
+    throw new Error(
+      `the bootstrap Invitation produced a ${role}, not an admin`,
+    );
   }
 
   return credentials;
@@ -295,11 +314,15 @@ async function registerAdministrator(announcement) {
 // forwards /graphql with the browser's Host and Origin intact, which is what lets bitmagnet
 // issue its Secure, SameSite=Strict cookie to a page on localhost.
 function startDevServer(address) {
-  const child = childProcess.spawn(process.execPath, [path.join(root, "dev.js")], {
-    cwd: root,
-    env: { ...process.env, BITMAGNET_URL: address },
-    stdio: "inherit",
-  });
+  const child = childProcess.spawn(
+    process.execPath,
+    [path.join(root, "dev.js")],
+    {
+      cwd: root,
+      env: { ...process.env, BITMAGNET_URL: address },
+      stdio: "inherit",
+    },
+  );
 
   shutdownSteps.push(() => stop(child, "the dev server"));
 
@@ -311,7 +334,8 @@ function startDevServer(address) {
 }
 
 function stop(child, what) {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  if (child.exitCode !== null || child.signalCode !== null)
+    return Promise.resolve();
 
   return new Promise((resolve) => {
     const forced = setTimeout(() => {

@@ -25,12 +25,16 @@ function permission(page, objectAction) {
 
 // The listed Role, by its exact name.
 function listedRole(page, name) {
-  return page.getByRole("listitem").filter({ has: page.getByText(name, { exact: true }) });
+  return page
+    .getByRole("listitem")
+    .filter({ has: page.getByText(name, { exact: true }) });
 }
 
 async function editRole(page, name) {
   await listedRole(page, name).getByRole("button", { name: "Edit" }).click();
-  await expect(page.getByRole("heading", { name: `Editing ${name}` })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: `Editing ${name}` }),
+  ).toBeVisible();
 }
 
 test.beforeEach(async ({ page, credentials }) => {
@@ -76,13 +80,17 @@ test("deletes a custom Role only after asking, and offers no deletion of a core 
   await row.getByRole("button", { name: "Delete" }).click();
   await expect(listedRole(page, name)).toHaveCount(0);
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Create a Role" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Create a Role" }),
+  ).toBeVisible();
   await expect(listedRole(page, name)).toHaveCount(0);
 
   for (const core of ["admin", "editor", "user", "anon"]) {
     const coreRow = listedRole(page, core);
     await expect(coreRow).toHaveCount(1);
-    await expect(coreRow.getByRole("button", { name: "Delete" })).toHaveCount(0);
+    await expect(coreRow.getByRole("button", { name: "Delete" })).toHaveCount(
+      0,
+    );
   }
 });
 
@@ -102,7 +110,9 @@ test("a change to a Role reaches the Identity of a User who holds it", async ({
 
     await signIn(them, holder);
     await them.getByRole("button", { name: holder.username }).click();
-    await expect(them.getByRole("link", { name: "Users", exact: true })).toBeVisible();
+    await expect(
+      them.getByRole("link", { name: "Users", exact: true }),
+    ).toBeVisible();
 
     // Take administration away from the Role. Nothing tells the holder's browser; its next
     // request is told by bitmagnet.
@@ -110,13 +120,19 @@ test("a change to a Role reaches the Identity of a User who holds it", async ({
     await editRole(page, name);
     await permission(page, "auth::query").uncheck();
     await page.getByRole("button", { name: `Save ${name}` }).click();
-    await expect(page.getByRole("status")).toHaveText(`Saved the Role ${name}.`);
+    await expect(page.getByRole("status")).toHaveText(
+      `Saved the Role ${name}.`,
+    );
 
     await them.reload();
     await them.getByRole("button", { name: holder.username }).click();
     await expect(them.getByRole("link", { name: "Your User" })).toBeVisible();
-    await expect(them.getByRole("link", { name: "Users", exact: true })).toHaveCount(0);
+    await expect(
+      them.getByRole("link", { name: "Users", exact: true }),
+    ).toHaveCount(0);
     await them.goto("/admin/users");
-    await expect(them.getByText("Your Identity does not permit administration.")).toBeVisible();
+    await expect(
+      them.getByText("Your Identity does not permit administration."),
+    ).toBeVisible();
   });
 });

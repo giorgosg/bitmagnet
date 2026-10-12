@@ -4,7 +4,7 @@ Transcribed from `../bitmagnet/graphql/schema/*.graphqls` in the fork at `trunk`
 `77fdb9de7`, the source of truth for every shape below. Re-read that schema when the fork
 is upgraded. This page exists because bitmagnet publishes no API reference of its own.
 
-Read it before writing a query. For how to *express* a query in Elm, see the `elm` skill;
+Read it before writing a query. For how to _express_ a query in Elm, see the `elm` skill;
 this page is only about what bitmagnet offers.
 
 Statements marked **[verified]** were checked on 2026-08-24 by read-only query against a
@@ -22,7 +22,7 @@ signatures are on disk — read those rather than inferring shapes from the Grap
 browser can query bitmagnet directly with nothing in the path — which is what makes the
 serverless UI possible.
 
-Allowed *headers* are no longer reflected back from the request. Since PR #45 they are the
+Allowed _headers_ are no longer reflected back from the request. Since PR #45 they are the
 four the server actually reads: `Content-Type`, `Authorization`, `X-Api-Key`,
 `X-Import-Id`. `Authorization` is among them, so bearer tokens work cross-origin; any
 other header Magnes invents fails preflight until an operator adds it to
@@ -56,7 +56,7 @@ type TorrentQuery {
 ```
 
 Queries are **nested one level** — `torrentContent` then `search` — so an Elm query is two
-selection sets, not one. Note `input` is non-null: it is a required record argument, *not*
+selection sets, not one. Note `input` is non-null: it is a required record argument, _not_
 elm-graphql's optionals-updater. The optional-ness lives in the input object's fields.
 
 ## Search
@@ -94,10 +94,10 @@ load-more state on an offset.
 silently and plausibly.** [verified] They do not come back null — they come back with
 values that look real:
 
-| Request | `totalCount` | `totalCountIsEstimate` | `hasNextPage` |
-| --- | --- | --- | --- |
-| `{limit: 2}` | `0` | `false` | `false` |
-| `{limit: 2, totalCount: true, hasNextPage: true}` | `2870414` | `true` | `true` |
+| Request                                           | `totalCount` | `totalCountIsEstimate` | `hasNextPage` |
+| ------------------------------------------------- | ------------ | ---------------------- | ------------- |
+| `{limit: 2}`                                      | `0`          | `false`                | `false`       |
+| `{limit: 2, totalCount: true, hasNextPage: true}` | `2870414`    | `true`                 | `true`        |
 
 So forgetting `hasNextPage: true` doesn't scroll forever — it makes the list report
 `hasNextPage: false` and **stop dead after the first batch**, which reads as "that's all
@@ -134,7 +134,7 @@ enum TorrentContentOrderByField {
 }
 ```
 
-`orderBy` is a *list* of `{ field, descending }`, so sorts compose.
+`orderBy` is a _list_ of `{ field, descending }`, so sorts compose.
 
 ### Facets
 
@@ -152,7 +152,7 @@ Each aggregation bucket is `{ value, label, count, isEstimate }`. `contentType` 
 **`torrentFileType` aggregation counts are wrong — don't display them.** [verified] On the
 same `"ubuntu"` search (`totalCount: 673`) every file-type bucket returned ~1918, and the
 values drifted between two identical calls. They are not scoped to the query. The
-*filter* side works correctly (`filter: [video]` returns sensible rows), so file type is
+_filter_ side works correctly (`filter: [video]` returns sensible rows), so file type is
 usable as a filter with no count beside it.
 
 **All nine facets have since been checked** [verified] by comparing each aggregation's
@@ -275,14 +275,14 @@ enum FilesStatus { no_info | single | multi | over_threshold }
 
 - `no_info` — bitmagnet has no file list. Nothing to expand to.
 - `single` — one file; the file list adds nothing over the row itself.
-- `over_threshold` — bitmagnet *declined* to index the files, too many.
+- `over_threshold` — bitmagnet _declined_ to index the files, too many.
 - `multi` — the only case with a file list worth fetching.
 
 **This is the common case, not the edge case.** [verified] A 100-row sample:
 
 | `no_info` | `multi` | `single` | `over_threshold` |
-| --- | --- | --- | --- |
-| 81 | 13 | 5 | 1 |
+| --------- | ------- | -------- | ---------------- |
+| 81        | 13      | 5        | 1                |
 
 So the second expansion level is **unavailable for roughly four rows in five**. Decide from
 `filesStatus` whether to render the affordance at all — don't offer an expander that
@@ -324,8 +324,12 @@ See `docs/auth-api.md`.
 ## Custom scalars
 
 ```graphql
-scalar Hash20   scalar Date   scalar DateTime
-scalar Duration scalar Void   scalar Year
+scalar Hash20
+scalar Date
+scalar DateTime
+scalar Duration
+scalar Void
+scalar Year
 ```
 
 All six arrive as `String`-backed opaque wrappers unless mapped in

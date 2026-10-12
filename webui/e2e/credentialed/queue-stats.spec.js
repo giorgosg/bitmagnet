@@ -13,12 +13,30 @@
 // So what the page should draw is worked out here as the page works it out, with the timeframe
 // applied, and one test checks that the answer does hold jobs from before it.
 
-import { registerUser, signIn, signInAt, expect, test } from "../support/credentialed.js";
-import { afterFrames, answeredLooks, chip, drawn, holdLooks, quietMoment, setHidden } from "../support/stats.js";
+import {
+  registerUser,
+  signIn,
+  signInAt,
+  expect,
+  test,
+} from "../support/credentialed.js";
+import {
+  afterFrames,
+  answeredLooks,
+  chip,
+  drawn,
+  holdLooks,
+  quietMoment,
+  setHidden,
+} from "../support/stats.js";
 
 function isQueueMetrics(request) {
   const body = request.postData() ?? "";
-  return new URL(request.url()).pathname === "/graphql" && body.includes("queue") && body.includes("metrics");
+  return (
+    new URL(request.url()).pathname === "/graphql" &&
+    body.includes("queue") &&
+    body.includes("metrics")
+  );
 }
 
 // Resolves with bitmagnet's next answer to the page's query, as the page was given it, and the
@@ -26,7 +44,11 @@ function isQueueMetrics(request) {
 // earlier one still on its way is not mistaken for it.
 function nextMetrics(page, predicate = () => true) {
   return page
-    .waitForResponse((response) => isQueueMetrics(response.request()) && predicate(response.request().postDataJSON().query))
+    .waitForResponse(
+      (response) =>
+        isQueueMetrics(response.request()) &&
+        predicate(response.request().postDataJSON().query),
+    )
     .then(async (response) => ({
       buckets: (await response.json()).data.queue.metrics.buckets,
       query: response.request().postDataJSON().query,
@@ -62,12 +84,16 @@ function inTimeframe(query, at) {
 // The moment a job is the timeframe's by: when it was queued if it is pending, when it last ran
 // otherwise, as the Angular UI and the page have it.
 function windowedBy(bucket) {
-  return bucket.status === "pending" ? bucket.createdAtBucket : bucket.ranAtBucket;
+  return bucket.status === "pending"
+    ? bucket.createdAtBucket
+    : bucket.ranAtBucket;
 }
 
 // The answer's rows that are the timeframe's, by that test. Without a start, all of them.
 function ofTimeframe(buckets, query) {
-  return askedIn(query).start === null ? buckets : buckets.filter((bucket) => inTimeframe(query, windowedBy(bucket)));
+  return askedIn(query).start === null
+    ? buckets
+    : buckets.filter((bucket) => inTimeframe(query, windowedBy(bucket)));
 }
 
 // What happened to the jobs of an answer, as the ticket says to read it: created where a job
@@ -78,10 +104,22 @@ function occurrences(buckets, query) {
   const happened = [];
   for (const bucket of buckets) {
     if (inTimeframe(query, bucket.createdAtBucket)) {
-      happened.push({ queue: bucket.queue, event: "created", count: bucket.count });
+      happened.push({
+        queue: bucket.queue,
+        event: "created",
+        count: bucket.count,
+      });
     }
-    if (["processed", "failed"].includes(bucket.status) && bucket.ranAtBucket && inTimeframe(query, bucket.ranAtBucket)) {
-      happened.push({ queue: bucket.queue, event: bucket.status, count: bucket.count });
+    if (
+      ["processed", "failed"].includes(bucket.status) &&
+      bucket.ranAtBucket &&
+      inTimeframe(query, bucket.ranAtBucket)
+    ) {
+      happened.push({
+        queue: bucket.queue,
+        event: bucket.status,
+        count: bucket.count,
+      });
     }
   }
   return happened;
@@ -99,7 +137,11 @@ function total(items, predicate = () => true) {
 // queue with only a total, such as jobs waiting to be retried that were queued before the
 // timeframe, has none.
 function queuesOnTimeline(buckets, query) {
-  return [...new Set(occurrences(buckets, query).map((occurrence) => occurrence.queue))].sort();
+  return [
+    ...new Set(
+      occurrences(buckets, query).map((occurrence) => occurrence.queue),
+    ),
+  ].sort();
 }
 
 // What the timeline's table should hold for an answer: a line for each event chosen (all of
@@ -109,19 +151,31 @@ function queuesOnTimeline(buckets, query) {
 function expectedLines(buckets, query, chosen = {}) {
   const happened = occurrences(buckets, query);
   const present = queuesOnTimeline(buckets, query);
-  const order = chosen.queues?.length ? chosen.queues.filter((queue) => present.includes(queue)) : present;
+  const order = chosen.queues?.length
+    ? chosen.queues.filter((queue) => present.includes(queue))
+    : present;
   const groups =
     order.length <= 2
       ? order.map((queue) => ({ name: queue, members: [queue] }))
-      : [{ name: order[0], members: [order[0]] }, { name: "Other queues", members: order.slice(1) }];
-  const drawnEvents = events.filter((event) => !chosen.events?.length || chosen.events.includes(event));
+      : [
+          { name: order[0], members: [order[0]] },
+          { name: "Other queues", members: order.slice(1) },
+        ];
+  const drawnEvents = events.filter(
+    (event) => !chosen.events?.length || chosen.events.includes(event),
+  );
 
   const lines = {};
   for (const group of groups) {
-    const ours = happened.filter((occurrence) => group.members.includes(occurrence.queue));
+    const ours = happened.filter((occurrence) =>
+      group.members.includes(occurrence.queue),
+    );
     if (ours.length > 0) {
       for (const event of drawnEvents) {
-        lines[`${group.name}: ${event}`] = total(ours, (occurrence) => occurrence.event === event);
+        lines[`${group.name}: ${event}`] = total(
+          ours,
+          (occurrence) => occurrence.event === event,
+        );
       }
     }
   }
@@ -133,12 +187,20 @@ function expectedLines(buckets, query, chosen = {}) {
 function expectedTotals(buckets, query, chosen = []) {
   const windowed = ofTimeframe(buckets, query);
   const present = [...new Set(windowed.map((bucket) => bucket.queue))].sort();
-  const queues = chosen.length ? chosen.filter((queue) => present.includes(queue)) : present;
+  const queues = chosen.length
+    ? chosen.filter((queue) => present.includes(queue))
+    : present;
   return Object.fromEntries(
     queues.map((queue) => [
       queue,
       Object.fromEntries(
-        statuses.map((status) => [status, total(windowed, (bucket) => bucket.queue === queue && bucket.status === status)]),
+        statuses.map((status) => [
+          status,
+          total(
+            windowed,
+            (bucket) => bucket.queue === queue && bucket.status === status,
+          ),
+        ]),
       ),
     ]),
   );
@@ -154,7 +216,9 @@ async function chartTable(page, index) {
   for (const row of await table.locator("tbody tr").all()) {
     rows.push({
       label: await row.locator("th").textContent(),
-      cells: (await row.locator("td").allTextContents()).map((cell) => Number(cell.replace(/,/g, ""))),
+      cells: (await row.locator("td").allTextContents()).map((cell) =>
+        Number(cell.replace(/,/g, "")),
+      ),
     });
   }
   return { headings, rows };
@@ -163,7 +227,9 @@ async function chartTable(page, index) {
 // The timeline's numbers: a column of counts for each line, added up, by the line's name.
 async function timelineCounts(page) {
   const { headings, rows } = await chartTable(page, 0);
-  const totals = Object.fromEntries(headings.slice(1).map((heading) => [heading, 0]));
+  const totals = Object.fromEntries(
+    headings.slice(1).map((heading) => [heading, 0]),
+  );
   for (const row of rows) {
     row.cells.forEach((cell, index) => {
       totals[headings[index + 1]] += cell;
@@ -176,7 +242,12 @@ async function timelineCounts(page) {
 async function totalsCounts(page) {
   const { headings, rows } = await chartTable(page, 1);
   return Object.fromEntries(
-    rows.map((row) => [row.label, Object.fromEntries(row.cells.map((cell, index) => [headings[index + 1], cell]))]),
+    rows.map((row) => [
+      row.label,
+      Object.fromEntries(
+        row.cells.map((cell, index) => [headings[index + 1], cell]),
+      ),
+    ]),
   );
 }
 
@@ -186,7 +257,13 @@ const staleAnswer = {
     queue: {
       metrics: {
         buckets: [
-          { queue: "stale_queue", status: "pending", createdAtBucket: new Date().toISOString(), ranAtBucket: null, count: 777 },
+          {
+            queue: "stale_queue",
+            status: "pending",
+            createdAtBucket: new Date().toISOString(),
+            ranAtBucket: null,
+            count: 777,
+          },
         ],
       },
     },
@@ -196,7 +273,12 @@ const staleAnswer = {
 // Holds back the page's next look, answered when let go with a queue nobody else would answer
 // with.
 function holdLook(page) {
-  return holdLooks(page, { count: 1, isLook: isQueueMetrics, stale: staleAnswer, marker: "stale_queue" });
+  return holdLooks(page, {
+    count: 1,
+    isLook: isQueueMetrics,
+    stale: staleAnswer,
+    marker: "stale_queue",
+  });
 }
 
 test("an administrator finds the queue's statistics from the status page, and both charts draw what bitmagnet counted", async ({
@@ -207,7 +289,9 @@ test("an administrator finds the queue's statistics from the status page, and bo
 
   const answered = nextMetrics(page);
   await page.getByRole("link", { name: "Queue statistics" }).click();
-  await expect(page.getByRole("heading", { name: "Queue statistics" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Queue statistics" }),
+  ).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/stats/queue");
 
   // The default is everything the queue holds, by the hour: no start.
@@ -216,24 +300,39 @@ test("an administrator finds the queue's statistics from the status page, and bo
   expect(query).not.toContain("startTime");
   await drawn(page);
   await expect(chip(page, "all time")).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("heading", { name: /^Jobs per (\d+ )?hours?$/ })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Jobs by queue and status" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: /^Jobs per (\d+ )?hours?$/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Jobs by queue and status" }),
+  ).toBeVisible();
 
   for (const status of statuses) {
-    expect(total(buckets, (bucket) => bucket.status === status), `the fixture seeds ${status} jobs`).toBeGreaterThan(0);
+    expect(
+      total(buckets, (bucket) => bucket.status === status),
+      `the fixture seeds ${status} jobs`,
+    ).toBeGreaterThan(0);
   }
-  expect(queuesOf(buckets).length, "the fixture seeds two queues").toBeGreaterThan(1);
+  expect(
+    queuesOf(buckets).length,
+    "the fixture seeds two queues",
+  ).toBeGreaterThan(1);
 
   // Every event bitmagnet's answer makes is in the timeline's table, by queue, and every job is
   // in the totals', by queue and status.
   const lines = expectedLines(buckets, query);
-  expect(lines[`${queuesOf(buckets)[0]}: failed`], "the fixture's failed jobs are on the timeline").toBeGreaterThan(0);
+  expect(
+    lines[`${queuesOf(buckets)[0]}: failed`],
+    "the fixture's failed jobs are on the timeline",
+  ).toBeGreaterThan(0);
   expect(await timelineCounts(page)).toEqual(lines);
   expect(await totalsCounts(page)).toEqual(expectedTotals(buckets, query));
   await expect(page.locator('svg[role="img"]')).toHaveCount(2);
 });
 
-test("Anonymous is offered the page on the status page and may open it", async ({ page }) => {
+test("Anonymous is offered the page on the status page and may open it", async ({
+  page,
+}) => {
   // The fixture is served with --anonymous-access, which grants the anon Role every read
   // action but auth, pprof and metrics, queue::query among them. A new installation grants
   // none, and an administrator chooses.
@@ -268,43 +367,75 @@ test("every control is in the URL, choosing a queue or an event picks it out wit
 
   // The resolution: a unit, and a multiplier typed into its own field. Half-hours are asked
   // for by the minute.
-  answered = nextMetrics(page, (query) => query.includes("bucketDuration: minute"));
+  answered = nextMetrics(page, (query) =>
+    query.includes("bucketDuration: minute"),
+  );
   await chip(page, "minutes").click();
-  await expect(page).toHaveURL(/\/stats\/queue\?timeframe=1d&resolution=minute$/);
+  await expect(page).toHaveURL(
+    /\/stats\/queue\?timeframe=1d&resolution=minute$/,
+  );
   await page.getByLabel("Buckets of how many").fill("30");
   await page.getByLabel("Buckets of how many").press("Enter");
-  await expect(page).toHaveURL(/\/stats\/queue\?timeframe=1d&resolution=minute&every=30$/);
+  await expect(page).toHaveURL(
+    /\/stats\/queue\?timeframe=1d&resolution=minute&every=30$/,
+  );
   ({ buckets, query } = await answered);
   await drawn(page);
-  await expect(page.getByRole("heading", { name: "Jobs per 30 minutes" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Jobs per 30 minutes" }),
+  ).toBeVisible();
   expect(await timelineCounts(page)).toEqual(expectedLines(buckets, query));
   const looks = asked.length;
 
   // A queue, picked out of the answer the page has: nothing is asked again, and both charts
   // narrow to it.
-  expect(queuesOf(buckets).length, "the fixture seeds two queues").toBeGreaterThan(1);
+  expect(
+    queuesOf(buckets).length,
+    "the fixture seeds two queues",
+  ).toBeGreaterThan(1);
   const queue = queuesOf(buckets)[0];
   await chip(page, queue).click();
-  await expect(page).toHaveURL(new RegExp(`/stats/queue\\?timeframe=1d&resolution=minute&every=30&queue=${queue}$`));
-  await expect.poll(() => timelineCounts(page)).toEqual(expectedLines(buckets, query, { queues: [queue] }));
-  expect(await totalsCounts(page)).toEqual(expectedTotals(buckets, query, [queue]));
+  await expect(page).toHaveURL(
+    new RegExp(
+      `/stats/queue\\?timeframe=1d&resolution=minute&every=30&queue=${queue}$`,
+    ),
+  );
+  await expect
+    .poll(() => timelineCounts(page))
+    .toEqual(expectedLines(buckets, query, { queues: [queue] }));
+  expect(await totalsCounts(page)).toEqual(
+    expectedTotals(buckets, query, [queue]),
+  );
 
   // An event, the same way: only that queue's failures are drawn.
-  const failures = expectedLines(buckets, query, { queues: [queue], events: ["failed"] });
-  expect(failures[`${queue}: failed`], "the fixture's failed jobs are in the last day").toBeGreaterThan(0);
+  const failures = expectedLines(buckets, query, {
+    queues: [queue],
+    events: ["failed"],
+  });
+  expect(
+    failures[`${queue}: failed`],
+    "the fixture's failed jobs are in the last day",
+  ).toBeGreaterThan(0);
   await chip(page, "failed").click();
   await expect(page).toHaveURL(
-    new RegExp(`/stats/queue\\?timeframe=1d&resolution=minute&every=30&queue=${queue}&event=failed$`),
+    new RegExp(
+      `/stats/queue\\?timeframe=1d&resolution=minute&every=30&queue=${queue}&event=failed$`,
+    ),
   );
   await expect.poll(() => timelineCounts(page)).toEqual(failures);
 
   // Auto-refresh is in the URL too, and does not ask for anything by itself.
   await chip(page, "5 minutes").click();
   await expect(page).toHaveURL(
-    new RegExp(`/stats/queue\\?timeframe=1d&resolution=minute&every=30&refresh=5m&queue=${queue}&event=failed$`),
+    new RegExp(
+      `/stats/queue\\?timeframe=1d&resolution=minute&every=30&refresh=5m&queue=${queue}&event=failed$`,
+    ),
   );
   await quietMoment(page);
-  expect(asked.length, "choosing a queue, an event or how often to look asks nothing").toBe(looks);
+  expect(
+    asked.length,
+    "choosing a queue, an event or how often to look asks nothing",
+  ).toBe(looks);
 
   // Opened afresh, the link is the same look.
   answered = nextMetrics(page);
@@ -317,14 +448,20 @@ test("every control is in the URL, choosing a queue or an event picks it out wit
   await expect(chip(page, "5 minutes")).toHaveAttribute("aria-pressed", "true");
   await expect(chip(page, queue)).toHaveAttribute("aria-pressed", "true");
   await expect(chip(page, "failed")).toHaveAttribute("aria-pressed", "true");
-  expect(await timelineCounts(page)).toEqual(expectedLines(buckets, query, { queues: [queue], events: ["failed"] }));
+  expect(await timelineCounts(page)).toEqual(
+    expectedLines(buckets, query, { queues: [queue], events: ["failed"] }),
+  );
 
   // Choosing them again takes them away, and asks nothing.
   const reloaded = asked.length;
   await chip(page, "failed").click();
   await chip(page, queue).click();
-  await expect(page).toHaveURL(/\/stats\/queue\?timeframe=1d&resolution=minute&every=30&refresh=5m$/);
-  await expect.poll(() => timelineCounts(page)).toEqual(expectedLines(buckets, query));
+  await expect(page).toHaveURL(
+    /\/stats\/queue\?timeframe=1d&resolution=minute&every=30&refresh=5m$/,
+  );
+  await expect
+    .poll(() => timelineCounts(page))
+    .toEqual(expectedLines(buckets, query));
   expect(asked.length).toBe(reloaded);
 });
 
@@ -333,13 +470,20 @@ test("a short timeframe draws only its own jobs, though bitmagnet answers with j
   credentials,
 }) => {
   const answered = nextMetrics(page);
-  await signInAt(page, credentials, "/stats/queue?timeframe=1h", "Queue statistics");
+  await signInAt(
+    page,
+    credentials,
+    "/stats/queue?timeframe=1h",
+    "Queue statistics",
+  );
   const { buckets, query } = await answered;
   await drawn(page);
 
   // The seed's jobs ran an hour or more ago, and bitmagnet answers with them all the same.
   expect(askedIn(query).start, "an hour has a start").not.toBeNull();
-  const before = buckets.filter((bucket) => !inTimeframe(query, windowedBy(bucket)));
+  const before = buckets.filter(
+    (bucket) => !inTimeframe(query, windowedBy(bucket)),
+  );
   expect(
     total(before),
     "bitmagnet answers the last hour with jobs that ran before it: its filter lets every job that is not pending through",
@@ -405,7 +549,9 @@ test.describe("auto-refresh", () => {
     await expect.poll(answered).toBe(1);
 
     await chip(page, "processed").click();
-    await expect(page).toHaveURL(/\/stats\/queue\?refresh=10s&event=processed$/);
+    await expect(page).toHaveURL(
+      /\/stats\/queue\?refresh=10s&event=processed$/,
+    );
     await quietMoment(page);
     expect(asked.length).toBe(1);
 
@@ -420,7 +566,9 @@ test.describe("auto-refresh", () => {
     expect(asked.length).toBe(2);
   });
 
-  test("does not pile a look on one that is still on its way", async ({ page }) => {
+  test("does not pile a look on one that is still on its way", async ({
+    page,
+  }) => {
     const asked = metricsRequests(page);
     const answered = await answeredLooks(page, "metrics");
     await page.goto("/stats/queue?refresh=10s");
@@ -449,12 +597,17 @@ test("an answer that comes back after the controls moved on does not replace the
   // on, with a queue nobody else would answer with.
   const looks = await holdLook(page);
   await page.goto("/stats/queue");
-  await expect(page.getByRole("heading", { name: "Queue statistics" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Queue statistics" }),
+  ).toBeVisible();
 
   const newer = nextMetrics(page, (query) => query.includes("startTime"));
   await chip(page, "1 day").click();
   const { buckets, query } = await newer;
-  expect(total(buckets), "the fixture seeds jobs in the last day").toBeGreaterThan(0);
+  expect(
+    total(buckets),
+    "the fixture seeds jobs in the last day",
+  ).toBeGreaterThan(0);
   await drawn(page);
 
   const delivered = looks.delivered();
@@ -496,19 +649,29 @@ test("asking for a look at once gives up on one that is not answered, and its an
   await expect(page.locator('.stats[aria-busy="false"]')).toBeVisible();
 });
 
-test("an Identity without queue::query is refused the page, and not offered it", async ({ page, request, issuer }) => {
+test("an Identity without queue::query is refused the page, and not offered it", async ({
+  page,
+  request,
+  issuer,
+}) => {
   // The core `user` Role holds health::query and torrent::query, but not queue::query.
   const ordinary = await registerUser(page, request, issuer, "e2e-noqstats");
   await signIn(page, ordinary);
 
   await page.goto("/status");
   await expect(page.getByRole("heading", { name: "Status" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Torrent statistics" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Queue statistics" })).toHaveCount(0);
+  await expect(
+    page.getByRole("link", { name: "Torrent statistics" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Queue statistics" }),
+  ).toHaveCount(0);
 
   const asked = metricsRequests(page);
   await page.goto("/stats/queue?timeframe=1d");
-  await expect(page.getByText("Your Identity does not permit reading bitmagnet's queue.")).toBeVisible();
+  await expect(
+    page.getByText("Your Identity does not permit reading bitmagnet's queue."),
+  ).toBeVisible();
   await expect(page.getByRole("figure")).toHaveCount(0);
   expect(asked.length).toBe(0);
 });

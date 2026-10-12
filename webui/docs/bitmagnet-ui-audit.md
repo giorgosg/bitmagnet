@@ -10,40 +10,40 @@ pass** — the read paths are built and most of the write paths are not.
 
 ## Routes it has
 
-| Route                     | Guard                        | State                        |
-| ------------------------- | ---------------------------- | ---------------------------- |
-| `/login`                  | redirects away if signed in  | works                        |
-| `/register`               | redirects away if signed in  | works                        |
-| `/account`                | requires a User              | works                        |
-| `/account/api-keys`       | requires a User              | create only, no delete       |
-| `/torrents`               | none                         | works                        |
-| `/torrents/permalink/:infoHash` | none                   | works                        |
-| `/dashboard`              | **none**                     | works                        |
-| `/dashboard/queues/{visualize,jobs,admin}` | **none**    | works                        |
-| `/dashboard/users`        | **none**                     | read-only table              |
-| `/dashboard/roles`        | **none**                     | add and edit, no delete      |
-| `/dashboard/invitations`  | **none**                     | create only, no delete       |
-| `/dashboard/torrents`     | **none**                     | works                        |
+| Route                                      | Guard                       | State                   |
+| ------------------------------------------ | --------------------------- | ----------------------- |
+| `/login`                                   | redirects away if signed in | works                   |
+| `/register`                                | redirects away if signed in | works                   |
+| `/account`                                 | requires a User             | works                   |
+| `/account/api-keys`                        | requires a User             | create only, no delete  |
+| `/torrents`                                | none                        | works                   |
+| `/torrents/permalink/:infoHash`            | none                        | works                   |
+| `/dashboard`                               | **none**                    | works                   |
+| `/dashboard/queues/{visualize,jobs,admin}` | **none**                    | works                   |
+| `/dashboard/users`                         | **none**                    | read-only table         |
+| `/dashboard/roles`                         | **none**                    | add and edit, no delete |
+| `/dashboard/invitations`                   | **none**                    | create only, no delete  |
+| `/dashboard/torrents`                      | **none**                    | works                   |
 
-`app.routes.ts` has exactly one guard, `requireUserGuard`, and it only ever asks *is there
-a User or not*. It is applied to the four account routes and to nothing else.
+`app.routes.ts` has exactly one guard, `requireUserGuard`, and it only ever asks _is there
+a User or not_. It is applied to the four account routes and to nothing else.
 
 ## What is missing
 
 Verified by grepping every `.ts` and `.html` under `webui/src/app` for the mutation names.
 None of these are called anywhere:
 
-| Mutation          | Consequence                                                      |
-| ----------------- | ----------------------------------------------------------------- |
-| `setUserRole`     | A user's role cannot be changed from the UI at all               |
-| `setUserEnabled`  | A user cannot be disabled — and `User` has no `enabled` field to show it anyway |
-| `deleteUser`      | A user cannot be removed                                          |
-| `deleteRole`      | A custom role can be created and edited but never deleted         |
-| `deleteInvitation`| An unclaimed invitation cannot be withdrawn                       |
-| `deleteAPIKey`    | A key can be issued but never revoked                             |
+| Mutation           | Consequence                                                                     |
+| ------------------ | ------------------------------------------------------------------------------- |
+| `setUserRole`      | A user's role cannot be changed from the UI at all                              |
+| `setUserEnabled`   | A user cannot be disabled — and `User` has no `enabled` field to show it anyway |
+| `deleteUser`       | A user cannot be removed                                                        |
+| `deleteRole`       | A custom role can be created and edited but never deleted                       |
+| `deleteInvitation` | An unclaimed invitation cannot be withdrawn                                     |
+| `deleteAPIKey`     | A key can be issued but never revoked                                           |
 
 So the administrative surface is roughly "create and look at". Everything that takes access
-*away* is unbuilt, which is the half that matters when an account is compromised.
+_away_ is unbuilt, which is the half that matters when an account is compromised.
 
 **No permission-driven UI whatsoever.** `AuthService.enforce()` and `AuthService.hasRole()`
 exist and are called from nowhere. The only use of the enforcer is inside

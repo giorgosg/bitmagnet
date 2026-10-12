@@ -19,7 +19,10 @@ export async function drawn(page) {
 // a tab is switched away from and back.
 export async function setHidden(page, hidden) {
   await page.evaluate((value) => {
-    Object.defineProperty(document, "hidden", { configurable: true, get: () => value });
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      get: () => value,
+    });
     Object.defineProperty(document, "visibilityState", {
       configurable: true,
       get: () => (value ? "hidden" : "visible"),
@@ -38,7 +41,12 @@ export async function quietMoment(page) {
 // Two frames on, whatever the page was going to do with an answer it has been handed, it has
 // done: Elm draws on the animation frame after it updates.
 export async function afterFrames(page) {
-  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+  await page.evaluate(
+    () =>
+      new Promise((done) =>
+        requestAnimationFrame(() => requestAnimationFrame(done)),
+      ),
+  );
 }
 
 // Counts, from inside the page, the answers to requests whose body names `marker` that the page
@@ -85,6 +93,9 @@ export async function holdLooks(page, { count, isLook, stale, marker }) {
   return {
     release,
     // The page has been handed the stale answer. Not the same as having done anything with it.
-    delivered: () => page.waitForResponse(async (response) => (await response.text().catch(() => "")).includes(marker)),
+    delivered: () =>
+      page.waitForResponse(async (response) =>
+        (await response.text().catch(() => "")).includes(marker),
+      ),
   };
 }

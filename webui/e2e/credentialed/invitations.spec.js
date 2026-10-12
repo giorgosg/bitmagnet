@@ -10,7 +10,13 @@
 // Registration links under a base path are not checked here, because this harness serves at
 // the origin root. Invitations' unit tests check them; see e2e/README.md.
 
-import { inAnotherBrowser, registerThrough, signInAt, expect, test } from "../support/credentialed.js";
+import {
+  inAnotherBrowser,
+  registerThrough,
+  signInAt,
+  expect,
+  test,
+} from "../support/credentialed.js";
 
 test.beforeEach(async ({ page, credentials }) => {
   await signInAt(page, credentials, "/admin/invitations", "Invite someone");
@@ -30,10 +36,14 @@ async function invite(page, { role, expires }) {
 
 // The listed Invitation behind a link.
 function listed(page, link) {
-  return page.getByRole("listitem").filter({ has: page.getByRole("link", { name: link }) });
+  return page
+    .getByRole("listitem")
+    .filter({ has: page.getByRole("link", { name: link }) });
 }
 
-test("creates an Invitation with a Role and an expiry, and lists it", async ({ page }) => {
+test("creates an Invitation with a Role and an expiry, and lists it", async ({
+  page,
+}) => {
   const link = await invite(page, { role: "editor", expires: "7 days" });
   expect(link).toMatch(/^\/register\?code=[0-9a-f]+$/);
 
@@ -82,6 +92,8 @@ test("withdraws an unclaimed Invitation only after asking, naming what it would 
   // The list is refetched from the server: the row is gone because bitmagnet deleted it.
   await expect(listed(page, link)).toHaveCount(0);
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Invite someone" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Invite someone" }),
+  ).toBeVisible();
   await expect(listed(page, link)).toHaveCount(0);
 });

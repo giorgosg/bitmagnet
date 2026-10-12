@@ -12,11 +12,16 @@ async function fillCredentials(page) {
 }
 
 test.describe("the login form", () => {
-  test("labels its fields and hides what is typed into the password", async ({ page }) => {
+  test("labels its fields and hides what is typed into the password", async ({
+    page,
+  }) => {
     await page.goto("/login");
 
     await expect(page.getByLabel("Username")).toHaveAttribute("type", "text");
-    await expect(page.getByLabel("Password")).toHaveAttribute("type", "password");
+    await expect(page.getByLabel("Password")).toHaveAttribute(
+      "type",
+      "password",
+    );
   });
 
   test("puts the cursor in the username field", async ({ page }) => {
@@ -29,7 +34,9 @@ test.describe("the login form", () => {
     await expect(page.getByLabel("Username")).toBeFocused();
   });
 
-  test("offers no submission until both fields are filled", async ({ page }) => {
+  test("offers no submission until both fields are filled", async ({
+    page,
+  }) => {
     await page.goto("/login");
     const submit = page.getByRole("button", { name: "Sign in" });
 
@@ -61,9 +68,14 @@ test.describe("a refused sign-in", () => {
     // The text is bitmagnet's INVALID_CREDENTIALS mapped through ApiError, so this
     // exercises the whole path from extensions.code to the rendered sentence.
     const rejection = page.getByRole("alert");
-    await expect(rejection).toHaveText("That username and password do not match.");
+    await expect(rejection).toHaveText(
+      "That username and password do not match.",
+    );
 
-    await expect(page.getByLabel("Username")).toHaveAttribute("aria-invalid", "true");
+    await expect(page.getByLabel("Username")).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
     await expect(page.getByLabel("Username")).toHaveAttribute(
       "aria-describedby",
       "login-rejection",
@@ -79,7 +91,9 @@ test.describe("a refused sign-in", () => {
     await expect(page.getByRole("status")).toHaveCount(0);
   });
 
-  test("stays on the login route rather than navigating anywhere", async ({ page }) => {
+  test("stays on the login route rather than navigating anywhere", async ({
+    page,
+  }) => {
     await page.goto("/login?returnUrl=%2Faccount");
     await fillCredentials(page);
     await page.getByRole("button", { name: "Sign in" }).click();
@@ -88,7 +102,9 @@ test.describe("a refused sign-in", () => {
     expect(new URL(page.url()).pathname).toBe("/login");
   });
 
-  test("is dismissed by typing, which is no longer what it described", async ({ page }) => {
+  test("is dismissed by typing, which is no longer what it described", async ({
+    page,
+  }) => {
     await page.goto("/login");
     await fillCredentials(page);
     await page.getByRole("button", { name: "Sign in" }).click();
@@ -97,7 +113,10 @@ test.describe("a refused sign-in", () => {
     await page.getByLabel("Password").fill("something-else");
 
     await expect(page.getByRole("alert")).toHaveCount(0);
-    await expect(page.getByLabel("Username")).toHaveAttribute("aria-invalid", "false");
+    await expect(page.getByLabel("Username")).toHaveAttribute(
+      "aria-invalid",
+      "false",
+    );
   });
 });
 
@@ -105,7 +124,9 @@ test.describe("the way in", () => {
   // The header is the only route to /account, and an Anonymous Identity is offered the
   // login form instead. Both are drawn from self.identity, so this needs the response to
   // have actually arrived — invisible to elm-test.
-  test("the header offers sign-in to an Anonymous Identity", async ({ page }) => {
+  test("the header offers sign-in to an Anonymous Identity", async ({
+    page,
+  }) => {
     await page.goto("/search?q=linux");
 
     const signIn = page.getByRole("link", { name: "Sign in" });
@@ -119,7 +140,9 @@ test.describe("the way in", () => {
     expect(url.searchParams.get("returnUrl")).toBe("/search?q=linux");
   });
 
-  test("the login form does not offer a way back to itself", async ({ page }) => {
+  test("the login form does not offer a way back to itself", async ({
+    page,
+  }) => {
     await page.goto("/login");
 
     await expect(page.getByRole("link", { name: "Sign in" })).toHaveAttribute(
@@ -146,7 +169,9 @@ test.describe("routes that require a User", () => {
     });
   }
 
-  test("the login form does not pile up in history on the way there", async ({ page }) => {
+  test("the login form does not pile up in history on the way there", async ({
+    page,
+  }) => {
     await page.goto("/search?q=linux");
     await page.goto("/account");
     await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();

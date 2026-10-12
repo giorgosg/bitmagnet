@@ -9,9 +9,15 @@
 // form cleared, and bitmagnet has no password reset.
 
 import { registerUser, signIn, expect, test } from "../support/credentialed.js";
-import { recordCredentialStores, storedCredentials } from "../support/credential-store.js";
+import {
+  recordCredentialStores,
+  storedCredentials,
+} from "../support/credential-store.js";
 
-test("a successful sign-in offers the credential", async ({ page, credentials }) => {
+test("a successful sign-in offers the credential", async ({
+  page,
+  credentials,
+}) => {
   await recordCredentialStores(page);
   await page.goto("/login");
 
@@ -22,7 +28,11 @@ test("a successful sign-in offers the credential", async ({ page, credentials })
   ]);
 });
 
-test("a successful registration offers the credential", async ({ page, request, issuer }) => {
+test("a successful registration offers the credential", async ({
+  page,
+  request,
+  issuer,
+}) => {
   await recordCredentialStores(page);
   const registered = await registerUser(page, request, issuer, "e2e-new");
 

@@ -1,5 +1,8 @@
 # Deploy browser UIs separately
 
+The independent UI maintenance/deployment choice below is superseded by
+[ADR 0005](0005-maintain-and-bundle-the-elm-ui-in-this-repository.md).
+
 The fork ships the Go backend, GraphQL and Torznab APIs without an embedded Angular UI.
 Browser clients are maintained and deployed in their own projects. This removes the
 transitional Angular authentication screens, committed bundles and frontend generators

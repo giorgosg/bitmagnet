@@ -11,21 +11,32 @@ are pointing at.
 
 The target fork needs these two capabilities:
 
-| Needed for | Capability | How to check |
-| --- | --- | --- |
-| Identity and permission work | the fork's auth surface | `{self{identity{user{username}}}}` resolves |
-| Same-origin serving (way 2) | `http_server.static` (PR #48) | the configured static path returns something other than 404 |
+| Needed for                   | Capability                    | How to check                                                |
+| ---------------------------- | ----------------------------- | ----------------------------------------------------------- |
+| Identity and permission work | the fork's auth surface       | `{self{identity{user{username}}}}` resolves                 |
+| Same-origin serving (way 2)  | `http_server.static` (PR #48) | the configured static path returns something other than 404 |
 
 [auth-api.md](auth-api.md#the-shape-of-it) is authoritative for the two supported
 anonymous-access configurations. The serving check here answers only whether this
 instance exposes the capability needed by the task.
 
-## Three ways to serve the UI
+## Bundled release UI
+
+`task build` at the repository root embeds the optimized UI in the executable. It serves
+`/ui/` by default and redirects `/` there. Its base URL and runtime config follow
+`http_server.static.path` automatically; no `config.js` needs to be created on disk.
+`http_server.static.bundled: false` disables it. Browser sign-in still requires HTTPS
+through a reverse proxy. An explicit `http_server.static.dir` overrides the bundle and
+uses the external configuration described below.
+
+Run npm commands on this page from `webui/`.
+
+## Three ways to serve the UI separately
 
 ### 1. The same-origin HTTPS development proxy — what `npm run dev` does
 
 ```bash
-npm install
+npm ci
 BITMAGNET_URL=http://your-bitmagnet:3333 npm run dev
 ```
 
@@ -78,8 +89,8 @@ configured path:
 ```yaml
 http_server:
   static:
-    dir: /path/to/magnes/public   # empty (the default) disables the mount entirely
-    path: /ui                     # the default; any non-reserved path works
+    dir: /path/to/magnes/public # empty (the default) disables the mount entirely
+    path: /ui # the default; any non-reserved path works
 ```
 
 Unknown paths beneath it fall back to `index.html`, so Magnes keeps its own routing and
@@ -102,7 +113,7 @@ insecure. Nothing is reported; the person simply stays Anonymous. **[verified 20
 on a plain-HTTP mount, which is what prompted this section.]**
 
 So way 2 needs a TLS-terminating proxy in front of it, exactly as way 1 does. One header is
-load-bearing there: the proxy must pass the browser's `Host` through *with its port*
+load-bearing there: the proxy must pass the browser's `Host` through _with its port_
 (nginx's `$http_host`, not `$host`), because bitmagnet compares the `Origin` header's host
 against the request's `Host` for every cookie-authenticated mutation, and a stripped port
 makes them differ.
@@ -111,7 +122,7 @@ Note also that a proxy makes every request appear to come from it, and bitmagnet
 throttle is keyed on the client address — set `http_server.trusted_proxies` or the whole
 network is throttled as one caller.
 
-Notes from `../bitmagnet/internal/httpserver/static/static.go`:
+Notes from `../internal/httpserver/static/static.go`:
 
 - A configured directory that does not exist is a **startup error**, not a silent 404. So
   the directory has to be created before the config references it.
@@ -189,7 +200,7 @@ needs:
 
 ```yaml
 auth:
-  anonymous_access: false      # this is the switch that turns authentication on
+  anonymous_access: false # this is the switch that turns authentication on
   jwt_secret: <anything fixed> # otherwise every restart logs everyone out
 ```
 
@@ -216,7 +227,7 @@ correct for a directly reachable dev instance.
 
 The three ways above all point Magnes at an instance someone maintains. The credentialed
 end-to-end suite does not: `npm run test:e2e:credentialed` starts a bitmagnet of its own, on
-a clone of the `../btm-testdb` seed template, registers a throwaway administrator through
+a clone of the `../../btm-testdb` seed template, registers a throwaway administrator through
 the bootstrap Invitation that instance prints, and drops all of it afterwards. It is way 1
 underneath — the same `dev.js` proxy, for the same reason, since the cookie is `Secure` and
 the origin has to be — with the upstream chosen per run instead of read from `.dev/env`.
@@ -239,12 +250,12 @@ nothing. The scratch directory also gets a fresh, unmapped `ScalarCodecs.elm`, w
 the install step leaves it out: the committed one, with the custom scalar mappings, stays.
 
 The simplest way needs no running instance and no introspection. Read the fork's committed
-SDL directly, taking it from `trunk` rather than from whatever branch `../bitmagnet` has
-checked out:
+SDL directly from this checkout, so the generated UI client matches the backend:
 
 ```bash
-(cd ../bitmagnet && for f in $(git ls-tree --name-only trunk graphql/schema/ | grep '\.graphqls$'); do git show "trunk:$f"; echo; done) > /tmp/bitmagnet.graphql
-BITMAGNET_SDL=/tmp/bitmagnet.graphql npm run codegen:sdl
+mkdir -p .dev
+cat ../graphql/schema/*.graphqls > .dev/bitmagnet.graphql
+BITMAGNET_SDL=.dev/bitmagnet.graphql npm run codegen:sdl
 git status --short src/Magnes/Api
 ```
 

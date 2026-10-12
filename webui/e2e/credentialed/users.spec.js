@@ -26,7 +26,9 @@ async function find(page, username) {
   await page.getByLabel("Find a User").fill(username);
   await searched;
 
-  const row = page.getByRole("listitem").filter({ has: page.getByText(username, { exact: true }) });
+  const row = page
+    .getByRole("listitem")
+    .filter({ has: page.getByText(username, { exact: true }) });
   await expect(row).toHaveCount(1);
   return row;
 }
@@ -53,7 +55,9 @@ function attemptSignIn(browser, user) {
     const signedIn = them.getByRole("button", { name: user.username });
     const refused = them.getByRole("alert");
     await expect(signedIn.or(refused)).toBeVisible();
-    return (await signedIn.isVisible()) ? "signed in" : await refused.textContent();
+    return (await signedIn.isVisible())
+      ? "signed in"
+      : await refused.textContent();
   });
 }
 
@@ -71,11 +75,15 @@ test("finds a User, and each act on them lands on the server and leaves the scre
   // bitmagnet's User has no enabled field, so the screen says it cannot show one rather than
   // inventing a column.
   await expect(
-    page.getByText("Whether a User is disabled is not shown: bitmagnet does not report it."),
+    page.getByText(
+      "Whether a User is disabled is not shown: bitmagnet does not report it.",
+    ),
   ).toBeVisible();
 
   let row = await find(page, target.username);
-  await expect(row.getByLabel(`Role for ${target.username}`)).toHaveValue("user");
+  await expect(row.getByLabel(`Role for ${target.username}`)).toHaveValue(
+    "user",
+  );
 
   // A Role change for someone else applies at once, with no ask: an administrator can as
   // easily undo it.
@@ -83,7 +91,9 @@ test("finds a User, and each act on them lands on the server and leaves the scre
   await settled(row);
   await page.reload();
   row = await find(page, target.username);
-  await expect(row.getByLabel(`Role for ${target.username}`)).toHaveValue("editor");
+  await expect(row.getByLabel(`Role for ${target.username}`)).toHaveValue(
+    "editor",
+  );
 
   // Disabling asks first, and then takes their sign-ins away.
   await row.getByRole("button", { name: "Disable" }).click();
@@ -101,11 +111,17 @@ test("finds a User, and each act on them lands on the server and leaves the scre
   // Deleting asks, then the row goes because bitmagnet deleted them, and so does the User.
   await row.getByRole("button", { name: "Delete" }).click();
   await row.getByRole("button", { name: "Delete" }).click();
-  await expect(page.getByText(`No User matches "${target.username}".`)).toBeVisible();
+  await expect(
+    page.getByText(`No User matches "${target.username}".`),
+  ).toBeVisible();
   await page.reload();
   await page.getByLabel("Find a User").fill(target.username);
-  await expect(page.getByText(`No User matches "${target.username}".`)).toBeVisible();
-  expect(await attemptSignIn(browser, target)).toBe("That username and password do not match.");
+  await expect(
+    page.getByText(`No User matches "${target.username}".`),
+  ).toBeVisible();
+  expect(await attemptSignIn(browser, target)).toBe(
+    "That username and password do not match.",
+  );
 });
 
 test("an act asked about and then kept changes nothing", async ({

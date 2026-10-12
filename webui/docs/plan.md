@@ -141,7 +141,7 @@ eight are query-scoped and sane.
 
 The reason the other seven are not drawn is data, not correctness. `genre` and
 `torrentTag` returned no buckets at all, and `language`, `videoResolution` and
-`videoSource` returned buckets totalling *four*, *two* and *six* rows out of 4,703 — a DHT
+`videoSource` returned buckets totalling _four_, _two_ and _six_ rows out of 4,703 — a DHT
 index simply does not know that much about what it has crawled. Content type is the
 obvious axis, and file type is the one that still means something for the ~88% of rows
 that were never classified. The rest are worth adding when an index exists that can fill
@@ -152,7 +152,7 @@ at all. Its counts are the broken ones, and its values are a fixed eight-member 
 UI can draw for itself — asking would be both misleading and pointless.
 
 **`Unclassified` is a value, not the absence of one.** `ContentTypeFacetInput.filter` is
-`[ContentType]` with *nullable* elements, and sending `[null]` returns exactly the rows
+`[ContentType]` with _nullable_ elements, and sending `[null]` returns exactly the rows
 bitmagnet never classified — 4,210 of 4,703 on a live "ubuntu" search. Since that is the
 largest bucket by far on any real index, being able to filter to it matters more than the
 named types do.
@@ -204,7 +204,7 @@ choosing a sort is a deliberate act and is worth a history entry. Verified — s
 adds exactly one entry, and back restores both the previous ordering and the menu.
 
 **Rows are centred one by one, not by centring their container.** The container is
-`InfiniteList`'s, and it writes `margin: 0; padding: 0` as an *inline* style, which beats
+`InfiniteList`'s, and it writes `margin: 0; padding: 0` as an _inline_ style, which beats
 any rule in the stylesheet — so a centred wrapper silently does nothing and the column
 sits flush left. The rule goes on `.item` instead.
 
@@ -217,7 +217,7 @@ column as the header while only the hover highlight bleeds past it.
 **The file list is a directory tree, and it is hand-rolled.** bitmagnet returns flat
 `/`-separated paths relative to the torrent's root directory, so the tree has to be
 reconstructed — and no Elm package does that part, which is the actual work. Three tree
-*views* exist on the registry; `dosarf/elm-tree-view` is the credible one and can render
+_views_ exist on the registry; `dosarf/elm-tree-view` is the credible one and can render
 custom rows, but it brings its own model, messages, `<table>` markup, CSS classes,
 selection and keyboard machinery, of which roughly none is wanted here. `FileTree` is
 about 150 lines and owes nothing.
@@ -256,7 +256,7 @@ layout arithmetic.
 **A row with no file list says why, when it owes an explanation.** `over_threshold`
 reports a file count and then offers nothing, which reads as a missing feature; it now
 says bitmagnet declined to index them. `no_info` has no count to explain away and `single`
-is a torrent that *is* its one file, so both stay silent.
+is a torrent that _is_ its one file, so both stay silent.
 
 **`/torrent/<hash>` only matches 40 hex characters.** bitmagnet answers a malformed hash
 with `encoding/hex: odd length hex string`, which reached the page as-is before the route
@@ -269,7 +269,7 @@ Not bugs, but things a reader should not mistake for oversights.
 
 - **Every expanded height is a constant in both `Main.elm` and `styles.css`.** The
   virtualizer positions rows from those numbers, so nothing inside an expanded panel may
-  size itself to its content. Heights may still *vary per row*, since they are computed
+  size itself to its content. Heights may still _vary per row_, since they are computed
   from each row's own data — the raw-name line is drawn only when it differs from the
   title, and the panel is 48px or 66px accordingly. Verified in the DOM: expanded rows
   measured 108px against a computed 108, and an expanded row with 23 files measured 632px

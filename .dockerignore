@@ -2,3 +2,13 @@ data
 node_modules
 webui/node_modules
 webui/.angular
+webui/elm-stuff
+webui/review/elm-stuff
+webui/.dev
+webui/public/main.js
+webui/public/config.js
+webui/test-results
+webui/playwright-report
+webui/blob-report
+webui/.scratch
+*.local.md
