@@ -149,8 +149,7 @@ is generated per process.
 **The two `graphql.*` keys gate developer surface, not access.** Schema introspection and
 the GraphiQL page carry no authorization of their own, so on an instance reachable
 anonymously they hand out a full map of the API. Nothing shipped needs either at runtime —
-the web UI's client is generated from the schema files at build time — so both default to
-off, and a developer turns them on deliberately.
+clients can generate against the schema files — so both default to off, and a developer turns them on deliberately.
 
 ## Browser login
 
@@ -335,7 +334,7 @@ access. And Torznab takes machine credentials only — a browser session present
 `apikey` slot is refused, and the endpoint ignores whatever the global bearer middleware
 resolved.
 
-Issue an API key from the web UI's account section. Keys can be scoped to individual
+Issue an API key through the GraphQL `self.createAPIKey` mutation or your external UI. Keys can be scoped to individual
 object actions, so a key handed to Prowlarr can be allowed Torznab and nothing else.
 
 **Keys issued before this version keep working, and there is nothing to run.** How a key's
@@ -394,9 +393,6 @@ baseline: orchestrators poll it, and it reports liveness only.
 
 ## Known gaps
 
-- **No route guards in the web UI.** An unauthorised user reaches an administrative screen
-  and sees its queries refused, rather than being sent to login. The GraphQL surface is
-  enforced, so this is presentation, not protection.
 - **`auth.email_verification` does nothing.** The parameter is carried over from
   `upstream/next` for fidelity, but its value is never read and no verification code is
   ever issued — the `users.email_verify_code` column is written nowhere. It is inert on
@@ -404,37 +400,25 @@ baseline: orchestrators poll it, and it reports liveness only.
   defaults to on while doing nothing tells an operator their addresses are verified when
   they are not. The default follows the behaviour, and flips back when the behaviour
   arrives.
-- **The bundled web UI keeps its token in `localStorage`, not in the session cookie.** The
-  Angular screens authenticate with `self.login`, which returns the JWT, and store it under
-  `bitmagnet-jwt` where any script on the origin can read it. `self.loginBrowser` and the
-  `HttpOnly` cookie described above have no caller in `webui/src` outside the generated
-  client.
 
-  This is the shipped default rather than an oversight. The cookie path was built for a
-  separately served same-origin browser client — the Magnes integration environment above
-  is what it is for — and the bundled auth screens are transitional: they exist so that
-  `auth.anonymous_access: false` does not leave the bundled UI unusable, and they come out
-  once that replacement is complete. They are presentation, never a boundary; the `@auth`
-  directive enforces server-side regardless of what the browser holds.
+## UI deployment and CORS
 
-  What it means for an operator: script injection anywhere on the API origin yields a
-  bearer token valid until it expires or the session is revoked. Signing out now does
-  revoke it — see [Ending a session](#ending-a-session) — so a leaked token is no longer
-  good for the whole of `auth.jwt_duration` regardless of what the user does. Prefer
-  `loginBrowser` for any client you write yourself, and keep `auth.jwt_duration` no longer
-  than you would accept an unnoticed leak living.
+This fork no longer bundles Angular or redirects `/` to `/webui`. Deploy a browser UI
+separately. `http_server.static.dir` serves a built UI from disk at `/ui` by default;
+`http_server.static.path: /webui` can retain the old URL. Root mounts are refused because
+Gin's static wildcard conflicts with the API routes. Alternatively, serve UI assets and
+proxy `/graphql` under one origin. Remove `webui` from explicit `http_server.options`
+lists when upgrading.
 
-- **CORS origins still default to `*`.** Carried over from before this lineage had
-  authentication. If an administrator grants the anon role catalogue reads, any web page
-  can query a reachable instance as the anonymous identity — including an instance bound
-  to a LAN address that the page could not otherwise reach. Narrowing it requires knowing
-  where your web UI is served from: the bundled UI shares the API's origin and needs no
-  CORS at all, but serving it separately is supported. An empty origin list currently
-  means allow all in the CORS library; it does not restrict browsers.
-  Set `http_server.cors.allowed_origins` explicitly if you serve the UI from another
-  origin.
+Use `self.loginBrowser` for same-origin browser sessions. The HTTP-only cookie contract
+is described above; there is no bundled client storing JWTs in localStorage.
 
-  The allowed _headers_ are no longer `*`; they are the four the server actually reads
-  (`Content-Type`, `Authorization`, `X-Api-Key`, `X-Import-Id`). A client sending anything
-  else cross-origin now fails its preflight, and needs the header added to
-  `http_server.cors.allowed_headers`.
+`http_server.cors.allowed_origins` now defaults to `[]`, withholding permission for
+cross-origin browser reads. Same-origin requests and non-browser API clients need no
+CORS permission. To deploy a UI on another origin, list its exact origin explicitly;
+`["*"]` restores the previous public cross-origin behavior. This controls browser access,
+while authentication and role permissions still govern API access.
+
+The default allowed headers are `Content-Type`, `Authorization`, `X-Api-Key` and
+`X-Import-Id`. If a cross-origin client needs another header, add it to
+`http_server.cors.allowed_headers`.

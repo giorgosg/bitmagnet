@@ -21,7 +21,7 @@ For context: after torrents are crawled or imported, they won't show up in the U
 
 ## Reprocess individual torrents
 
-Individual torrents can be reprocessed from the "Classification" tab of the torrent detail view.
+Use the GraphQL `torrent.reprocess` mutation or a separately deployed UI to reprocess individual torrents.
 
 The following options are available:
 
@@ -31,9 +31,7 @@ The following options are available:
 
 ## Enqueue torrent processing batch
 
-From within the admin dashboard of the web UI, the "Enqueue torrent processing batch" dialog allows you to re-queue torrents and apply the latest classifier updates to their content records.
-
-![Enqueue torrent processing batch](/assets/images/webui-reprocess.png)
+Use the GraphQL `queue.enqueueReprocessTorrentsBatch` mutation or the `bitmagnet reprocess` command to re-queue torrents and apply classifier updates. Run `bitmagnet reprocess --help` for command-line options.
 
 The following options are available:
 

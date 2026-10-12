@@ -25,9 +25,9 @@ A single Go binary (`main.go`) backed by PostgreSQL. It crawls the BitTorrent DH
 infohashes, fetches each torrent's metainfo from peers, writes it to the database, and
 enqueues a classification job. A Postgres-backed job queue drives a processor that runs a
 rule engine over each torrent to work out what it _is_ — film, episode, music — and
-writes a searchable `torrent_contents` row. Three interfaces read that back out: a
-GraphQL API, a Torznab endpoint for \*arr clients, and an Angular web UI compiled into
-the binary. Everything is wired with [`uber-go/fx`](https://github.com/uber-go/fx) and
+writes a searchable `torrent_contents` row. Two APIs read that back out: a
+GraphQL API and a Torznab endpoint for \*arr clients. Browser UIs are built and deployed
+separately. Everything is wired with [`uber-go/fx`](https://github.com/uber-go/fx) and
 run as a set of registered workers.
 
 ```
@@ -58,7 +58,7 @@ run as a set of registered workers.
    └──────────────────┘            └────────────────────────┘
                                                 │
                                                 ▼
-                              GraphQL  ·  Torznab  ·  web UI
+                              GraphQL  ·  Torznab
 ```
 
 ## Where the code lives
@@ -87,6 +87,5 @@ run as a set of registered workers.
 | `pkg/json_schema/`      | JSON schema types, used by `internal/config/param`                 |
 | `migrations/`           | Goose SQL migrations, `00001`–`00022`                              |
 | `graphql/`              | Schema and operations — the _source_ for `internal/gql`            |
-| `webui/`                | Angular app; `webui/dist` is committed and embedded                |
 
-The web UI is out of scope for these notes and is expected to be replaced.
+The optional `static` HTTP component serves a separately built UI from disk.

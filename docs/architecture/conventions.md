@@ -58,9 +58,6 @@ fails on any diff.
 | `internal/protobuf/bitmagnet.pb.go`                         | `internal/protobuf/bitmagnet.proto`                | `task gen-protoc`            |
 | `internal/**/mocks/*.go`                                    | interfaces and `.mockery.yml`                      | `task gen-mockery`           |
 | `bitmagnet.io/schemas/classifier-0.1.json`                  | classifier types                                   | `task gen-classifier-schema` |
-| `webui/src/app/graphql/generated/**`                        | the schema and web UI operations                   | `task gen-webui-graphql`     |
-| `webui/src/app/i18n/translations/*.json`                    | `i18n` markup in web UI templates                  | `task i18n-extract`          |
-| `webui/dist/**` — **committed to git**                      | `webui/src`                                        | `task build-webui`           |
 
 `task gen` runs them all in order; use the narrow target while iterating.
 
@@ -68,10 +65,11 @@ fails on any diff.
 
 `.prettierignore` does not exclude `*.md`, and formatting differs between 3.x releases, so
 a stray version passes locally and fails CI. Use the repo's own copy — deliberately absent
-from the Nix shell so nothing else wins on `PATH`:
+from the Nix shell so nothing else wins on `PATH`. Install it with
+`task install-tools` from the root package:
 
 ```bash
-./webui/node_modules/.bin/prettier --write AGENTS.md 'docs/**/*.md'
+./node_modules/.bin/prettier --write AGENTS.md 'docs/**/*.md'
 ```
 
 ## Trap 3: migration numbers collide across forks

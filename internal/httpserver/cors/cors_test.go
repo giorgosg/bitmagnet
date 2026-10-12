@@ -15,7 +15,7 @@ import (
 )
 
 // preflightAllows reports the Access-Control-Allow-Headers value returned for a
-// preflight asking for the given header, on an engine built from the default config.
+// preflight asking for the given header, with an explicitly allowed origin and the default header policy.
 //
 // The requested name is lowercased, because that is what a browser sends: the
 // Fetch standard guarantees CORS-unsafe request-header names in
@@ -25,11 +25,13 @@ func preflightAllows(t *testing.T, requested string) string {
 
 	gin.SetMode(gin.TestMode)
 
-	engine, err := httpserver.NewEngine(httpserver.NewDefaultConfig())
+	cfg := httpserver.NewDefaultConfig()
+	cfg.Cors.AllowedOrigins = []string{"https://attacker.example"}
+	engine, err := httpserver.NewEngine(cfg)
 	require.NoError(t, err)
 
 	result := cors.New(cors.Params{
-		Config: httpserver.NewDefaultConfig(),
+		Config: cfg,
 		Logger: zap.NewNop().Sugar(),
 	})
 	require.NoError(t, result.Option.Apply(engine))
@@ -72,4 +74,63 @@ func TestDefaultConfig_CorsDebugIsOff(t *testing.T) {
 
 	assert.False(t, httpserver.NewDefaultConfig().Cors.Debug,
 		"CORS debug logging should not be on by default")
+}
+
+func TestCrossOriginPolicy(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		origins []string
+		origin  string
+		allowed string
+	}{
+		{
+			name:    "default denies",
+			origins: httpserver.NewDefaultConfig().Cors.AllowedOrigins,
+			origin:  "https://other.example",
+		},
+		{name: "empty denies", origins: []string{}, origin: "https://other.example"},
+		{
+			name:    "explicit allows",
+			origins: []string{"https://ui.example"},
+			origin:  "https://ui.example",
+			allowed: "https://ui.example",
+		},
+		{name: "explicit refuses others", origins: []string{"https://ui.example"}, origin: "https://other.example"},
+		{name: "wildcard opt in", origins: []string{"*"}, origin: "https://other.example", allowed: "*"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := httpserver.NewDefaultConfig()
+			cfg.Cors.AllowedOrigins = tc.origins
+			engine, err := httpserver.NewEngine(cfg)
+			require.NoError(t, err)
+			require.NoError(
+				t,
+				cors.New(cors.Params{Config: cfg, Logger: zap.NewNop().Sugar()}).Option.Apply(engine),
+			)
+			engine.POST("/graphql", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+			for _, method := range []string{http.MethodPost, http.MethodOptions} {
+				req := httptest.NewRequestWithContext(t.Context(), method, "/graphql", nil)
+				req.Header.Set("Origin", tc.origin)
+
+				if method == http.MethodOptions {
+					req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+					req.Header.Set("Access-Control-Request-Headers", "content-type")
+				}
+
+				rec := httptest.NewRecorder()
+				engine.ServeHTTP(rec, req)
+				assert.Equal(t, tc.allowed, rec.Header().Get("Access-Control-Allow-Origin"), method)
+			}
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/graphql", nil)
+			rec := httptest.NewRecorder()
+			engine.ServeHTTP(rec, req)
+			assert.Equal(t, http.StatusOK, rec.Code, "same-origin and non-browser requests still work")
+		})
+	}
 }

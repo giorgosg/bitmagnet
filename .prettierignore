@@ -1,7 +1,5 @@
 bitmagnet.io/schemas/**/*.*
-webui/dist/**/*.*
-webui/src/app/graphql/generated/**/*.*
-webui/src/app/i18n/translations/*.json
+# Legacy local Angular build cache (absent in a fresh checkout).
 webui/.angular
 
 # Untracked local files. These are gitignored, but Prettier reads .prettierignore

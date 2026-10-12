@@ -25,7 +25,11 @@ As a rough guide, you should allow around 300MB RAM for BitMagnet, and at least 
 
 ## I've started **bitmagnet** for the first time and am not seeing torrents right away, is something wrong?
 
-If everything is working, **bitmagnet** should begin showing torrents in the web UI within a maximum of 10 minutes (which is its cache TTL). The refresh button at the top of the torrent listing is a cache buster - use it to see new torrent content in real time. Bear in mind that when a torrent is inserted into the database, a background queue job must run before it will become available in the UI. If you're importing thousands or millions of torrents, it might therefore take a while for everything to show. Check the next question if you're still not seeing torrents.
+After a torrent is inserted into the database, its background processing job must run
+before it becomes searchable through GraphQL or Torznab. A large import can therefore
+take time to appear in search results. Check worker health and queue progress as described
+below. Browser display and refresh behavior depend on your separately deployed UI;
+this fork does not ship a torrent listing or refresh button.
 
 ## **bitmagnet** isn't finding any new torrents, what's wrong?
 
@@ -37,13 +41,11 @@ If everything is working, **bitmagnet** should begin showing torrents in the web
 >
 > Note that some Windows users have reported issues: if you are having issues on Windows, then for now it's advisable to run the software on Linux or MacOS instead.
 
-**bitmagnet** now shows its health status in the main toolbar: It will show a tick for health, a cross for unhealthy or sometimes 3 dots for pending. Click on it to open the health dialog and check that all workers are running and healthy.
-
-![WebUI health check screenshot](/assets/images/webui-health-check.png)
+Query `health` and `workers.listAll` through GraphQL to check health results and started workers, or inspect your separately deployed UI. This fork has no bundled toolbar or dashboard.
 
 The most common issues are networking, firewall or a VPN misconfigurations preventing **bitmagnet** from connecting to the DHT. Additionally, the TMDB API is blocked in certain countries; if you are in an affected country you may need to either disable the TMDB integration with the `tmdb.enabled` configuration key, or use a VPN. Configuring a personal TMDB API key (or disabling TMDB) will make the queue run a **lot** faster.
 
-The dashboard can be used to monitor queue throughput. On the queues dashboard, the following would indicate a problem:
+Use the GraphQL `queue.jobs` and `queue.metrics` queries to monitor queue progress. The following can indicate a problem:
 
 - A high number of pending jobs, and the number of processed jobs not increasing over time
 - A high number of failed jobs
@@ -51,7 +53,7 @@ The dashboard can be used to monitor queue throughput. On the queues dashboard, 
 
 ## Why doesn't **bitmagnet** show me exactly how many torrents it has indexed?
 
-Torrents are indexed to a Postgres database, and Postgres is notoriously slow in counting large numbers of rows. To provide acceptable performance, **bitmagnet** uses a strategy it calls a "budgeted count". This takes advantage of the fact that the Postgres query planner can provide an estimated count, along with the total cost of executing the count query. If the cost exceeds the budget, we return the estimate, and the UI will show an estimate symbol `~`. If the cost is within budget, we return the exact count. For large result sets, you will probably always be seeing an estimate.
+Torrents are indexed to a Postgres database, and Postgres is notoriously slow in counting large numbers of rows. To provide acceptable performance, **bitmagnet** uses a strategy it calls a "budgeted count". This takes advantage of the fact that the Postgres query planner can provide an estimated count, along with the total cost of executing the count query. If the cost exceeds the budget, GraphQL returns an estimate with `totalCountIsEstimate: true`. If the cost is within budget, we return the exact count. For large result sets, you will probably always be seeing an estimate.
 
 ## At what rate will **bitmagnet** crawl torrents from the DHT?
 
@@ -59,7 +61,7 @@ This will depend on a number of factors, including your hardware and network con
 
 ## How can I see exactly how many torrents **bitmagnet** has crawled in the current session?
 
-The new dashboard shows throughput of the crawler and job queue. Alternatively, visit the metrics endpoint at `/metrics` and check the metric `bitmagnet_dht_crawler_persisted_total`. `{entity="Torrent"}` corresponds to newly crawled torrents, and `{entity="TorrentsTorrentSource"}` corresponds to torrents that were rediscovered and had their seeders/leechers count, and last-seen-on date updated.
+Use an authenticated request to the metrics endpoint at `/metrics` and check the metric `bitmagnet_dht_crawler_persisted_total`. `{entity="Torrent"}` corresponds to newly crawled torrents, and `{entity="TorrentsTorrentSource"}` corresponds to torrents that were rediscovered and had their seeders/leechers count, and last-seen-on date updated.
 
 ## How are the seeders/leechers numbers determined for torrents crawled from the DHT?
 

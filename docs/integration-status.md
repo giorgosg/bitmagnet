@@ -119,10 +119,13 @@ transaction, both serialisation points in the auth path, and the anonymous-acces
 findings. `files_count`/`size` was settled without a backfill: `size` keeps the total
 length, padding included.
 
-Still open, as of 2026-10-11:
+Prepared locally, awaiting integration (2026-10-12):
 
-- **The same-origin CORS default**, decided and deferred to the release that removes the
-  Angular UI, whose dev server is the one caller relying on `*`.
+- **Remove the bundled Angular UI and deny cross-origin browser reads by default.**
+  Retain the disk-served UI option and move pinned Prettier to root tooling.
+  Regression tests were observed red for the bundled UI registration and root redirect,
+  the empty/default origin policy, and serving an external UI at the former `/webui`
+  mount, then passed after the change.
 
 The crawler peer and scrape loops' cancellation finding was fixed in #90. A deterministic
 test observed both loops walking all remaining nodes after cancellation before the fix.

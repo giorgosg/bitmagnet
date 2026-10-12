@@ -26,9 +26,7 @@
             protobuf
             protoc-gen-go
             ruby
-          ] ++ (if stdenv.isLinux then [
-            chromium
-          ] else []);
+          ];
         };
       };
     });

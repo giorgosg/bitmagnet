@@ -24,7 +24,7 @@ type CorsConfig struct {
 	// An origin may contain a wildcard (*) to replace 0 or more characters
 	// (i.e.: http://*.domain.com). Usage of wildcards implies a small performance penalty.
 	// Only one wildcard can be used per origin.
-	// Default value is ["*"]
+	// Empty (the default) denies cross-origin browser access.
 	AllowedOrigins []string
 	// AllowedMethods is a list of methods the client is allowed to use with
 	// cross-domain requests. Default value is simple methods (HEAD, GET and POST).
@@ -59,17 +59,14 @@ type CorsConfig struct {
 	Debug bool
 }
 
-// StaticConfig mounts a directory of static files, for serving a web UI that is
-// not the bundled one. The bundled UI is compiled into the binary and cannot be
-// replaced without rebuilding it; this is the seam for an alternative.
+// StaticConfig mounts a separately built web UI from disk.
 type StaticConfig struct {
 	// Dir is the directory to serve. Empty - the default - disables the mount
 	// entirely, which is why an absent directory is not an error and a configured
 	// one that does not exist is.
 	Dir string
-	// Path is where it mounts. It cannot be "/", because the bundled web UI already
-	// redirects the root, and two options claiming the same route make gin panic at
-	// startup rather than report a conflict.
+	// Path is where it mounts. It cannot be "/": a root wildcard conflicts with
+	// the API routes and makes gin panic at startup.
 	Path string
 }
 
@@ -78,11 +75,7 @@ func NewDefaultConfig() Config {
 		LocalAddress: ":3333",
 		GinMode:      "release",
 		Cors: CorsConfig{
-			// AllowedOrigins stays permissive: the bundled web UI is served from the
-			// same origin and needs no CORS at all, but serving it from a separate
-			// origin is a supported deployment, and narrowing this would break those
-			// silently. Tightening it is an operator decision - see docs/auth.md.
-			AllowedOrigins: []string{"*"},
+			AllowedOrigins: []string{},
 			// Only the headers the server actually reads. "*" reflected back whatever
 			// a caller asked for, which grants more than anything here needs.
 			// Literals rather than the constants that define them: those live in

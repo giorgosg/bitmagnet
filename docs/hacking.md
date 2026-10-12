@@ -8,8 +8,8 @@ this covers _how to work on them_.
 ## Toolchain
 
 `flake.nix` provides a dev shell — Go, go-task, Node 22, golangci-lint, protoc,
-Ruby/Jekyll for the docsite, and Chromium on Linux. Prettier is deliberately not in it;
-the web UI's pinned copy is the only one that should ever run. `direnv allow` or `nix develop` gets
+Ruby/Jekyll for the docsite. Prettier is deliberately not in it;
+the root package's pinned copy, installed by `task install-tools`, is the one to run. `direnv allow` or `nix develop` gets
 you a working environment. Without Nix you need Go, go-task, Node 22, PostgreSQL, and —
 only if you touch protobufs — `protoc`.
 
@@ -17,24 +17,16 @@ Two things the shell does **not** supply: PostgreSQL, which most targets want an
 `docker-compose.yml` at the root brings up, and a `goose` binary, which only
 `task create-migration` needs.
 
-Everything is driven by [`Taskfile.yml`](../Taskfile.yml) (go-task, not `make`). Two
-targets worth knowing that AGENTS.md doesn't list:
+Everything is driven by [`Taskfile.yml`](../Taskfile.yml) (go-task, not `make`). One
+target worth knowing that AGENTS.md doesn't list:
 
 ```bash
-task serve-webui     # Angular dev server on :3334, calling bitmagnet cross-origin
 task serve-docsite   # the Jekyll site under bitmagnet.io/
 ```
 
-`serve-webui` has no proxy: `webui/src/environments/environment.ts` points at an absolute
-`http://localhost:3333/graphql`, so the browser makes a cross-origin request and it works
-only because `http_server.cors.allowed_origins` defaults to `*`. The production build
-replaces that file with `environment.embedded.ts`, which derives the endpoint from
-`window.location` and is therefore same-origin.
-
-The web UI has no standalone test target. Its former Karma specs only instantiated each
-component and asserted that it existed, so they duplicated the production build while
-providing no behavioral coverage. `task lint-webui` checks the TypeScript and templates;
-`task build-webui` is the compile-time and bundling check run by CI.
+The fork ships no bundled frontend. Serve a separately built UI with
+`http_server.static.dir`, or deploy it behind the same reverse proxy as the API.
+Cross-origin browser deployments must set `http_server.cors.allowed_origins` explicitly.
 
 ## CI cost controls
 
@@ -44,12 +36,9 @@ GitHub merge button skips the duplicate checks; a direct push still runs them.
 
 Container builds are deliberately separate. They run when a Docker build input changes
 and once a week to catch image or registry drift, rather than spending roughly ten runner
-minutes on every source-only pull request. CodeQL scans Go and TypeScript on pull requests
+minutes on every source-only pull request. CodeQL scans Go on pull requests
 and weekly; the docsite's only Ruby source is the 14-line schema-copy plugin and does not
 justify a runner for every scan.
-
-`serve-webui` is how to iterate on the web UI without rebuilding the committed
-`webui/dist` on every change.
 
 ## Adding a subsystem
 
@@ -72,8 +61,8 @@ before writing your own, whatever you think of the features.
 
 ## Changing the GraphQL API
 
-Beyond the schema-edit, `task gen-gql`, resolver, `task gen-webui-graphql` cycle in
-AGENTS.md: any third-party client generated from introspection needs regenerating too.
+After editing the schema, running `task gen-gql` and implementing the resolver,
+regenerate any external client that consumes the changed fields.
 The schema is the contract, and nothing outside this repo learns that it moved.
 
 ## Testing at realistic scale
