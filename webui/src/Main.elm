@@ -1,4 +1,4 @@
-port module Main exposing (Refresh(..), main, refreshFailure)
+port module Main exposing (Refresh(..), main, refreshFailure, viewResultList)
 
 import ApiError
 import ApiKeys
@@ -3668,13 +3668,44 @@ viewResults model =
             else
                 div [ class "results" ]
                     [ p [ class "tally" ] [ text (tally feed) ]
-                    , div
-                        [ class "list"
-                        , id "results"
-                        , on "scroll" (Decode.map Scrolled Decode.value)
-                        ]
-                        [ InfiniteList.view (listConfig model) model.infiniteList feed.items ]
+                    , viewResultList feed (InfiniteList.view (listConfig model) model.infiniteList feed.items)
                     ]
+
+
+{-| Keep the continuation indicator outside the virtualized rows so its height does
+not enter the virtualizer's item calculations. Availability, rather than an active
+request, controls its presence.
+-}
+viewResultList : { feed | hasNextPage : Bool, fetching : Bool } -> Html Msg -> Html Msg
+viewResultList feed rows =
+    div
+        [ class "list"
+        , id "results"
+        , on "scroll" (Decode.map Scrolled Decode.value)
+        ]
+        (rows
+            :: (if feed.hasNextPage then
+                    [ div
+                        [ class "pagination-indicator"
+                        , attribute "role" "status"
+                        ]
+                        [ span [ class "pagination-spinner", attribute "aria-hidden" "true" ] []
+                        , span [ class "pagination-label" ]
+                            [ text
+                                (if feed.fetching then
+                                    "Loading more results…"
+
+                                 else
+                                    "More results below"
+                                )
+                            ]
+                        ]
+                    ]
+
+                else
+                    []
+               )
+        )
 
 
 listConfig : Model -> InfiniteList.Config Item Msg

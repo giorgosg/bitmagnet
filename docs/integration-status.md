@@ -106,6 +106,7 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#91](https://github.com/giorgosg/bitmagnet/pull/91) | Record the metadata request integration                                     | local                                                                | Documentation only; #90 CI and regression suite passed                                                      |
 | [#92](https://github.com/giorgosg/bitmagnet/pull/92) | Remove the bundled Angular UI; deny cross-origin browser reads by default   | local                                                                | UI registration/root redirect, empty/default CORS and static `/webui` tests observed red                    |
 | [#93](https://github.com/giorgosg/magnes/pull/93)    | Import Magnes history and bundle the Elm UI by default                      | magnes-ui `fd5be8f`, 91 commits                                      | Bundled HTTP routes and packaged-browser smoke observed red; 831 Elm and 82 credentialed browser tests pass |
+| [#94](https://github.com/giorgosg/magnes/pull/94)    | Show a continuation spinner below torrent results                           | local                                                                | Missing footer observed red in three Elm tests; 835 Elm tests and Chromium pagination checks pass           |
 
 ## In flight
 
