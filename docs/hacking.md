@@ -32,6 +32,10 @@ executable embeds the HTML, JavaScript, CSS and favicon; no asset directory is n
 runtime. Docker builds the UI on the build host before cross-compiling Go, and GoReleaser
 builds it once before compiling its platform binaries.
 
+The GoReleaser configuration uses version 2 and the current `archives.ids` and
+`format_overrides.formats` fields. Validate it with `goreleaser check` before changing
+release packaging; the release workflow installs GoReleaser's latest version.
+
 `task build-backend` and plain `go build ./...` omit the bundle. This keeps generators,
 backend development and database tests independent of Elm. Building Go directly with
 `-tags webui` requires `task build-ui` first; a missing bundle fails compilation.

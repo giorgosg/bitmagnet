@@ -1,3 +1,5 @@
+version: 2
+
 before:
   hooks:
     - go mod tidy
@@ -38,11 +40,12 @@ builds:
 
 archives:
   - id: bitmagnet
-    builds:
+    ids:
       - bitmagnet
     format_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
     name_template: >-
       {{ .ProjectName }}_
       {{- .Version }}_

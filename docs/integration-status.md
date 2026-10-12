@@ -108,9 +108,9 @@ review in [porting.md](porting.md) and a test seen **red**.
 
 ## In flight
 
-| PR                    | Change                                                 | Source                          | Validation                                                                                                  |
-| --------------------- | ------------------------------------------------------ | ------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `codex/import-elm-ui` | Import Magnes history and bundle the Elm UI by default | magnes-ui `fd5be8f`, 91 commits | Bundled HTTP routes and packaged-browser smoke observed red; 831 Elm and 82 credentialed browser tests pass |
+| PR                                                | Change                                                 | Source                          | Validation                                                                                                  |
+| ------------------------------------------------- | ------------------------------------------------------ | ------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| [#93](https://github.com/giorgosg/magnes/pull/93) | Import Magnes history and bundle the Elm UI by default | magnes-ui `fd5be8f`, 91 commits | Bundled HTTP routes and packaged-browser smoke observed red; 831 Elm and 82 credentialed browser tests pass |
 
 ## The static review findings
 
