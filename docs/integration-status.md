@@ -105,6 +105,8 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#90](https://github.com/giorgosg/bitmagnet/pull/90) | Race metadata requests under shared and per-hash limits                     | lodestone `751a09607`, redesigned; local finding 0008b               | Stalled peer, TCP cancellation and node loops observed red     |
 | [#91](https://github.com/giorgosg/bitmagnet/pull/91) | Record the metadata request integration                                     | local                                                                | Documentation only; #90 CI and regression suite passed         |
 
+| [#92](https://github.com/giorgosg/bitmagnet/pull/92) | Remove the bundled Angular UI; deny cross-origin browser reads by default | local | UI registration/root redirect, empty/default CORS and static `/webui` tests observed red |
+
 ## In flight
 
 Nothing currently in flight.
@@ -119,13 +121,9 @@ transaction, both serialisation points in the auth path, and the anonymous-acces
 findings. `files_count`/`size` was settled without a backfill: `size` keeps the total
 length, padding included.
 
-Prepared locally, awaiting integration (2026-10-12):
-
-- **Remove the bundled Angular UI and deny cross-origin browser reads by default.**
-  Retain the disk-served UI option and move pinned Prettier to root tooling.
-  Regression tests were observed red for the bundled UI registration and root redirect,
-  the empty/default origin policy, and serving an external UI at the former `/webui`
-  mount, then passed after the change.
+The same-origin CORS default is resolved by #92 alongside removal of the bundled Angular
+UI. Explicit cross-origin allowlists remain supported; empty/default policies and the
+former bundled route behavior were observed red before the change.
 
 The crawler peer and scrape loops' cancellation finding was fixed in #90. A deterministic
 test observed both loops walking all remaining nodes after cancellation before the fix.
