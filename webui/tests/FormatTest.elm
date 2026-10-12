@@ -1,0 +1,61 @@
+module FormatTest exposing (suite)
+
+import Expect
+import Format
+import Test exposing (Test, describe, test)
+import Time
+
+
+{-| 2026-08-25T14:03:07Z.
+-}
+moment : Time.Posix
+moment =
+    Time.millisToPosix 1787666587000
+
+
+suite : Test
+suite =
+    describe "Format"
+        [ describe "date"
+            [ test "is the sortable, locale-free form" <|
+                \_ ->
+                    Format.date Time.utc moment
+                        |> Expect.equal "2026-08-25"
+            ]
+        , describe "time"
+            [ test "is the clock time to the minute" <|
+                \_ ->
+                    Format.time Time.utc moment
+                        |> Expect.equal "14:03"
+            , test "pads a single-digit hour and minute" <|
+                \_ ->
+                    -- 2026-08-25T04:07:00Z
+                    Format.time Time.utc (Time.millisToPosix 1787630820000)
+                        |> Expect.equal "04:07"
+            ]
+        , describe "dateTime"
+            [ test "adds the clock time to the date" <|
+                \_ ->
+                    Format.dateTime Time.utc moment
+                        |> Expect.equal "2026-08-25 14:03"
+            , test "pads a single-digit hour and minute" <|
+                \_ ->
+                    -- 2026-08-25T04:07:00Z
+                    Format.dateTime Time.utc (Time.millisToPosix 1787630820000)
+                        |> Expect.equal "2026-08-25 04:07"
+            , test "is read in the given zone, not UTC" <|
+                \_ ->
+                    Format.dateTime (Time.customZone 90 []) moment
+                        |> Expect.equal "2026-08-25 15:33"
+            ]
+        , describe "series"
+            [ test "joins the last two with the conjunction and the rest with commas" <|
+                \_ ->
+                    [ Format.series "and" []
+                    , Format.series "and" [ "created" ]
+                    , Format.series "or" [ "pending", "retry" ]
+                    , Format.series "and" [ "created", "processed", "failed" ]
+                    ]
+                        |> Expect.equal [ "", "created", "pending or retry", "created, processed and failed" ]
+            ]
+        ]

@@ -1,0 +1,352 @@
+// The credentialed suite's server side: one process that stands up everything a signed-in
+// browser test needs, and takes it all down again.
+//
+// Playwright's `webServer` starts a command and waits for a URL, but it cannot read that
+// command's stdout — and the bootstrap Invitation this suite registers through is printed
+// on the fixture server's stdout. So the order is inverted here rather than split across a
+// globalSetup: this script starts the fixture server, reads its announcement, registers the
+// throwaway administrator, writes the credentials, and only then starts the dev server that
+// Playwright is waiting on. By the time the first test runs, the credentials file exists.
+//
+// Nothing here is a secret at rest. The password is generated per run and the User it
+// belongs to lives in a database that is dropped when this process exits, so the file is a
+// handle on something already gone by the time anyone could read it. See e2e/README.md.
+
+const childProcess = require("child_process");
+const crypto = require("crypto");
+const fs = require("fs");
+const net = require("net");
+const os = require("os");
+const path = require("path");
+
+const root = path.join(__dirname, "..", "..");
+const bitmagnet = process.env.MAGNES_E2E_BITMAGNET || path.join(root, "..", "bitmagnet");
+const testdb = process.env.MAGNES_E2E_TESTDB || path.join(root, "..", "btm-testdb");
+const credentialsPath = process.env.MAGNES_E2E_CREDENTIALS;
+
+// The instance this suite expects, stated rather than inherited: the defaults these match
+// are bitmagnet's, and a change there should not quietly change what the suite is testing.
+//
+// The login throttle is the one that is not a default. bitmagnet buckets it by client
+// address and every request arrives from the development proxy, so the whole suite shares
+// one bucket: at the shipped 30 a minute after a burst of 5, parallel tests that each sign
+// in start being refused for reasons none of them are about. A suite that wants to *provoke*
+// throttling — the wait state ticket 09 could only assert against a stub — wants the
+// opposite of this, and its own fixture server, so it will set these to 1 where it stands
+// them up rather than reaching for a knob left here for it.
+const fixtureFlags = [
+  "--anonymous-access=true",
+  "--invitation-required=true",
+  "--login-requests-per-minute=6000",
+  "--login-request-burst=600",
+];
+
+// Everything this process is responsible for killing, newest first.
+const shutdownSteps = [];
+let shuttingDown = false;
+
+async function main() {
+  if (!credentialsPath) {
+    throw new Error("MAGNES_E2E_CREDENTIALS must name where to write the credentials");
+  }
+
+  buildBundle();
+
+  const templateDSN = seedTemplateDSN();
+  await requireReachable(templateDSN);
+
+  const binary = buildFixtureServer();
+  const announcement = await startFixtureServer(binary, templateDSN);
+  const credentials = await registerAdministrator(announcement);
+
+  fs.mkdirSync(path.dirname(credentialsPath), { recursive: true });
+  fs.writeFileSync(
+    credentialsPath,
+    JSON.stringify(
+      {
+        // The pid is how e2e/harness/teardown.js finds this process to stop it politely.
+        // Playwright's own teardown kills the web server hard enough that the database drop
+        // does not finish, and a dropped connection is not the same as a dropped database.
+        pid: process.pid,
+        ...credentials,
+        graphqlEndpoint: announcement.graphqlEndpoint,
+      },
+      null,
+      2,
+    ),
+    { mode: 0o600 },
+  );
+  shutdownSteps.push(() => fs.rmSync(credentialsPath, { force: true }));
+
+  startDevServer(announcement.address);
+}
+
+// The Elm bundle dev.js serves. Built here rather than by an npm script wrapping this one,
+// because npm does not forward SIGTERM to the script it runs: with it in the middle, this
+// process is never told to stop, and the fixture server's database is never dropped.
+function buildBundle() {
+  childProcess.execFileSync("npm", ["run", "build"], { cwd: root, stdio: "inherit" });
+}
+
+// The connection string for the instance holding the seed template. bitmagnet's dbtest
+// clones from it; provisioning it is btm-testdb's job and not this suite's.
+function seedTemplateDSN() {
+  if (process.env.TEST_POSTGRES_TEMPLATE_DSN) return process.env.TEST_POSTGRES_TEMPLATE_DSN;
+
+  const testdbCommand = path.join(testdb, "bin", "testdb");
+  if (!fs.existsSync(testdbCommand)) {
+    throw new Error(
+      `no seed template: ${testdbCommand} is missing, and TEST_POSTGRES_TEMPLATE_DSN is ` +
+        "unset. See e2e/README.md.",
+    );
+  }
+
+  try {
+    return childProcess.execFileSync(testdbCommand, ["url"], { encoding: "utf8" }).trim();
+  } catch (error) {
+    throw new Error(
+      `could not ask btm-testdb for its connection string (${error.message}). ` +
+        "Is the instance up? `bin/testdb status`.",
+    );
+  }
+}
+
+// Fails on a stopped database before a minute of `go build` and a Go panic have gone by.
+// Without this the first sign of trouble is a stack trace from the fixture server, with
+// "connection refused" somewhere inside it — true, and a poor way to learn that a container
+// is not running. A TCP connect is enough to tell "not running" from anything subtler, and
+// needs no PostgreSQL client here.
+async function requireReachable(dsn) {
+  let target;
+  try {
+    const parsed = new URL(dsn);
+    target = { host: parsed.hostname, port: Number(parsed.port) || 5432 };
+  } catch {
+    // An unparseable DSN is not this check's business to report; let the server say so.
+    return;
+  }
+
+  const reachable = await new Promise((resolve) => {
+    const socket = net.connect(target);
+    const settle = (answer) => {
+      socket.destroy();
+      resolve(answer);
+    };
+
+    socket.setTimeout(5_000);
+    socket.on("connect", () => settle(true));
+    socket.on("timeout", () => settle(false));
+    socket.on("error", () => settle(false));
+  });
+
+  if (!reachable) {
+    throw new Error(
+      `nothing is listening at ${target.host}:${target.port}, where the seed template ` +
+        "should be. Is the test database up? `cd ../btm-testdb && bin/testdb status`.",
+    );
+  }
+}
+
+// Built rather than `go run`, because there is a signal to deliver later. `go run` is a
+// parent that compiles and execs a second process, and killing the one whose pid we hold
+// leaves the other serving — with a cloned database it will now never drop.
+function buildFixtureServer() {
+  if (!fs.existsSync(path.join(bitmagnet, "go.mod"))) {
+    throw new Error(`no bitmagnet checkout at ${bitmagnet}. See e2e/README.md.`);
+  }
+
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "magnes-e2e-"));
+  shutdownSteps.push(() => fs.rmSync(directory, { recursive: true, force: true }));
+
+  const binary = path.join(directory, "fixture-server");
+  childProcess.execFileSync("go", ["build", "-o", binary, "./internal/dev"], {
+    cwd: bitmagnet,
+    stdio: ["ignore", "ignore", "inherit"],
+  });
+
+  return binary;
+}
+
+// Starts the server and resolves with the announcement it prints: one line of JSON naming
+// its address and GraphQL endpoint. Its stderr is passed through.
+//
+// bitmagnet documents that announcement as the only thing on stdout, and gin writes to
+// stderr to keep it so. Its logger does not: since bitmagnet #82 the anon-role translation
+// logs as the server starts, and so does each worker, all on stdout and ahead of the
+// announcement (observed 2026-10-08 against trunk at 51a7c2895; filed in bitmagnet's
+// .scratch as test-fixtures 03). So every other line on stdout is passed on to stderr, before
+// the announcement and after it, where a reason the server failed to come up is still seen.
+function startFixtureServer(binary, templateDSN) {
+  const child = childProcess.spawn(
+    binary,
+    [
+      "fixture",
+      "serve",
+      "--address",
+      "127.0.0.1:0",
+      ...fixtureFlags,
+    ],
+    {
+      cwd: bitmagnet,
+      env: { ...process.env, TEST_POSTGRES_TEMPLATE_DSN: templateDSN },
+      stdio: ["ignore", "pipe", "inherit"],
+    },
+  );
+
+  // Waited for on the way out, not just signalled: the clone is dropped in an fx OnStop
+  // hook, so exiting before that finishes is how a stray bitmagnet_test_* database is left
+  // behind on the fixture instance.
+  shutdownSteps.push(() => stop(child, "the fixture server"));
+
+  return new Promise((resolve, reject) => {
+    let buffered = "";
+    let announced = false;
+
+    // Its own deadline, because the one that would otherwise apply is Playwright's
+    // web-server timeout — and reaching that means Playwright kills this process, which is
+    // the path measured to be faster than the fixture server's database drop. Failing here
+    // instead keeps the cleanup ours.
+    const deadline = setTimeout(() => {
+      reject(new Error("the fixture server did not announce itself within 60 seconds"));
+    }, 60_000);
+
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      buffered += chunk;
+
+      let newline;
+      while ((newline = buffered.indexOf("\n")) >= 0) {
+        const line = buffered.slice(0, newline);
+        buffered = buffered.slice(newline + 1);
+
+        const announcement = announced ? null : readAnnouncement(line);
+        if (announcement) {
+          announced = true;
+          clearTimeout(deadline);
+          resolve(announcement);
+        } else {
+          process.stderr.write(`${line}\n`);
+        }
+      }
+    });
+
+    child.on("exit", (code) => {
+      clearTimeout(deadline);
+      reject(new Error(`the fixture server exited with ${code} before announcing itself`));
+    });
+    child.on("error", reject);
+  });
+}
+
+// The announcement, or null for any other line: a log line, coloured or as JSON, names no
+// address and GraphQL endpoint.
+function readAnnouncement(line) {
+  try {
+    const parsed = JSON.parse(line);
+    return parsed && parsed.graphqlEndpoint && parsed.address ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+// Claims the printed bootstrap Invitation, which makes this User an administrator — the
+// first registration through it always is. Done over HTTP rather than in a browser because
+// it has to happen before the browser has anything to talk to.
+async function registerAdministrator(announcement) {
+  const credentials = {
+    username: `e2e-admin-${crypto.randomBytes(4).toString("hex")}`,
+    // Comfortably past auth.password_min_entropy, and never the same twice.
+    password: crypto.randomBytes(24).toString("base64url"),
+  };
+
+  const response = await fetch(announcement.graphqlEndpoint, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      query:
+        "mutation Register($input: RegisterInput!) " +
+        "{ self { register(input: $input) { user { username role } } } }",
+      variables: {
+        input: {
+          invitationCode: announcement.invitationCode,
+          username: credentials.username,
+          password: credentials.password,
+        },
+      },
+    }),
+  });
+
+  const body = await response.json();
+  if (body.errors) {
+    throw new Error(`registering the throwaway administrator: ${JSON.stringify(body.errors)}`);
+  }
+
+  const role = body.data?.self?.register?.user?.role;
+  if (role !== "admin") {
+    // Every credentialed spec assumes administration is reachable. Finding out here says
+    // which assumption broke; finding out in a test says only that a screen was refused.
+    throw new Error(`the bootstrap Invitation produced a ${role}, not an admin`);
+  }
+
+  return credentials;
+}
+
+// The same development proxy a person uses, pointed at the fixture. It terminates TLS and
+// forwards /graphql with the browser's Host and Origin intact, which is what lets bitmagnet
+// issue its Secure, SameSite=Strict cookie to a page on localhost.
+function startDevServer(address) {
+  const child = childProcess.spawn(process.execPath, [path.join(root, "dev.js")], {
+    cwd: root,
+    env: { ...process.env, BITMAGNET_URL: address },
+    stdio: "inherit",
+  });
+
+  shutdownSteps.push(() => stop(child, "the dev server"));
+
+  child.on("exit", (code) => {
+    // Playwright is waiting on this server's URL; if it has gone there is nothing left to
+    // wait for, and holding the fixture open would only leak a database.
+    shutdown(code ?? 1);
+  });
+}
+
+function stop(child, what) {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    const forced = setTimeout(() => {
+      console.error(`${what} did not stop; killing it`);
+      child.kill("SIGKILL");
+    }, 10_000);
+
+    child.on("exit", () => {
+      clearTimeout(forced);
+      resolve();
+    });
+    child.kill("SIGTERM");
+  });
+}
+
+async function shutdown(code) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
+  for (const step of shutdownSteps.reverse()) {
+    try {
+      await step();
+    } catch (error) {
+      console.error(`while shutting down: ${error.message}`);
+    }
+  }
+
+  process.exit(code);
+}
+
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, () => shutdown(0));
+}
+
+main().catch(async (error) => {
+  console.error(`the credentialed harness could not start: ${error.message}`);
+  await shutdown(1);
+});

@@ -1,0 +1,815 @@
+module Route exposing (Access(..), BasePath, JobsParams, LoginParams, QueueStatsParams, RegisterParams, Route(..), SearchParams, TorrentEvent(..), TorrentStatsParams, basePath, emptyJobs, emptyQueueStats, emptySearch, emptyTorrentStats, fromUrl, guard, loginReturningTo, refreshInterval, returnDestination, sameQuestion, toHref)
+
+{-| Routes are real paths, not fragments — see the README.
+
+`toHref` is the inverse of the parser and is the only way links are built. Adding a
+variant breaks it at compile time rather than producing a dead link.
+
+-}
+
+import Facet exposing (Filters)
+import Identity
+import JobOrder exposing (JobOrder)
+import Magnes.Api.Enum.QueueJobStatus as QueueJobStatus exposing (QueueJobStatus)
+import QueueMetrics
+import Sort exposing (Sort)
+import StatsControls exposing (Controls)
+import Url exposing (Url)
+import Url.Builder as Builder
+import Url.Parser as Parser exposing ((</>), (<?>), Parser, oneOf, s, top)
+import Url.Parser.Query as Query
+
+
+type Route
+    = Search SearchParams
+    | Torrent String
+    | Login LoginParams
+    | Register RegisterParams
+    | UserOverview
+    | APIKeys
+    | AdminUsers
+    | AdminRoles
+    | AdminInvitations
+    | AdminQueue
+    | Status
+    | QueueJobs JobsParams
+    | TorrentStats TorrentStatsParams
+    | QueueStats QueueStatsParams
+    | NotFound
+
+
+type alias LoginParams =
+    { returnUrl : Maybe String }
+
+
+type alias RegisterParams =
+    { code : Maybe String }
+
+
+type Access
+    = PendingIdentity
+    | Allowed
+    | RedirectTo Route
+    | Refused String
+
+
+{-| The URL prefix where Magnes is mounted. An empty value means the origin root.
+Normalising it once keeps parsing and link building exact inverses.
+-}
+type BasePath
+    = BasePath String
+
+
+basePath : String -> BasePath
+basePath raw =
+    raw
+        |> String.split "/"
+        |> List.filter (not << String.isEmpty)
+        |> String.join "/"
+        |> (\path ->
+                if String.isEmpty path then
+                    BasePath ""
+
+                else
+                    BasePath ("/" ++ path)
+           )
+
+
+{-| Everything the URL says about a search. The model derives from this, never the
+reverse, so a search is always a link — the ordering included.
+-}
+type alias SearchParams =
+    { q : Maybe String
+    , sort : Sort
+    , filters : Filters
+    }
+
+
+emptySearch : SearchParams
+emptySearch =
+    { q = Nothing, sort = Sort.default, filters = Facet.empty }
+
+
+{-| Everything the URL says about the queue's jobs, so a filtered page of them is a link
+(ADR 0002). `page` counts from 1, as bitmagnet's does.
+-}
+type alias JobsParams =
+    { queues : List String
+    , statuses : List QueueJobStatus
+    , order : JobOrder
+    , page : Int
+    }
+
+
+emptyJobs : JobsParams
+emptyJobs =
+    { queues = [], statuses = [], order = JobOrder.default, page = 1 }
+
+
+{-| Everything the URL says about the torrent timeline: how far back, how coarsely, how
+often to look again, and which sources, so a view of the index's growth is a link (ADR
+0002). No source is all of them.
+-}
+type alias TorrentStatsParams =
+    { controls : Controls
+    , sources : List String
+    , event : TorrentEvent
+    }
+
+
+{-| The torrent events drawn from an answer that always contains both.
+-}
+type TorrentEvent
+    = AllTorrentEvents
+    | NewTorrents
+    | UpdatedTorrents
+
+
+emptyTorrentStats : TorrentStatsParams
+emptyTorrentStats =
+    { controls = StatsControls.default, sources = [], event = AllTorrentEvents }
+
+
+{-| Everything the URL says about the queue's statistics: how far back, how coarsely, how
+often to look again, and which queues and events to draw, so a view of the queue is a link
+(ADR 0002). No queue is all of them, and no event is all of them.
+
+The queues and events are picked out of the answer, not asked for: bitmagnet is asked about
+every queue (`question` says what is asked).
+
+-}
+type alias QueueStatsParams =
+    { controls : Controls
+    , queues : List String
+    , events : List QueueMetrics.Event
+    }
+
+
+emptyQueueStats : QueueStatsParams
+emptyQueueStats =
+    { controls = StatsControls.queueDefault, queues = [], events = [] }
+
+
+parser : Parser (Route -> a) a
+parser =
+    oneOf
+        [ Parser.map (searchWith Nothing Nothing [] []) top
+        , Parser.map searchWith
+            (s "search"
+                <?> Query.string "q"
+                <?> Query.string "sort"
+                <?> Query.custom Facet.contentParam identity
+                <?> Query.custom Facet.fileParam identity
+            )
+        , Parser.map Torrent (s "torrent" </> infoHash)
+        , Parser.map (Login << LoginParams) (s "login" <?> Query.string "returnUrl")
+        , Parser.map (Register << RegisterParams) (s "register" <?> Query.string "code")
+        , Parser.map UserOverview (s "account")
+        , Parser.map APIKeys (s "account" </> s "api-keys")
+        , Parser.map AdminUsers (s "admin" </> s "users")
+        , Parser.map AdminRoles (s "admin" </> s "roles")
+        , Parser.map AdminInvitations (s "admin" </> s "invitations")
+        , Parser.map AdminQueue (s "admin" </> s "queue")
+        , Parser.map Status (s "status")
+        , Parser.map jobsWith
+            (s "queue"
+                </> s "jobs"
+                <?> Query.custom "queue" identity
+                <?> Query.custom "status" identity
+                <?> Query.string "order"
+                <?> Query.string "direction"
+                <?> Query.int "page"
+            )
+        , Parser.map torrentStatsWith
+            (s "stats"
+                </> s "torrents"
+                <?> Query.string "timeframe"
+                <?> Query.string "resolution"
+                <?> Query.int "every"
+                <?> Query.string "refresh"
+                <?> Query.custom "source" identity
+                <?> Query.string "event"
+            )
+        , Parser.map queueStatsWith
+            (s "stats"
+                </> s "queue"
+                <?> Query.string "timeframe"
+                <?> Query.string "resolution"
+                <?> Query.int "every"
+                <?> Query.string "refresh"
+                <?> Query.custom "queue" identity
+                <?> Query.custom "event" identity
+            )
+        ]
+
+
+{-| Only a real info hash matches, so `/torrent/abc` falls through to `NotFound` instead
+of being sent to bitmagnet, which answers a malformed hash with a raw decoding error.
+Matching lowercases it too, so a link and a lookup always agree.
+-}
+infoHash : Parser (String -> a) a
+infoHash =
+    Parser.custom "INFO_HASH" <|
+        \segment ->
+            let
+                lowered =
+                    String.toLower segment
+            in
+            if String.length lowered == 40 && String.all Char.isHexDigit lowered then
+                Just lowered
+
+            else
+                Nothing
+
+
+searchWith : Maybe String -> Maybe String -> List String -> List String -> Route
+searchWith q sort contentValues fileValues =
+    Search
+        { q = q |> Maybe.andThen nonBlank
+        , sort = sort |> Maybe.map Sort.fromParam |> Maybe.withDefault Sort.default
+        , filters = Facet.fromQuery contentValues fileValues
+        }
+
+
+{-| As a search's filters do, unrecognised values are dropped rather than failing the page,
+so a link written against a later schema still opens a list.
+-}
+jobsWith : List String -> List String -> Maybe String -> Maybe String -> Maybe Int -> Route
+jobsWith queues statuses order direction page =
+    QueueJobs
+        { queues = List.filterMap nonBlank queues
+        , statuses = List.filterMap QueueJobStatus.fromString statuses
+        , order = JobOrder.fromParams order direction
+        , page = page |> Maybe.withDefault 1 |> max 1
+        }
+
+
+{-| As the jobs' filters do, drops what it does not recognise. The timeframe of everything is
+for a page bounded by what it holds, as the queue's statistics will be; the torrent query is
+not, so a link to it is read as the default.
+-}
+torrentStatsWith : Maybe String -> Maybe String -> Maybe Int -> Maybe String -> List String -> Maybe String -> Route
+torrentStatsWith timeframe resolution every refresh sources event =
+    TorrentStats
+        { controls =
+            StatsControls.fromParams
+                { defaults = StatsControls.default
+                , timeframes = StatsControls.boundedTimeframes
+                , timeframe = timeframe
+                , resolution = resolution
+                , every = every
+                , refresh = refresh
+                }
+        , sources = unique (List.filterMap nonBlank sources)
+        , event =
+            case event of
+                Just "new" ->
+                    NewTorrents
+
+                Just "updated" ->
+                    UpdatedTorrents
+
+                _ ->
+                    AllTorrentEvents
+        }
+
+
+{-| As the torrent timeline's does, drops what it does not recognise. Every timeframe is
+offered here, everything among them, since the query is bounded by what the queue holds.
+-}
+queueStatsWith : Maybe String -> Maybe String -> Maybe Int -> Maybe String -> List String -> List String -> Route
+queueStatsWith timeframe resolution every refresh queues events =
+    QueueStats
+        { controls =
+            StatsControls.fromParams
+                { defaults = StatsControls.queueDefault
+                , timeframes = StatsControls.allTimeframes
+                , timeframe = timeframe
+                , resolution = resolution
+                , every = every
+                , refresh = refresh
+                }
+        , queues = unique (List.filterMap nonBlank queues)
+        , events = unique (List.filterMap QueueMetrics.eventFromName events)
+        }
+
+
+{-| Each value once, where it was first named. A value named twice is chosen once: a chip is
+on or off, and `toHref` writes it once.
+-}
+unique : List a -> List a
+unique values =
+    List.foldl
+        (\value seen ->
+            if List.member value seen then
+                seen
+
+            else
+                seen ++ [ value ]
+        )
+        []
+        values
+
+
+nonBlank : String -> Maybe String
+nonBlank raw =
+    case String.trim raw of
+        "" ->
+            Nothing
+
+        trimmed ->
+            Just trimmed
+
+
+fromUrl : BasePath -> Url -> Route
+fromUrl (BasePath prefix) url =
+    pathWithin prefix url.path
+        |> Maybe.andThen
+            (\path ->
+                Parser.parse parser
+                    { url
+                        | path =
+                            if String.isEmpty path then
+                                "/"
+
+                            else
+                                path
+                    }
+            )
+        |> Maybe.withDefault NotFound
+
+
+pathWithin : String -> String -> Maybe String
+pathWithin prefix path =
+    if String.isEmpty prefix then
+        Just path
+
+    else if path == prefix then
+        Just "/"
+
+    else if String.startsWith (prefix ++ "/") path then
+        Just (String.dropLeft (String.length prefix) path)
+
+    else
+        Nothing
+
+
+{-| How often the page on this route asks again by itself, if it does. Every route is
+listed, with no catch-all, so that a page that is given a timer is not forgotten here.
+-}
+refreshInterval : Route -> Maybe Float
+refreshInterval route =
+    case route of
+        Search _ ->
+            Nothing
+
+        Torrent _ ->
+            Nothing
+
+        Login _ ->
+            Nothing
+
+        Register _ ->
+            Nothing
+
+        UserOverview ->
+            Nothing
+
+        APIKeys ->
+            Nothing
+
+        AdminUsers ->
+            Nothing
+
+        AdminRoles ->
+            Nothing
+
+        AdminInvitations ->
+            Nothing
+
+        AdminQueue ->
+            Nothing
+
+        Status ->
+            Nothing
+
+        QueueJobs _ ->
+            Nothing
+
+        TorrentStats params ->
+            StatsControls.refreshMillis params.controls.refresh
+
+        QueueStats params ->
+            StatsControls.refreshMillis params.controls.refresh
+
+        NotFound ->
+            Nothing
+
+
+{-| Whether two routes ask bitmagnet the same question, so that a page showing the answer to
+one need not ask again to show the other: how often to look again is not what to look at, and
+the statistics pages pick their events (and the queue's queues) out of an answer about all of them.
+-}
+sameQuestion : Route -> Route -> Bool
+sameQuestion one other =
+    question one == question other
+
+
+{-| The route reduced to what its page asks bitmagnet. Every route is listed, with no catch-all,
+for the reason `refreshInterval` is.
+-}
+question : Route -> Route
+question route =
+    case route of
+        Search _ ->
+            route
+
+        Torrent _ ->
+            route
+
+        Login _ ->
+            route
+
+        Register _ ->
+            route
+
+        UserOverview ->
+            route
+
+        APIKeys ->
+            route
+
+        AdminUsers ->
+            route
+
+        AdminRoles ->
+            route
+
+        AdminInvitations ->
+            route
+
+        AdminQueue ->
+            route
+
+        Status ->
+            route
+
+        QueueJobs _ ->
+            route
+
+        TorrentStats params ->
+            TorrentStats { params | controls = StatsControls.withoutRefresh params.controls, event = AllTorrentEvents }
+
+        QueueStats params ->
+            QueueStats { params | controls = StatsControls.withoutRefresh params.controls, queues = [], events = [] }
+
+        NotFound ->
+            route
+
+
+toHref : BasePath -> Route -> String
+toHref (BasePath prefix) route =
+    prefix
+        ++ (case route of
+                Search params ->
+                    -- The default sort is left out, so an ordinary search is still a bare ?q=.
+                    Builder.absolute [ "search" ]
+                        (List.filterMap identity
+                            [ Maybe.map (Builder.string "q") params.q
+                            , if params.sort == Sort.default then
+                                Nothing
+
+                              else
+                                Just (Builder.string "sort" (Sort.toParam params.sort))
+                            ]
+                            ++ Facet.toQueryParams params.filters
+                        )
+
+                Torrent hash ->
+                    Builder.absolute [ "torrent", hash ] []
+
+                Login params ->
+                    Builder.absolute [ "login" ]
+                        (Maybe.map (Builder.string "returnUrl") params.returnUrl
+                            |> Maybe.map List.singleton
+                            |> Maybe.withDefault []
+                        )
+
+                Register params ->
+                    Builder.absolute [ "register" ]
+                        (Maybe.map (Builder.string "code") params.code
+                            |> Maybe.map List.singleton
+                            |> Maybe.withDefault []
+                        )
+
+                UserOverview ->
+                    Builder.absolute [ "account" ] []
+
+                APIKeys ->
+                    Builder.absolute [ "account", "api-keys" ] []
+
+                AdminUsers ->
+                    Builder.absolute [ "admin", "users" ] []
+
+                AdminRoles ->
+                    Builder.absolute [ "admin", "roles" ] []
+
+                AdminInvitations ->
+                    Builder.absolute [ "admin", "invitations" ] []
+
+                AdminQueue ->
+                    Builder.absolute [ "admin", "queue" ] []
+
+                Status ->
+                    Builder.absolute [ "status" ] []
+
+                QueueJobs params ->
+                    Builder.absolute [ "queue", "jobs" ]
+                        (List.map (Builder.string "queue") params.queues
+                            ++ List.map (Builder.string "status" << QueueJobStatus.toString) params.statuses
+                            ++ JobOrder.toParams params.order
+                            ++ (if params.page == 1 then
+                                    []
+
+                                else
+                                    [ Builder.int "page" params.page ]
+                               )
+                        )
+
+                TorrentStats params ->
+                    Builder.absolute [ "stats", "torrents" ]
+                        (StatsControls.toParams StatsControls.default params.controls
+                            ++ List.map (Builder.string "source") params.sources
+                            ++ (case params.event of
+                                    AllTorrentEvents ->
+                                        []
+
+                                    NewTorrents ->
+                                        [ Builder.string "event" "new" ]
+
+                                    UpdatedTorrents ->
+                                        [ Builder.string "event" "updated" ]
+                               )
+                        )
+
+                QueueStats params ->
+                    Builder.absolute [ "stats", "queue" ]
+                        (StatsControls.toParams StatsControls.queueDefault params.controls
+                            ++ List.map (Builder.string "queue") params.queues
+                            ++ List.map (Builder.string "event" << QueueMetrics.eventName) params.events
+                        )
+
+                NotFound ->
+                    Builder.absolute [] []
+           )
+
+
+{-| Where login should land after it succeeds.
+
+The stored `returnUrl` came off the address bar, so it is attacker-supplied: a crafted
+`/login?returnUrl=https://evil.test` would otherwise turn Magnes' own login into an
+off-site redirect, which is exactly the shape a credential-phishing page wants. So this
+never navigates to the string. It re-parses it through the same parser the address bar
+goes through and returns a `Route`, which cannot name another origin at all.
+
+Anything that does not resolve to a real destination within the mount falls back to the
+default one. Login and registration are excluded because returning to them would bounce a
+User who has just signed in straight back to the form.
+
+-}
+returnDestination : BasePath -> Route -> Route
+returnDestination mount from =
+    storedReturnUrl from
+        |> Maybe.andThen internalPath
+        |> Maybe.map (fromUrl mount)
+        |> Maybe.andThen destination
+        |> Maybe.withDefault (Search emptySearch)
+
+
+storedReturnUrl : Route -> Maybe String
+storedReturnUrl route =
+    case route of
+        Login params ->
+            params.returnUrl
+
+        _ ->
+            Nothing
+
+
+{-| A single leading slash, and nothing that could start an authority. `//evil.test` is a
+protocol-relative URL, and browsers have historically treated a backslash as a slash in
+that position, so both are refused rather than normalized.
+-}
+internalPath : String -> Maybe Url
+internalPath raw =
+    if String.startsWith "/" raw && not (List.any (\prefix -> String.startsWith prefix raw) [ "//", "/\\" ]) then
+        let
+            ( path, query ) =
+                case String.split "?" raw of
+                    before :: rest ->
+                        ( before, String.join "?" rest |> nonBlank )
+
+                    [] ->
+                        ( raw, Nothing )
+        in
+        Just
+            { protocol = Url.Https
+            , host = ""
+            , port_ = Nothing
+            , path = path
+            , query = query
+            , fragment = Nothing
+            }
+
+    else
+        Nothing
+
+
+destination : Route -> Maybe Route
+destination route =
+    case route of
+        Login _ ->
+            Nothing
+
+        Register _ ->
+            Nothing
+
+        NotFound ->
+            Nothing
+
+        _ ->
+            Just route
+
+
+guard : BasePath -> Identity.Identity -> Route -> Access
+guard mount identity route =
+    case identity of
+        Identity.Unknown ->
+            PendingIdentity
+
+        Identity.Failed message ->
+            Refused message
+
+        Identity.Anonymous _ ->
+            anonymousAccess mount identity route
+
+        Identity.APIKeyAuthenticated _ _ _ ->
+            anonymousAccess mount identity route
+
+        Identity.UserAuthenticated _ _ ->
+            userAccess identity route
+
+
+anonymousAccess : BasePath -> Identity.Identity -> Route -> Access
+anonymousAccess mount identity route =
+    case route of
+        Status ->
+            requireHealth identity
+
+        QueueJobs _ ->
+            requireQueue identity
+
+        TorrentStats _ ->
+            requireTorrent identity
+
+        QueueStats _ ->
+            requireQueue identity
+
+        -- Refused rather than sent to sign in, as the queue's other pages are: see
+        -- `requireQueueAdministration`.
+        AdminQueue ->
+            requireQueueAdministration identity
+
+        UserOverview ->
+            loginRedirect mount route
+
+        APIKeys ->
+            loginRedirect mount route
+
+        AdminUsers ->
+            loginRedirect mount route
+
+        AdminRoles ->
+            loginRedirect mount route
+
+        AdminInvitations ->
+            loginRedirect mount route
+
+        _ ->
+            Allowed
+
+
+loginRedirect : BasePath -> Route -> Access
+loginRedirect mount route =
+    RedirectTo (loginReturningTo mount route)
+
+
+{-| The login form, asked to come back to `route` once it succeeds. The guard sends a route
+that needs a User here, and so does a password change, which signs the User out of the
+page it was made on.
+-}
+loginReturningTo : BasePath -> Route -> Route
+loginReturningTo mount route =
+    Login { returnUrl = Just (toHref mount route) }
+
+
+userAccess : Identity.Identity -> Route -> Access
+userAccess identity route =
+    case route of
+        Login _ ->
+            RedirectTo UserOverview
+
+        Register _ ->
+            RedirectTo UserOverview
+
+        AdminUsers ->
+            requireAdministration identity
+
+        AdminRoles ->
+            requireAdministration identity
+
+        AdminInvitations ->
+            requireAdministration identity
+
+        Status ->
+            requireHealth identity
+
+        QueueJobs _ ->
+            requireQueue identity
+
+        TorrentStats _ ->
+            requireTorrent identity
+
+        QueueStats _ ->
+            requireQueue identity
+
+        AdminQueue ->
+            requireQueueAdministration identity
+
+        _ ->
+            Allowed
+
+
+{-| Refused rather than sent to sign in, whoever is asking. `health::query` is in the
+baseline of the `anon` and `user` Roles, so Anonymous always holds it and signing in would
+not change the answer. An Identity without it is one whose Role was given less: `editor`
+holds nothing until an administrator grants it.
+-}
+requireHealth : Identity.Identity -> Access
+requireHealth =
+    require "health" "Your Identity does not permit reading bitmagnet's health."
+
+
+{-| Refused rather than sent to sign in, as `requireHealth` is. Signing in can grant it, but
+only to a User whose Role holds it, and the core `user` Role does not; a sign-in offered
+here would mostly lead to the same refusal.
+-}
+requireQueue : Identity.Identity -> Access
+requireQueue =
+    require "queue" "Your Identity does not permit reading bitmagnet's queue."
+
+
+{-| Refused rather than sent to sign in, as the other guards here refuse, and the refusal
+says what is missing. `torrent::query` is in the core `user` Role and in the `anon` Role while
+anonymous access is on and an administrator has granted it, which a development fixture does
+(`--anonymous-access`) and a new installation does not. An Identity refused it has been given
+a Role without it.
+-}
+requireTorrent : Identity.Identity -> Access
+requireTorrent =
+    require "torrent" "Your Identity does not permit reading bitmagnet's torrents."
+
+
+requireAdministration : Identity.Identity -> Access
+requireAdministration =
+    require "auth" "Your Identity does not permit administration."
+
+
+{-| Purging jobs and queueing a reprocessing batch both need `queue::mutate`, and the page
+needs `queue::query` as well: a purge's confirmation says how many jobs it would delete,
+which only the jobs query can count, so an Identity that may change the queue but not read
+it would be offered an act it could not be told the size of.
+
+Refused rather than sent to sign in, whoever is asking, as the queue's other pages are. The
+`anon` Role is not seeded with `queue::mutate` and the core `user` Role does not hold it, so
+signing in would rarely change the answer; an administrator may grant it to either.
+
+-}
+requireQueueAdministration : Identity.Identity -> Access
+requireQueueAdministration identity =
+    if not (Identity.can (Identity.graphql "queue" "mutate") identity) then
+        Refused "Your Identity does not permit changing bitmagnet's queue."
+
+    else
+        require "queue" "Your Identity does not permit reading bitmagnet's queue, which changing it here needs." identity
+
+
+{-| Allowed with the object's `query` action, and otherwise refused with `refusal`.
+-}
+require : String -> String -> Identity.Identity -> Access
+require object refusal identity =
+    if Identity.can (Identity.graphql object "query") identity then
+        Allowed
+
+    else
+        Refused refusal
