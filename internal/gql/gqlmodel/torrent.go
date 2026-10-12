@@ -3,11 +3,13 @@ package gqlmodel
 import (
 	"context"
 
+	"github.com/bitmagnet-io/bitmagnet/internal/database/catalogue"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/search"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql/gqlmodel/gen"
 	"github.com/bitmagnet-io/bitmagnet/internal/metrics/torrentmetrics"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
+	"gorm.io/gen/field"
 )
 
 type TorrentQuery struct {
@@ -36,7 +38,10 @@ func (t TorrentQuery) SuggestTags(
 }
 
 func (t TorrentQuery) ListSources(ctx context.Context) (gen.TorrentListSourcesResult, error) {
-	result, err := t.Dao.TorrentSource.WithContext(ctx).Order(t.Dao.TorrentSource.Key.Asc()).Find()
+	result, err := t.Dao.TorrentSource.WithContext(catalogue.Context(ctx)).
+		Where(field.NewUnsafeFieldRaw(catalogue.VisibleSource())).
+		Order(t.Dao.TorrentSource.Key.Asc()).
+		Find()
 	if err != nil {
 		return gen.TorrentListSourcesResult{}, err
 	}

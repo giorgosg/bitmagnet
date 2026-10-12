@@ -129,26 +129,11 @@ tasks:
   export-data:
     cmds:
       - |
-        pg_dump \
-        --column-inserts \
-        --data-only \
-        --on-conflict-do-nothing \
-        --rows-per-insert=1000 \
-        --table=metadata_sources \
-        --table=content \
-        --table=content_attributes \
-        --table=content_collections \
-        --table=content_collections_content \
-        --table=torrent_sources \
-        --table=torrents \
-        --table=torrent_files \
-        --table=torrent_hints \
-        --table=torrent_contents \
-        --table=torrent_tags \
-        --table=torrents_torrent_sources \
-        --table=key_values \
-        bitmagnet \
-        > export.sql
+        set -eu
+        export_tmp=$(mktemp ./export.sql.XXXXXX)
+        trap 'rm -f "$export_tmp"' EXIT
+        go run ./internal/database/catalogue/exportcmd > "$export_tmp"
+        mv "$export_tmp" export.sql
 
   create-migration:
     dir: ./migrations

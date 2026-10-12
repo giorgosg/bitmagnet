@@ -3,6 +3,8 @@ package search
 import (
 	"context"
 
+	"github.com/bitmagnet-io/bitmagnet/internal/database/cache"
+	"github.com/bitmagnet-io/bitmagnet/internal/database/catalogue"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/query"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
@@ -31,11 +33,12 @@ func (s search) Torrents(ctx context.Context, options ...query.Option) (Torrents
 	return query.GenericQuery[model.Torrent](
 		ctx,
 		s.q,
-		query.Options(append([]query.Option{query.SelectAll()}, options...)...),
+		catalogueOptions(options),
 		model.TableNameTorrent,
 		func(ctx context.Context, q *dao.Query) query.SubQuery {
 			return query.GenericSubQuery[dao.ITorrentDo]{
-				SubQuery: q.Torrent.WithContext(ctx).ReadDB(),
+				SubQuery: q.Torrent.WithContext(catalogue.Context(ctx)).ReadDB().
+					Where(field.NewUnsafeFieldRaw(catalogue.VisibleInfoHash("torrents.info_hash"))),
 			}
 		},
 	)
@@ -161,11 +164,12 @@ func (s search) TorrentSuggestTags(
 				},
 			),
 			query.Limit(10),
-		}, options...)...),
+		}, append(options, query.CacheMode(cache.ModeNoCache))...)...),
 		model.TableNameTorrentTag,
 		func(ctx context.Context, q *dao.Query) query.SubQuery {
 			return query.GenericSubQuery[dao.ITorrentTagDo]{
-				SubQuery: q.TorrentTag.WithContext(ctx).ReadDB(),
+				SubQuery: q.TorrentTag.WithContext(catalogue.Context(ctx)).ReadDB().
+					Where(field.NewUnsafeFieldRaw(catalogue.VisibleInfoHash("torrent_tags.info_hash"))),
 			}
 		},
 	)

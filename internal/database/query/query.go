@@ -220,7 +220,10 @@ func (gq *genericQuery[T]) doItems() {
 					return
 				}
 
-				cte := gq.factory(raceCtx, gq.daoQ).UnderlyingDB().Clauses(
+				// The factory may carry mandatory root-table predicates. They belong
+				// inside the CTE, not on the outer query whose only table is cte.
+				cte := gq.factory(raceCtx, gq.daoQ).UnderlyingDB().
+					Session(&gorm.Session{NewDB: true}).Clauses(
 					exclause.NewWith("cte", sqCte.UnderlyingDB().Limit(stoppingPoint), true),
 					exclause.NewWith("cte_count", "SELECT COUNT(*) AS total_count FROM cte", true),
 				).Table("cte").Where("(SELECT MAX(total_count) FROM cte_count) < ?", stoppingPoint)

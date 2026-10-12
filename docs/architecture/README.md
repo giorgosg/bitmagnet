@@ -79,7 +79,7 @@ run as a set of registered workers.
 | `internal/httpserver/`  | gin engine, middleware, option registration                        |
 | `internal/auth/`        | Identity, RBAC, API keys, JWT, users — see [auth.md](auth.md)      |
 | `internal/importer/`    | Bulk import path, used by external importers                       |
-| `internal/moderation/`  | Exact private moderation ledger; ingestion/read activation pending |
+| `internal/moderation/`  | Exact ledger consumed by catalogue reads; ingestion pending        |
 | `internal/blocking/`    | Bloom-filter-backed "is this hash blocked" manager                 |
 | `internal/health/`      | Health checks reported over GraphQL                                |
 | `internal/worker/`      | The registry every long-running thing registers with               |

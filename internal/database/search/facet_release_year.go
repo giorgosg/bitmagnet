@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/bitmagnet-io/bitmagnet/internal/database/catalogue"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/query"
 	"github.com/bitmagnet-io/bitmagnet/internal/maps"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
@@ -95,8 +96,9 @@ func (yearFacet) Values(ctx query.FacetContext) (map[string]string, error) {
 
 	var years []model.Year
 
-	err := q.WithContext(ctx.Context()).Where(
+	err := q.WithContext(catalogue.Context(ctx.Context())).Where(
 		q.ReleaseYear.Gte(1000),
+		field.NewUnsafeFieldRaw(catalogue.VisibleContent("content")),
 		q.ReleaseYear.Lte(9999),
 	).Distinct(q.ReleaseYear).Pluck(q.ReleaseYear, &years)
 	if err != nil {

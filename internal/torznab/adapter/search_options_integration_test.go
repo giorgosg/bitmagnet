@@ -110,3 +110,25 @@ func TestSearchIgnoresQueryWhenTMDBIDProvided(t *testing.T) {
 	require.Len(t, result.Channel.Items, 1)
 	require.Equal(t, "The matching torrent", result.Channel.Items[0].Title)
 }
+
+func TestSearchConcealsModerationRecords(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	dbtest.ModerationCatalogue(t, db)
+
+	s, err := search.New(
+		search.Params{Query: lazy.New(func() (*dao.Query, error) { return db.Query, nil })},
+	).Search.Get()
+	require.NoError(t, err)
+	result, err := New(
+		s,
+	).Search(t.Context(), torznab.SearchRequest{Profile: torznab.ProfileDefault, Type: torznab.FunctionSearch})
+	require.NoError(t, err)
+
+	names := make([]string, 0, len(result.Channel.Items))
+	for _, item := range result.Channel.Items {
+		names = append(names, item.Title)
+	}
+
+	require.ElementsMatch(t, []string{"Visible", "Allowed"}, names)
+}

@@ -3,8 +3,10 @@ package search
 import (
 	"strings"
 
+	"github.com/bitmagnet-io/bitmagnet/internal/database/catalogue"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/query"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
+	"gorm.io/gen/field"
 )
 
 type torrentContentCollectionFacet struct {
@@ -15,8 +17,9 @@ type torrentContentCollectionFacet struct {
 func (f torrentContentCollectionFacet) Values(ctx query.FacetContext) (map[string]string, error) {
 	q := ctx.Query().ContentCollection
 
-	colls, err := ctx.Query().ContentCollection.WithContext(ctx.Context()).Where(
+	colls, err := ctx.Query().ContentCollection.WithContext(catalogue.Context(ctx.Context())).Where(
 		q.Type.Eq(f.collectionType),
+		field.NewUnsafeFieldRaw(catalogue.VisibleCollection()),
 	).Find()
 	if err != nil {
 		return nil, err

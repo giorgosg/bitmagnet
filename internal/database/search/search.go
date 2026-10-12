@@ -1,7 +1,9 @@
 package search
 
 import (
+	"github.com/bitmagnet-io/bitmagnet/internal/database/cache"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
+	"github.com/bitmagnet-io/bitmagnet/internal/database/query"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
 	"go.uber.org/fx"
 )
@@ -25,11 +27,20 @@ type Params struct {
 
 type Result struct {
 	fx.Out
-	Search lazy.Lazy[Search]
+	Search         lazy.Lazy[Search]
+	MetadataSearch lazy.Lazy[MetadataSearch]
 }
 
 func New(params Params) Result {
 	return Result{
+		MetadataSearch: lazy.New(func() (MetadataSearch, error) {
+			q, err := params.Query.Get()
+			if err != nil {
+				return nil, err
+			}
+
+			return metadataSearch{q}, nil
+		}),
 		Search: lazy.New(func() (Search, error) {
 			q, err := params.Query.Get()
 			if err != nil {
@@ -41,4 +52,9 @@ func New(params Params) Result {
 			}, nil
 		}),
 	}
+}
+
+func catalogueOptions(options []query.Option) query.Option {
+	opts := append([]query.Option{query.SelectAll()}, options...)
+	return query.Options(append(opts, query.CacheMode(cache.ModeNoCache))...)
 }

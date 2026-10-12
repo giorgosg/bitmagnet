@@ -428,3 +428,11 @@ while authentication and role permissions still govern API access.
 The default allowed headers are `Content-Type`, `Authorization`, `X-Api-Key` and
 `X-Import-Id`. If a cross-origin client needs another header, add it to
 `http_server.cors.allowed_headers`.
+
+## Moderation and catalogue reads
+
+Catalogue query permission does not expose pending/banned torrent metadata. Ordinary
+GraphQL and Torznab reads, including files, direct hash requests, suggestions, facets and
+source listings, enforce the exact moderation ledger irrespective of the caller's role.
+Private moderation evidence currently has only an internal service interface; the
+permissioned moderator API is a later integration. See [architecture/moderation.md](architecture/moderation.md).

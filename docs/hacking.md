@@ -143,7 +143,19 @@ entirely different plan.
 
 If you can point at a populated instance, `EXPLAIN` — not `EXPLAIN ANALYZE` — is free and
 tells you far more than a synthetic dataset. `task export-data` produces a portable
-data-only dump for seeding a smaller one.
+data-only column-INSERT dump of the ordinary visible catalogue for seeding a smaller one.
+Pending/banned torrents and metadata backed only by them are excluded. Auth records,
+internal key-value state, moderation evidence/history/decisions and ban lists are omitted.
+
+The export uses PostgreSQL connection environment variables (`PGHOST`, `PGPORT`, `PGUSER`,
+`PGPASSWORD`, `PGDATABASE`), defaulting the database to `bitmagnet`. It streams from one
+read-only repeatable-read snapshot without modifying the source database. `export.sql` is
+replaced only after a successful export; a failed export leaves the previous file intact.
+Restore it into a migrated database with `psql -v ON_ERROR_STOP=1 -d bitmagnet -f export.sql`.
+Explicit columns omit generated columns; `ON CONFLICT DO NOTHING` permits repeated restores.
+This SQL dump is separate from the newline-delimited JSON `/import` protocol. A full
+administrative `pg_dump` still includes private data and is a database backup, not a
+catalogue export or shareable ban list.
 
 Be careful with instances you do not own. bitmagnet is frequently self-hosted on slow
 hardware, where a single `count(*)` on `torrents` is genuinely disruptive.

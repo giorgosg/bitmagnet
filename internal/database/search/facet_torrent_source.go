@@ -1,8 +1,10 @@
 package search
 
 import (
+	"github.com/bitmagnet-io/bitmagnet/internal/database/catalogue"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/query"
 	"gorm.io/gen"
+	"gorm.io/gen/field"
 )
 
 const TorrentSourceFacetKey = "torrent_source"
@@ -26,7 +28,9 @@ type torrentSourceFacet struct {
 func (torrentSourceFacet) Values(ctx query.FacetContext) (map[string]string, error) {
 	q := ctx.Query().TorrentSource
 
-	sources, sourcesErr := q.WithContext(ctx.Context()).Find()
+	sources, sourcesErr := q.WithContext(catalogue.Context(ctx.Context())).
+		Where(field.NewUnsafeFieldRaw(catalogue.VisibleSource())).
+		Find()
 	if sourcesErr != nil {
 		return nil, sourcesErr
 	}
