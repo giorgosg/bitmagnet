@@ -83,6 +83,8 @@ retains its previous visibility. The classifier receives a separate trusted meta
 for content not yet present in the ordinary catalogue. See [moderation.md](moderation.md).
 
 Catalogue SQL exports apply the same policy and retain only visible relationships.
+Metadata source definitions include dependencies used only by visible torrent hints;
+unassociated definitions are preserved, while sources used solely by hidden rows are excluded.
 They are distinct from full administrative database backups.
 
 ## Migrations
