@@ -6,7 +6,6 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/browser_session"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/rbac"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/user"
-	"github.com/bitmagnet-io/bitmagnet/internal/blocking"
 	"github.com/bitmagnet-io/bitmagnet/internal/config/configfx"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/search"
@@ -112,11 +111,6 @@ func New() fx.Option {
 							return nil, err
 						}
 
-						bm, err := p.BlockingManager.Get()
-						if err != nil {
-							return nil, err
-						}
-
 						return &resolvers.Resolver{
 							Dao:                  d,
 							Search:               s,
@@ -125,7 +119,6 @@ func New() fx.Option {
 							QueueManager:         qm,
 							TorrentMetricsClient: tm,
 							Processor:            pr,
-							BlockingManager:      bm,
 							UserService:          p.UserService,
 							APIKeyService:        p.APIKeyService,
 							RBACService:          p.RBACService,
@@ -157,7 +150,6 @@ type Params struct {
 	QueueManager         lazy.Lazy[manager.Manager]
 	TorrentMetricsClient lazy.Lazy[torrentmetrics.Client]
 	Processor            lazy.Lazy[processor.Processor]
-	BlockingManager      lazy.Lazy[blocking.Manager]
 	UserService          user.Service
 	APIKeyService        api_key.Service
 	RBACService          rbac.Service

@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bitmagnet-io/bitmagnet/internal/blocking"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol/metainfo"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol/metainfo/metainforequester"
@@ -28,15 +27,6 @@ func (f metadataRequesterFunc) Request(
 type metadataCheckerFunc func(metainfo.Info) error
 
 func (f metadataCheckerFunc) Check(info metainfo.Info) error { return f(info) }
-
-type metadataBlockingManager struct {
-	blocking.Manager
-	block func(context.Context, []protocol.ID, bool) error
-}
-
-func (m metadataBlockingManager) Block(ctx context.Context, hashes []protocol.ID, flush bool) error {
-	return m.block(ctx, hashes, flush)
-}
 
 func TestMetadataRequestReturnsFirstSuccessWithoutWaitingForStalledPeer(t *testing.T) {
 	t.Parallel()
@@ -275,12 +265,11 @@ func TestMetadataRequestJoinsAllPeerFailures(t *testing.T) {
 	require.ErrorContains(t, err, "no peers")
 }
 
-func TestMetadataRequestBlocksBannedMetadata(t *testing.T) {
+func TestMetadataRequestRejectsMalformedMetadata(t *testing.T) {
 	t.Parallel()
 
 	banErr := errors.New("banned metadata")
 	hash := protocol.RandomNodeID()
-	blocked := make(chan []protocol.ID, 1)
 	c := &crawler{
 		metainfoRequester: metadataRequesterFunc(
 			func(_ context.Context, _ protocol.ID, _ netip.AddrPort) (metainforequester.Response, error) {
@@ -294,15 +283,6 @@ func TestMetadataRequestBlocksBannedMetadata(t *testing.T) {
 
 			return nil
 		}),
-		blockingManager: metadataBlockingManager{
-			block: func(_ context.Context, hashes []protocol.ID, flush bool) error {
-				require.False(t, flush)
-
-				blocked <- hashes
-
-				return nil
-			},
-		},
 		metadataRequestSlots: make(chan struct{}, 1),
 	}
 
@@ -313,5 +293,4 @@ func TestMetadataRequestBlocksBannedMetadata(t *testing.T) {
 	)
 	require.ErrorIs(t, err, banErr)
 	require.Empty(t, response.Info.Name)
-	require.Equal(t, []protocol.ID{hash}, <-blocked)
 }

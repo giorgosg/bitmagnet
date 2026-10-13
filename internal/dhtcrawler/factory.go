@@ -4,11 +4,11 @@ import (
 	"context"
 	"time"
 
-	"github.com/bitmagnet-io/bitmagnet/internal/blocking"
 	"github.com/bitmagnet-io/bitmagnet/internal/concurrency"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/search"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
+	"github.com/bitmagnet-io/bitmagnet/internal/moderation"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol/dht/client"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol/dht/ktable"
@@ -27,13 +27,13 @@ const labelEntity = "entity"
 type Params struct {
 	fx.In
 	Config            Config
+	KeywordPolicy     lazy.Lazy[*moderation.KeywordPolicy]
 	KTable            ktable.Table
 	Client            lazy.Lazy[client.Client]
 	MetainfoRequester metainforequester.Requester
 	BanningChecker    banning.Checker `name:"metainfo_banning_checker"`
 	Search            lazy.Lazy[search.Search]
 	Dao               lazy.Lazy[*dao.Query]
-	BlockingManager   lazy.Lazy[blocking.Manager]
 	DiscoveredNodes   concurrency.BatchingChannel[ktable.Node] `name:"dht_discovered_nodes"`
 	Logger            *zap.SugaredLogger
 }
@@ -86,12 +86,13 @@ func New(params Params) Result {
 						return err
 					}
 
-					blockingManager, err := params.BlockingManager.Get()
+					policy, err := params.KeywordPolicy.Get()
 					if err != nil {
 						return err
 					}
 
 					c = crawler{
+						keywordPolicy:                policy,
 						kTable:                       params.KTable,
 						client:                       cl,
 						metainfoRequester:            params.MetainfoRequester,
@@ -138,12 +139,11 @@ func New(params Params) Result {
 						ignoreHashes: &ignoreHashes{
 							bloom: boom.NewStableBloomFilter(10_000_000, 2, 0.001),
 						},
-						blockingManager: blockingManager,
-						soughtNodeID:    &concurrency.AtomicValue[protocol.ID]{},
-						persistedTotal:  persistedTotal,
-						logger:          params.Logger.Named("dht_crawler"),
-						maxQueueDepth:   params.Config.MaxQueueDepth,
-						queueDepth:      &concurrency.AtomicValue[int64]{},
+						soughtNodeID:   &concurrency.AtomicValue[protocol.ID]{},
+						persistedTotal: persistedTotal,
+						logger:         params.Logger.Named("dht_crawler"),
+						maxQueueDepth:  params.Config.MaxQueueDepth,
+						queueDepth:     &concurrency.AtomicValue[int64]{},
 					}
 					c.soughtNodeID.Set(protocol.RandomNodeID())
 

@@ -7,6 +7,7 @@ package resolvers
 
 import (
 	"context"
+	"database/sql/driver"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/classifier"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql"
@@ -51,7 +52,14 @@ func (r *mutationResolver) Queue(ctx context.Context) (gqlmodel.QueueMutation, e
 
 // Delete is the resolver for the delete field.
 func (r *torrentMutationResolver) Delete(ctx context.Context, obj *gqlmodel.TorrentMutation, infoHashes []protocol.ID) (*string, error) {
-	err := r.BlockingManager.Block(ctx, infoHashes, true)
+	valuers := make([]driver.Valuer, 0, len(infoHashes))
+	for _, hash := range infoHashes {
+		valuers = append(valuers, hash)
+	}
+	if len(valuers) == 0 {
+		return nil, nil
+	}
+	_, err := r.Dao.Torrent.WithContext(ctx).Where(r.Dao.Torrent.InfoHash.In(valuers...)).Delete()
 	return nil, err
 }
 

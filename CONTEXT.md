@@ -88,6 +88,11 @@ Retained torrent metadata used to review a decision: name, full file paths and m
 rule evidence. It describes metadata rather than verified file contents.
 _Avoid_: Proof of illegality, confirmed content
 
+**Catalogue deletion**:
+Removal of catalogue rows, independent of harmful-content decisions. It does not ban a
+torrent or prevent later rediscovery. Private evidence and decisions survive deletion.
+_Avoid_: Harmful ban, persistent block
+
 **Reviewed ban**:
 A ban made by a local moderator after review. Automatic and imported bans have distinct
 origins and do not become reviewed bans merely by being stored locally.

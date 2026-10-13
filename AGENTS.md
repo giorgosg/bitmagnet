@@ -142,8 +142,7 @@ weakening an existing test to make a port pass is not an option.
 
 This bar exists because it has already been earned: cherry-picks in this repo have
 compiled, vetted, and passed the whole suite while carrying a shutdown deadlock and a
-cache that answered the wrong question. `dhtcrawler`, `importer`, `processor`, and
-`blocking` have little coverage, so a change there gets a focused regression test or a
+cache that answered the wrong question. `dhtcrawler`, `importer`, and `processor` have little coverage, so a change there gets a focused regression test or a
 standalone reproduction.
 
 PostgreSQL tests use `internal/database/dbtest`, which creates and drops an isolated,

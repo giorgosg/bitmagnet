@@ -76,12 +76,15 @@ Pending/banned torrents are excluded by the shared catalogue reads used to load 
 inputs. The classifier itself receives the separately injected `search.MetadataSearch`
 lookup for known content, preserving reuse of metadata backed by hidden or not-yet-indexed
 torrents. The default `moderate_keywords` action checks the exact ledger before evaluating the
-existing `keywords.banned` group. Local allows skip the harmful check while the rest of the
+existing `keywords.banned` group. Its shared `moderation.KeywordPolicy` also checks
+crawler/import observations before catalogue persistence, so first detection preserves
+paths beyond the ordinary file cap even when classification is deferred. Local allows skip the harmful check while the rest of the
 workflow continues. Keyword matches retain pending evidence by default;
 `moderation.automatic_ban: true` instead creates automatic bans. Both stop classification
 without deletion or retries. A subsequent processing job after allow completes any missing
 classification; scheduling that job belongs to the moderator API integration. Category
-delete rules still use the separate `delete` action. See [moderation.md](moderation.md).
+delete rules still use the separate `delete` action and remove catalogue rows without
+persistent blocking or a harmful-content decision. See [moderation.md](moderation.md).
 
 ## The classifier
 

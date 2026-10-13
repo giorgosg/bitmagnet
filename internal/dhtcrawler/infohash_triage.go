@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
+	"github.com/bitmagnet-io/bitmagnet/internal/moderation"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol"
 )
 
@@ -37,7 +38,8 @@ func (c *crawler) runInfoHashTriage(ctx context.Context) {
 				reqMap[r.infoHash] = r
 			}
 
-			filteredHashes, filterErr := c.blockingManager.Filter(ctx, allHashes)
+			filteredHashes, filterErr := moderation.NewService(c.dao.UnderlyingDB()).
+				Discoverable(ctx, allHashes)
 			if filterErr != nil {
 				c.logger.Errorf("failed to filter infohashes: %s", filterErr.Error())
 				break
@@ -67,7 +69,7 @@ func (c *crawler) runInfoHashTriage(ctx context.Context) {
 			).LeftJoin(
 				c.dao.TorrentsTorrentSource,
 				c.dao.Torrent.InfoHash.EqCol(c.dao.TorrentsTorrentSource.InfoHash),
-				c.dao.TorrentsTorrentSource.Source.Eq("dht"),
+				c.dao.TorrentsTorrentSource.Source.Eq(dhtSource),
 			).Where(
 				c.dao.Torrent.InfoHash.In(valuers...),
 			).UnderlyingDB().Find(&result).Error; queryErr != nil {

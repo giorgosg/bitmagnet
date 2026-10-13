@@ -235,7 +235,7 @@ What the served instance answers for those pages: `health` reports one real chec
 the clone; `workers` lists the keys production registers, with the ones this stack actually
 runs marked started and the crawler, queue server and invitation worker listed and stopped;
 `queue.jobs`, `queue.metrics`, `torrent.metrics` and `torrent.listSources` all read the
-clone. The processor and the blocking manager stay unwired, as does the queue _server_ — so
+clone. The processor stays unwired, as does the queue _server_ — so
 a job enqueued through `queue.purgeJobs` or `enqueueReprocessTorrentsBatch` stays in the
 table to be asserted on rather than being picked up and run.
 

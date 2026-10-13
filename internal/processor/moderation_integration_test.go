@@ -1,12 +1,9 @@
 package processor
 
 import (
-	"context"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/bitmagnet-io/bitmagnet/internal/blocking"
 	"github.com/bitmagnet-io/bitmagnet/internal/classifier"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dbtest"
@@ -18,7 +15,6 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol"
 	"github.com/bitmagnet-io/bitmagnet/internal/tmdb"
 	tmdb_mocks "github.com/bitmagnet-io/bitmagnet/internal/tmdb/mocks"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 )
 
@@ -98,26 +94,12 @@ func moderationProcessor(
 	r, err := cr.Runner.Get()
 	require.NoError(t, err)
 
-	br := blocking.New(blocking.Params{
-		Pool:        lazy.New(func() (*pgxpool.Pool, error) { return db.Pool, nil }),
-		PgxPoolWait: &sync.WaitGroup{},
-	})
-	manager, err := br.Manager.Get()
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		require.NoError(t, br.AppHook.OnStop(ctx))
-	})
-
 	return processor{
 		moderation:      ledger,
 		defaultWorkflow: "default",
 		search:          s,
 		runner:          r,
 		dao:             db.Query,
-		blockingManager: manager,
 	}, ledger
 }
 
@@ -220,4 +202,26 @@ func TestKeywordQuarantinePreservesMissingFileMetadata(t *testing.T) {
 	require.NotNil(t, record.Evidence)
 	require.Nil(t, record.Evidence.Files)
 	require.Equal(t, "Harmless synthetic review marker.pdf", record.Evidence.Name)
+}
+
+func TestCategoryDeletionDoesNotCreateHarmfulBan(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	cfg := classifier.NewDefaultConfig()
+	cfg.Flags = map[string]any{
+		"apis_enabled":         false,
+		"local_search_enabled": false,
+		"delete_content_types": []any{"ebook"},
+	}
+	p, ledger := moderationProcessor(t, db, cfg, moderation.NewDefaultConfig())
+	hash := protocol.ID{90}
+	seedModerationTorrent(t, db, hash, "Synthetic handbook", "guide.pdf")
+	require.NoError(t, p.Process(t.Context(), MessageParams{InfoHashes: []protocol.ID{hash}}))
+	count, err := db.Query.Torrent.WithContext(t.Context()).Where(db.Query.Torrent.InfoHash.Eq(hash)).Count()
+	require.NoError(t, err)
+	require.Zero(t, count)
+	_, err = ledger.Get(t.Context(), moderation.IdentifierForInfoHash(hash))
+	require.ErrorIs(t, err, moderation.ErrNotFound)
+	require.NoError(t, db.Gorm.Table("bloom_filters").Where("key = ?", "blocked_torrents").Count(&count).Error)
+	require.Zero(t, count, "category deletion must not persist a legacy block")
 }

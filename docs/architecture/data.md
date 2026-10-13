@@ -37,7 +37,7 @@ in every signature in the tree.
 | `content_collections`                                                                  | genres, collections, and the join to `content`                                               |
 | `queue_jobs`                                                                           | the job queue — see [processing.md](processing.md)                                           |
 | `moderation_decisions`, `moderation_evidence`, `moderation_history`                    | Exact decisions and independent private review metadata — see [moderation.md](moderation.md) |
-| `bloom_filters`                                                                        | the blocklist, stored as a Postgres large object                                             |
+| `bloom_filters`                                                                        | retired legacy filter storage; `blocked_torrents` discarded by migration `00026`             |
 | `users`, `roles`, `role_permissions`, `api_keys`, `api_key_permissions`, `invitations` | auth — see [auth.md](auth.md)                                                                |
 
 `torrent_contents.id` is _derived from the content identity_, not a surrogate key
@@ -91,7 +91,7 @@ They are distinct from full administrative database backups.
 
 Goose SQL in [`migrations/`](../../migrations), embedded and run through
 `internal/database/migrations` — an fx decorator, so they apply before anything queries.
-Current high-water mark is `00025_moderation_ledger.sql`; `ls migrations/` rather than trusting this
+Current high-water mark is `00026_discard_legacy_blocks.sql`; `ls migrations/` rather than trusting this
 sentence.
 
 **Forks number theirs independently and the numbers collide.** Anything cherry-picked gets

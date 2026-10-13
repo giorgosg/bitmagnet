@@ -5,12 +5,14 @@ import (
 
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
+	"github.com/bitmagnet-io/bitmagnet/internal/moderation"
 	"go.uber.org/fx"
 )
 
 type Params struct {
 	fx.In
-	Dao lazy.Lazy[*dao.Query]
+	Dao           lazy.Lazy[*dao.Query]
+	KeywordPolicy lazy.Lazy[*moderation.KeywordPolicy]
 }
 
 type Result struct {
@@ -26,10 +28,19 @@ func New(p Params) Result {
 				return nil, err
 			}
 
+			var policy *moderation.KeywordPolicy
+			if p.KeywordPolicy != nil {
+				policy, err = p.KeywordPolicy.Get()
+				if err != nil {
+					return nil, err
+				}
+			}
+
 			return importer{
-				dao:         d,
-				bufferSize:  100,
-				maxWaitTime: 500 * time.Millisecond,
+				keywordPolicy: policy,
+				dao:           d,
+				bufferSize:    100,
+				maxWaitTime:   500 * time.Millisecond,
 			}, nil
 		}),
 	}

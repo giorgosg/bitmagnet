@@ -110,6 +110,10 @@ func (s *Service) change(ctx context.Context, id Identifier, c decisionChange) e
 	}
 
 	err := s.database(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockIdentifier(tx, id); err != nil {
+			return err
+		}
+
 		record := model.ModerationDecision{
 			Identifier:     id.String(),
 			Status:         string(c.status),
@@ -363,6 +367,10 @@ func (s *Service) Reopen(ctx context.Context, id Identifier, actor string) error
 // PurgeEvidence clears retained review metadata and prior private history, keeping the decision.
 func (s *Service) PurgeEvidence(ctx context.Context, id Identifier) error {
 	err := s.database(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockIdentifier(tx, id); err != nil {
+			return err
+		}
+
 		var record model.ModerationDecision
 		if err := tx.Clauses(clause.Locking{Strength: lockForUpdate}).
 			Where("identifier = ?", id.String()).
@@ -506,6 +514,10 @@ func (s *Service) RetainEvidence(ctx context.Context, id Identifier, evidence Ev
 	}
 
 	err := s.database(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockIdentifier(tx, id); err != nil {
+			return err
+		}
+
 		var record model.ModerationDecision
 		if err := tx.Clauses(clause.Locking{Strength: lockForUpdate}).
 			Where("identifier = ?", id.String()).

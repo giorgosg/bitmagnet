@@ -5,7 +5,8 @@ description: Preserve your index and access settings when upgrading.
 
 ## Back up PostgreSQL
 
-The database contains your catalogue, Users, Roles, Invitations, API keys, and queue.
+The database contains your catalogue, private moderation evidence and decisions, Users,
+Roles, Invitations, API keys, and queue.
 Back up your configuration and stable JWT secret separately. With the installation
 guide's Compose stack, a logical backup can be made with:
 
@@ -17,7 +18,7 @@ docker compose -f compose.magnes.yml exec -T postgres \
 
 Check the command's exit status and test restoring the dump into a separate database.
 A backup is only useful when you can restore it. Store it securely because it contains
-authentication records as well as catalogue data.
+authentication records and private moderation evidence as well as catalogue data.
 
 For large indexes, plan backup time, storage, and restore time against your actual
 hardware. Copying a live PostgreSQL data directory without a database-aware backup
@@ -85,3 +86,22 @@ Stop Magnes before a rollback, restore into an empty database, and select that d
 in the old version's configuration. Recheck sign-in and searches before letting its
 crawler and queue resume. Restoring a pre-upgrade backup loses changes made after that
 backup; keep the failed-upgrade database until you have decided what to recover from it.
+
+## Legacy blocking cutover
+
+Migration `00026` discards the opaque `blocked_torrents` Bloom filter and releases its
+PostgreSQL large object when no other filter references it. It does not enumerate old
+blocks, preserve them as harmful-content decisions, or export them. There is no automatic
+recovery of previously deleted metadata; torrents may be rediscovered if available from
+peers, and neither rediscovery nor recovery is guaranteed. The existing harmful-keyword
+list applies to newly processed metadata using the [moderation behavior](../classifier/).
+
+Stop every old crawler and processor before upgrading. An older executable can recreate
+the legacy key, so do not run old and new versions together against the upgraded database.
+Exact bans now stop crawler discovery and crawler/import writes, including digest-only
+bans and racing decisions. Local allows permit ingestion; pending metadata stays hidden
+and retains independent private evidence. Ordinary catalogue/category deletion creates
+no harmful-content ban and permits later rediscovery.
+
+The discard cannot be undone by a down migration. A rollback requiring the historical
+filter requires the pre-upgrade database backup and old application together.
