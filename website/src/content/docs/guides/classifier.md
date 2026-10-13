@@ -11,7 +11,8 @@ local content records, and optional TMDB lookups. An unidentified torrent can re
 ## Start with the included workflow
 
 The default workflow identifies content types and video attributes, tries available
-content matches, and applies configured deletion rules. You can inspect the merged
+content matches, quarantines harmful-keyword matches, and applies configured category
+deletion rules. You can inspect the merged
 source and generate its schema with the CLI:
 
 ```sh
@@ -78,6 +79,35 @@ Set `tmdb.enabled: false` in application configuration to disable TMDB. For an i
 reprocessing run, `--apisDisabled` disables external lookups without changing the global
 configuration. Existing local content can still supply a match; use
 `--localSearchDisabled` as well when that is the behaviour you need to inspect.
+
+## Harmful-keyword quarantine
+
+The included workflow sends matches from the existing `keywords.banned` group to pending
+moderation by default. Pending and banned torrents are hidden from catalogue queries,
+GraphQL details/files, Torznab and catalogue exports. The decision retains the torrent name,
+available complete file paths and matching rule privately for review. It adds no tag and
+stops classification without deleting metadata or repeatedly retrying the job.
+
+An operator can choose automatic bans in application `config.yml`:
+
+```yaml
+moderation:
+  automatic_ban: true
+```
+
+The default is `false`. Automatic bans retain their origin and evidence; they are distinct
+from moderator-reviewed bans. A local allow skips later harmful checks even when keywords
+change, while ordinary classification continues. Existing pending/banned decisions are
+skipped on reprocessing; changing this setting does not re-decide them.
+
+The moderation ledger and classifier integration are present in this revision. The
+moderator API, review UI and ingestion cutover are separate integrations; complete those
+before deploying the moderation feature. Filenames describe metadata and do not verify
+file contents.
+
+If you replace the default workflow, use the `moderate_keywords` action for harmful
+keyword moderation, or call the included `default` workflow. A custom keyword branch
+using `delete` keeps catalogue-deletion semantics and cannot create a reviewable decision.
 
 ## Deletion rules
 

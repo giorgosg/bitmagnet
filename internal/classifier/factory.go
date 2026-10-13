@@ -5,16 +5,19 @@ import (
 
 	"github.com/bitmagnet-io/bitmagnet/internal/database/search"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
+	"github.com/bitmagnet-io/bitmagnet/internal/moderation"
 	"github.com/bitmagnet-io/bitmagnet/internal/tmdb"
 	"go.uber.org/fx"
 )
 
 type Params struct {
 	fx.In
-	Config         Config
-	TmdbConfig     tmdb.Config
-	MetadataSearch lazy.Lazy[search.MetadataSearch]
-	TmdbClient     lazy.Lazy[tmdb.Client]
+	ModerationConfig moderation.Config
+	Moderation       lazy.Lazy[*moderation.Service]
+	Config           Config
+	TmdbConfig       tmdb.Config
+	MetadataSearch   lazy.Lazy[search.MetadataSearch]
+	TmdbClient       lazy.Lazy[tmdb.Client]
 }
 
 type Result struct {
@@ -36,13 +39,23 @@ func New(params Params) Result {
 			return nil, err
 		}
 
+		moderator, err := params.Moderation.Get()
+		if err != nil {
+			return nil, err
+		}
+
 		return compiler{
 			options: []compilerOption{
 				compilerFeatures(defaultFeatures),
 				celEnvOption,
 			},
 			dependencies: dependencies{
-				search:     newLocalSearchSemaphore(localSearch{s}, params.Config.SearchConcurrency),
+				moderation:       moderator,
+				moderationConfig: params.ModerationConfig,
+				search: newLocalSearchSemaphore(
+					localSearch{s},
+					params.Config.SearchConcurrency,
+				),
 				tmdbClient: tmdbClient,
 			},
 		}, nil

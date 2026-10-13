@@ -1,7 +1,8 @@
 package moderation
 
-// Config has no operator settings while the ledger is an inactive foundation.
-// Ingestion and classifier activation are separate changes.
-type Config struct{}
+// Config controls harmful-keyword matches. The default retains them pending review.
+type Config struct {
+	AutomaticBan bool
+}
 
 func NewDefaultConfig() Config { return Config{} }

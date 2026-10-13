@@ -37,6 +37,7 @@ var defaultFeatures = newFeatures(
 		attachTMDBContentByIDAction{},
 		attachTmdbContentBySearchAction{},
 		deleteAction{},
+		moderateKeywordsAction{},
 		findMatchAction{},
 		ifElseAction{},
 		unmatchedAction{},

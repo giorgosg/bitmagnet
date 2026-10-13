@@ -6,12 +6,14 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/search"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
+	"github.com/bitmagnet-io/bitmagnet/internal/moderation"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 )
 
 type Params struct {
 	fx.In
+	Moderation       lazy.Lazy[*moderation.Service]
 	ClassifierConfig classifier.Config
 	Search           lazy.Lazy[search.Search]
 	Workflow         lazy.Lazy[classifier.Runner]
@@ -48,7 +50,13 @@ func New(p Params) Result {
 				return nil, err
 			}
 
+			moderator, err := p.Moderation.Get()
+			if err != nil {
+				return nil, err
+			}
+
 			return processor{
+				moderation:      moderator,
 				dao:             d,
 				search:          s,
 				blockingManager: bm,

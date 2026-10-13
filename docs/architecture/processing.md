@@ -55,7 +55,8 @@ Failed jobs go to `retry` with `queue.CalculateBackoff(retries)` until `max_retr
 takes a batch of infohashes and:
 
 1. Loads the torrents with files, hint and sources preloaded, plus any existing
-   `torrent_contents` rows. Hashes that do not exist come back as `MissingInfoHashes`.
+   `torrent_contents` rows. Hashes that do not exist come back as `MissingInfoHashes`. Known pending/banned
+   decisions are skipped successfully even when their catalogue rows are absent.
 2. Carries forward a prior _sourced_ match (one with a `content_source`, i.e. TMDB) as a
    hint, so re-processing does not re-query external APIs. A rule-inferred type with no
    source is retained only when there is no stored file list to re-derive it from.
@@ -63,7 +64,9 @@ takes a batch of infohashes and:
    mutex.
 4. Deletes superseded `torrent_contents` rows (the row ID is derived from the content
    identity, so a re-classification that changes the match changes the ID), honours
-   `ErrDeleteTorrent`, and applies tags.
+   `ErrDeleteTorrent`, and applies tags. Quarantine is a successful early stop: it retains the catalogue
+   metadata and private review evidence, writes no classification or moderation tag, and
+   does not enter the retry path.
 5. Re-enqueues everything that failed, as a fresh job.
 
 `ClassifyMode` (`rematch`) and `ClassifierFlags` on the message are how the `reprocess`
@@ -72,8 +75,13 @@ CLI command and the GraphQL `torrent.reprocess` mutation steer this.
 Pending/banned torrents are excluded by the shared catalogue reads used to load processing
 inputs. The classifier itself receives the separately injected `search.MetadataSearch`
 lookup for known content, preserving reuse of metadata backed by hidden or not-yet-indexed
-torrents. This read foundation does not yet change keyword actions; quarantine activation
-and classification restoration on allow are later integrations. See [moderation.md](moderation.md).
+torrents. The default `moderate_keywords` action checks the exact ledger before evaluating the
+existing `keywords.banned` group. Local allows skip the harmful check while the rest of the
+workflow continues. Keyword matches retain pending evidence by default;
+`moderation.automatic_ban: true` instead creates automatic bans. Both stop classification
+without deletion or retries. A subsequent processing job after allow completes any missing
+classification; scheduling that job belongs to the moderator API integration. Category
+delete rules still use the separate `delete` action. See [moderation.md](moderation.md).
 
 ## The classifier
 
@@ -84,7 +92,7 @@ in the tree and the one most worth reading before changing.
   default; an operator's file is merged over it. `Config.Workflow` names the entry point.
 - **Actions** are the statements: `if_else`, `run_workflow`, `set_content_type`,
   `parse_video_content`, `parse_date`, `find_match`, `attach_tmdb_content_by_search`,
-  `attach_local_content_by_id`, `add_tag`, `delete`, … one file per action, all named
+  `attach_local_content_by_id`, `add_tag`, `moderate_keywords`, `delete`, … one file per action, all named
   `action_*.go`.
 - **Conditions** are the expressions: `and`, `or`, `not`, and `expression`, which is
   [CEL](https://cel.dev) (`cel_env.go`, `cel_lists.go`). The torrent is exposed to CEL as
