@@ -30,23 +30,24 @@ AUTH_ANONYMOUS_ACCESS=false LOG_LEVEL=debug ./bitmagnet config show
 
 ## Important settings
 
-| Key                                | Default     | Purpose                                              |
-| ---------------------------------- | ----------- | ---------------------------------------------------- |
-| `postgres.host`                    | `localhost` | Database hostname                                    |
-| `postgres.port`                    | `5432`      | Database port                                        |
-| `postgres.name`                    | `bitmagnet` | Database name                                        |
-| `postgres.user`                    | `postgres`  | Database User                                        |
-| `postgres.dsn`                     | empty       | Overrides individual connection fields when set      |
-| `http_server.local_address`        | `:3333`     | Backend HTTP listener                                |
-| `http_server.static.bundled`       | `true`      | Serve included UI in a UI-enabled build              |
-| `http_server.static.path`          | `/ui`       | UI mount; cannot be `/`                              |
-| `http_server.static.dir`           | empty       | External UI directory overriding the bundle          |
-| `http_server.options`              | `['*']`     | Enabled HTTP components; include `static` for the UI |
-| `http_server.cors.allowed_origins` | `[]`        | Explicit cross-origin browser allowances             |
-| `http_server.trusted_proxies`      | `[]`        | Proxy addresses trusted for forwarded client IPs     |
-| `auth.anonymous_access`            | `true`      | Allow configured anonymous Permissions to apply      |
-| `auth.invitation_required`         | `true`      | Require an Invitation for registration               |
-| `auth.jwt_duration`                | `24h`       | Session token lifetime                               |
+| Key                                | Default     | Purpose                                               |
+| ---------------------------------- | ----------- | ----------------------------------------------------- |
+| `postgres.host`                    | `localhost` | Database hostname                                     |
+| `postgres.port`                    | `5432`      | Database port                                         |
+| `postgres.name`                    | `bitmagnet` | Database name                                         |
+| `postgres.user`                    | `postgres`  | Database User                                         |
+| `postgres.dsn`                     | empty       | Overrides individual connection fields when set       |
+| `http_server.local_address`        | `:3333`     | Backend HTTP listener                                 |
+| `http_server.static.bundled`       | `true`      | Serve included UI in a UI-enabled build               |
+| `http_server.static.path`          | `/ui`       | UI mount; cannot be `/`                               |
+| `http_server.static.dir`           | empty       | External UI directory overriding the bundle           |
+| `http_server.options`              | `['*']`     | Enabled HTTP components; include `static` for the UI  |
+| `http_server.cors.allowed_origins` | `[]`        | Explicit cross-origin browser allowances              |
+| `http_server.trusted_proxies`      | `[]`        | Proxy addresses trusted for forwarded client IPs      |
+| `auth.anonymous_access`            | `true`      | Allow configured anonymous Permissions to apply       |
+| `auth.invitation_required`         | `true`      | Require an Invitation for registration                |
+| `moderation.automatic_ban`         | `false`     | Ban new harmful-keyword matches instead of quarantine |
+| `auth.jwt_duration`                | `24h`       | Session token lifetime                                |
 
 Set `auth.jwt_secret` to a stable random secret. An empty value generates a process-local
 secret, invalidating sessions across restarts and failing to share them across replicas.

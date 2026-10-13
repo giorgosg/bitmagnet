@@ -111,6 +111,7 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#96](https://github.com/giorgosg/magnes/pull/96)    | Canonical versioned moderation identifiers                                       | local                                                                | Independent zero/high-bit vectors and strict parser cases observed red; focused race and PostgreSQL-enabled Go suite pass |
 | [#97](https://github.com/giorgosg/magnes/pull/97)    | Exact moderation decisions and private evidence                                  | local                                                                | Flag, allow precedence, reopening, purge, search and evidence identity observed red; PostgreSQL race/rollback regressions |
 | [#98](https://github.com/giorgosg/magnes/pull/98)    | Mandatory moderation visibility and safe catalogue SQL exports                   | local                                                                | Catalogue, GraphQL/Torznab, cache, facets and export FK observed red; PostgreSQL/race and fixture EXPLAIN pass            |
+| [#99](https://github.com/giorgosg/magnes/pull/99)    | Default harmful-keyword quarantine and automatic-ban option                      | local                                                                | Keyword deletion, hidden retries, category-only deletes and absent paths observed red; PostgreSQL/race pass               |
 
 ## In flight
 

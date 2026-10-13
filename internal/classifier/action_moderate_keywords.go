@@ -1,0 +1,105 @@
+package classifier
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/bitmagnet-io/bitmagnet/internal/classifier/classification"
+	"github.com/bitmagnet-io/bitmagnet/internal/keywords"
+	"github.com/bitmagnet-io/bitmagnet/internal/model"
+	"github.com/bitmagnet-io/bitmagnet/internal/moderation"
+)
+
+const moderateKeywordsName = "moderate_keywords"
+
+type moderateKeywordsAction struct{}
+
+func (moderateKeywordsAction) name() string { return moderateKeywordsName }
+
+var moderateKeywordsPayload = payloadLiteral[string]{
+	literal:     moderateKeywordsName,
+	description: "Quarantine harmful keywords or automatically ban when configured; local allows skip the check",
+}
+
+func (moderateKeywordsAction) compileAction(ctx compilerContext) (action, error) {
+	if _, err := moderateKeywordsPayload.Unmarshal(ctx); err != nil {
+		return action{}, ctx.error(err)
+	}
+
+	regex, err := keywords.NewRegexFromKeywords(ctx.keywords["banned"]...)
+	if err != nil {
+		return action{}, ctx.fatal(err)
+	}
+
+	path := ctx.path
+
+	return action{run: func(ctx executionContext) (classification.Result, error) {
+		id := moderation.IdentifierForInfoHash(ctx.torrent.InfoHash)
+		if ctx.moderation != nil {
+			record, getErr := ctx.moderation.Get(ctx.Context, id)
+			if getErr != nil && !errors.Is(getErr, moderation.ErrNotFound) {
+				return ctx.result, getErr
+			}
+
+			if getErr == nil && record.Status == moderation.Allowed {
+				return ctx.result, nil
+			}
+		}
+
+		parts := []string{ctx.torrentPb.GetBaseName()}
+
+		for _, file := range ctx.torrentPb.GetFiles() {
+			parts = append(parts, file.GetBasePath())
+		}
+
+		matches := regex.FindAllString(strings.Join(parts, " "), -1)
+		if len(matches) == 0 {
+			return ctx.result, nil
+		}
+
+		if ctx.moderation == nil {
+			return ctx.result, fmt.Errorf("%s requires moderation service", moderateKeywordsName)
+		}
+
+		status := moderation.Pending
+		if ctx.moderationConfig.AutomaticBan {
+			status = moderation.Banned
+		}
+
+		// CEL may synthesize a file from a name when metainfo is absent. Evidence
+		// records only supplied paths, or the implicit known single-file name.
+		var files []string
+		if ctx.torrent.FilesStatus.HasStoredFileList() || len(ctx.torrent.Files) > 0 {
+			files = make([]string, 0, len(ctx.torrent.Files))
+			for _, file := range ctx.torrent.Files {
+				files = append(files, file.Path)
+			}
+
+			if ctx.torrent.FilesStatus == model.FilesStatusSingle && len(files) == 0 {
+				files = append(files, ctx.torrent.Name)
+			}
+		}
+
+		evidence := moderation.Evidence{
+			InfoHash: &ctx.torrent.InfoHash, Name: ctx.torrent.Name, Files: files,
+			Rule: "keywords.banned: " + regex.String(), Matches: matches,
+		}
+		if err := ctx.moderation.ApplyAutomatic(ctx.Context, id, status, evidence); err != nil {
+			return ctx.result, err
+		}
+		// A moderator may have allowed the torrent while the keywords were evaluated.
+		record, err := ctx.moderation.Get(ctx.Context, id)
+		if err != nil {
+			return ctx.result, err
+		}
+
+		if record.Status == moderation.Allowed {
+			return ctx.result, nil
+		}
+
+		return ctx.result, classification.RuntimeError{Path: path, Cause: classification.ErrQuarantinedTorrent}
+	}}, nil
+}
+
+func (moderateKeywordsAction) JSONSchema() JSONSchema { return moderateKeywordsPayload.JSONSchema() }

@@ -35,6 +35,9 @@ var ErrDeleteTorrent = WorkflowError{
 	key: "delete_torrent",
 }
 
+// ErrQuarantinedTorrent means moderation hid the torrent without a processing failure.
+var ErrQuarantinedTorrent = WorkflowError{key: "quarantined_torrent"}
+
 type RuntimeError struct {
 	Path  []string
 	Cause error

@@ -93,6 +93,10 @@
       ],
       "type": "object"
     },
+    "action__moderate_keywords": {
+      "const": "moderate_keywords",
+      "description": "Quarantine harmful keywords or automatically ban when configured; local allows skip the check"
+    },
     "action__parse_date": {
       "const": "parse_date",
       "description": "Try to parse a date from the name of the current torrent"
@@ -172,6 +176,9 @@
         },
         {
           "$ref": "#/definitions/action__delete"
+        },
+        {
+          "$ref": "#/definitions/action__moderate_keywords"
         },
         {
           "$ref": "#/definitions/action__find_match"

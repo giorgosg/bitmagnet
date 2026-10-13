@@ -13,6 +13,7 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/database/query"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/search"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
+	"github.com/bitmagnet-io/bitmagnet/internal/moderation"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol"
 	"gorm.io/gen/field"
 	"gorm.io/gorm/clause"
@@ -28,6 +29,7 @@ type processor struct {
 	runner          classifier.Runner
 	dao             *dao.Query
 	blockingManager blocking.Manager
+	moderation      *moderation.Service
 }
 
 type MissingHashesError struct {
@@ -58,6 +60,26 @@ func (c processor) Process(ctx context.Context, params MessageParams) error {
 	if searchErr != nil {
 		return searchErr
 	}
+
+	// Ordinary search intentionally cannot load quarantined inputs. A durable
+	// hidden decision is successful suppression, not a missing-torrent retry.
+	missing := make([]protocol.ID, 0, len(searchResult.MissingInfoHashes))
+	for _, hash := range searchResult.MissingInfoHashes {
+		if c.moderation != nil {
+			record, err := c.moderation.Get(ctx, moderation.IdentifierForInfoHash(hash))
+			if err != nil && !errors.Is(err, moderation.ErrNotFound) {
+				return err
+			}
+
+			if err == nil && (record.Status == moderation.Pending || record.Status == moderation.Banned) {
+				continue
+			}
+		}
+
+		missing = append(missing, hash)
+	}
+
+	searchResult.MissingInfoHashes = missing
 
 	tcResult, tcErr := c.search.TorrentContent(
 		ctx,
@@ -141,6 +163,10 @@ func (c processor) Process(ctx context.Context, params MessageParams) error {
 			}
 
 			cl, classifyErr := c.runner.Run(ctx, workflowName, params.ClassifierFlags, torrent)
+			if errors.Is(classifyErr, classification.ErrQuarantinedTorrent) {
+				// The decision/evidence are already durable; no retry or catalogue writes.
+				return
+			}
 
 			mtx.Lock()
 			defer mtx.Unlock()
@@ -195,7 +221,7 @@ func (c processor) Process(ctx context.Context, params MessageParams) error {
 		}
 	}
 
-	if len(tcs) == 0 {
+	if len(tcs) == 0 && len(infoHashesToDelete) == 0 {
 		return nil
 	}
 

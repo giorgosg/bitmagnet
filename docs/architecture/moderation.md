@@ -2,9 +2,29 @@
 
 `internal/moderation` owns exact harmful-content decisions keyed by the versioned
 [moderation identifier](../adr/0006-version-moderation-identifiers.md). Ordinary catalogue reads now enforce
-this ledger. The classifier, crawler and importer do not yet create moderation decisions,
-and there is no moderation HTTP or GraphQL API. Existing keyword deletion and legacy
-blocking remain until the ingestion cutover; this read foundation does not activate them.
+this ledger. The default classifier creates automatic decisions from the existing harmful
+keyword group; crawler/import enforcement and removal of legacy blocking are separate
+integrations. There is no moderation HTTP or GraphQL API yet.
+
+## Keyword matching
+
+`moderate_keywords` replaces the default harmful-keyword `delete` branch. It uses the
+same keyword grammar and combined base name/base file paths as the previous CEL condition.
+Before evaluating it, the action checks for a local allow; allowed torrents continue normal
+classification, regardless of keyword changes. Category-deletion rules remain independent.
+
+Matches create pending decisions by default. `moderation.automatic_ban: true` instead
+creates banned decisions with automatic origin. Either decision hides the torrent using the
+mandatory catalogue predicate and stops classification successfully. No moderation tag is
+added, and torrent metadata is retained. Private evidence contains the original name, all
+available full file paths, raw infohash, matched text and compiled keyword rule. Missing
+file metadata remains missing; no torrent payload is fetched for review.
+
+The service serializes assertions with moderator decisions; an allow made during matching
+wins and classification continues when observed by the action. Existing pending/banned
+processing inputs are skipped rather than retried as missing hashes. Switching the mode
+changes new matches, not existing decisions. After allow, a processing job can complete
+missing classification; the later moderator API integration schedules it.
 
 ## State and precedence
 

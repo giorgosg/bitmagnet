@@ -28,6 +28,7 @@ type compiler struct {
 
 type compilerContext struct {
 	features
+	keywords      keywordGroups
 	celEnv        *cel.Env
 	source        any
 	path          []string
@@ -95,6 +96,8 @@ func (c compiler) Compile(source Source) (Runner, error) {
 	if sourceErr != nil {
 		return nil, ctx.fatal(sourceErr)
 	}
+
+	ctx.keywords = source.Keywords
 
 	for _, opt := range c.options {
 		if err := opt(source, ctx); err != nil {
