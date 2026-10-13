@@ -58,7 +58,6 @@ func TestProcessPreservesRuleDerivedTypeWithoutStoredFiles(t *testing.T) {
 				search:          searcher,
 				runner:          runner,
 				dao:             db.Query,
-				blockingManager: noOpBlockingManager{},
 			}
 			require.NoError(t, processor.Process(ctx, MessageParams{
 				InfoHashes:   []protocol.ID{infoHash},
@@ -96,18 +95,4 @@ func (r *hintPreservingRunner) Run(
 			ContentType: torrent.Hint.NullContentType(),
 		},
 	}, nil
-}
-
-type noOpBlockingManager struct{}
-
-func (noOpBlockingManager) Filter(_ context.Context, hashes []protocol.ID) ([]protocol.ID, error) {
-	return hashes, nil
-}
-
-func (noOpBlockingManager) Block(_ context.Context, _ []protocol.ID, _ bool) error {
-	return nil
-}
-
-func (noOpBlockingManager) Flush(_ context.Context) error {
-	return nil
 }

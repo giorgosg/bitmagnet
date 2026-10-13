@@ -7,13 +7,17 @@ import (
 
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
+	"github.com/bitmagnet-io/bitmagnet/internal/moderation"
 	"github.com/bitmagnet-io/bitmagnet/internal/processor"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol/metainfo"
 	"github.com/prometheus/client_golang/prometheus"
 	"gorm.io/gen"
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+const dhtSource = "dht"
 
 // runPersistTorrents waits on the persistTorrents channel, and persists torrents to the database in batches.
 // After persisting each batch it will publish a message to the classifier,
@@ -54,6 +58,58 @@ func (c *crawler) writeTorrentBatch(
 	ctx context.Context,
 	is []infoHashWithMetaInfo,
 ) (map[protocol.ID]infoHashWithMetaInfo, bool) {
+	evidence := make([]moderation.Evidence, 0, len(is))
+	for _, item := range is {
+		hash := item.infoHash
+
+		files := make([]string, 0, len(item.metaInfo.Files))
+		for _, file := range item.metaInfo.Files {
+			files = append(files, file.DisplayPath(&item.metaInfo))
+		}
+
+		evidence = append(
+			evidence,
+			moderation.Evidence{InfoHash: &hash, Name: item.metaInfo.BestName(), Files: files},
+		)
+	}
+
+	var written map[protocol.ID]infoHashWithMetaInfo
+
+	err := moderation.NewService(c.dao.UnderlyingDB()).Ingest(ctx, evidence,
+		func(db *gorm.DB, permitted map[protocol.ID]bool) error {
+			eligible := make([]infoHashWithMetaInfo, 0, len(is))
+			for _, item := range is {
+				if permitted[item.infoHash] {
+					eligible = append(eligible, item)
+				}
+			}
+
+			if len(eligible) == 0 {
+				written = map[protocol.ID]infoHashWithMetaInfo{}
+				return nil
+			}
+
+			var err error
+
+			written, err = c.writeEligibleTorrentBatch(ctx, eligible, dao.Use(db))
+
+			return err
+		})
+	if err != nil {
+		c.logger.Errorf("error persisting torrents: %s", err)
+		return nil, false
+	}
+
+	c.persistedTotal.With(prometheus.Labels{labelEntity: "Torrent"}).Add(float64(len(written)))
+
+	return written, true
+}
+
+func (c *crawler) writeEligibleTorrentBatch(
+	ctx context.Context,
+	is []infoHashWithMetaInfo,
+	tx *dao.Query,
+) (map[protocol.ID]infoHashWithMetaInfo, error) {
 	torrentsToPersist := make([]*model.Torrent, 0, len(is))
 
 	var torrentFilesToPersist []*model.TorrentFile
@@ -139,7 +195,7 @@ func (c *crawler) writeTorrentBatch(
 
 	flushHashesToClassify()
 
-	if persistErr := c.dao.Transaction(func(tx *dao.Query) error {
+	if persistErr := func() error {
 		if err := tx.WithContext(ctx).Torrent.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: string(c.dao.Torrent.InfoHash.ColumnName())}},
 			DoUpdates: clause.AssignmentColumns([]string{
@@ -174,17 +230,15 @@ func (c *crawler) writeTorrentBatch(
 			}
 		}
 
-		return tx.WithContext(ctx).QueueJob.CreateInBatches(queueJobsToPersist, 10)
-	}); persistErr != nil {
-		c.logger.Errorf("error persisting torrents: %s", persistErr)
-
-		return nil, false
+		return tx.WithContext(ctx).QueueJob.Clauses(clause.OnConflict{DoNothing: true}).
+			CreateInBatches(queueJobsToPersist, 10)
+	}(); persistErr != nil {
+		return nil, persistErr
 	}
 
-	c.persistedTotal.With(prometheus.Labels{labelEntity: "Torrent"}).Add(float64(len(torrentsToPersist)))
 	c.logger.Debugw("persisted torrents", "count", len(torrentsToPersist))
 
-	return hashMap, true
+	return hashMap, nil
 }
 
 // drainPersistTorrents writes what the torrent pipeline still holds. It runs
@@ -297,7 +351,7 @@ func createTorrentModel(
 		FilesCount:  filesCount,
 		Sources: []model.TorrentsTorrentSource{
 			{
-				Source:   "dht",
+				Source:   dhtSource,
 				InfoHash: hash,
 			},
 		},
@@ -366,6 +420,45 @@ func (c *crawler) runPersistSources(ctx context.Context) {
 }
 
 func (c *crawler) persistSourceBatch(ctx context.Context, scrapes []infoHashWithScrape) {
+	evidence := make([]moderation.Evidence, 0, len(scrapes))
+	for _, scrape := range scrapes {
+		hash := scrape.infoHash
+		evidence = append(evidence, moderation.Evidence{InfoHash: &hash})
+	}
+
+	var count int
+
+	err := moderation.NewService(c.dao.UnderlyingDB()).Ingest(ctx, evidence,
+		func(db *gorm.DB, permitted map[protocol.ID]bool) error {
+			eligible := make([]infoHashWithScrape, 0, len(scrapes))
+			for _, scrape := range scrapes {
+				if permitted[scrape.infoHash] {
+					eligible = append(eligible, scrape)
+				}
+			}
+
+			if len(eligible) == 0 {
+				return nil
+			}
+
+			var err error
+
+			count, err = c.writeEligibleSourceBatch(ctx, eligible, dao.Use(db))
+
+			return err
+		})
+	if err != nil {
+		c.logger.Errorf("error persisting torrent sources: %s", err)
+		return
+	}
+
+	c.persistedTotal.With(prometheus.Labels{labelEntity: "TorrentsTorrentSource"}).Add(float64(count))
+	c.logger.Debugw("persisted torrent sources", "count", count)
+}
+
+func (c *crawler) writeEligibleSourceBatch(
+	ctx context.Context, scrapes []infoHashWithScrape, tx *dao.Query,
+) (int, error) {
 	srcs := make([]*model.TorrentsTorrentSource, 0, len(scrapes))
 
 	hashSet := make(map[protocol.ID]struct{}, len(scrapes))
@@ -383,7 +476,7 @@ func (c *crawler) persistSourceBatch(ctx context.Context, scrapes []infoHashWith
 		}
 	}
 
-	if persistErr := c.dao.WithContext(ctx).TorrentsTorrentSource.Clauses(
+	persistErr := tx.WithContext(ctx).TorrentsTorrentSource.Clauses(
 		clause.OnConflict{
 			Columns: []clause.Column{
 				{Name: string(c.dao.TorrentsTorrentSource.InfoHash.ColumnName())},
@@ -400,16 +493,12 @@ func (c *crawler) persistSourceBatch(ctx context.Context, scrapes []infoHashWith
 		},
 	).Where(
 		// check that the torrent record hasn't been deleted:
-		gen.Exists(c.dao.WithContext(ctx).Torrent.Where(
+		gen.Exists(tx.WithContext(ctx).Torrent.Where(
 			c.dao.Torrent.InfoHash.EqCol(c.dao.TorrentsTorrentSource.InfoHash),
 		)),
-	).CreateInBatches(srcs, 100); persistErr != nil {
-		c.logger.Errorf("error persisting torrent sources: %s", persistErr.Error())
-	} else {
-		c.persistedTotal.With(prometheus.Labels{labelEntity: "TorrentsTorrentSource"}).
-			Add(float64(len(srcs)))
-		c.logger.Debugw("persisted torrent sources", "count", len(srcs))
-	}
+	).CreateInBatches(srcs, 100)
+
+	return len(srcs), persistErr
 }
 
 func createTorrentSourceModel(
@@ -419,7 +508,7 @@ func createTorrentSourceModel(
 	leechers := model.NewNullUint(uint(result.bfpe.ApproximatedSize()))
 
 	return model.TorrentsTorrentSource{
-		Source:   "dht",
+		Source:   dhtSource,
 		InfoHash: result.infoHash,
 		Seeders:  seeders,
 		Leechers: leechers,

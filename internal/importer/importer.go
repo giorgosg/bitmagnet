@@ -9,8 +9,10 @@ import (
 
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
+	"github.com/bitmagnet-io/bitmagnet/internal/moderation"
 	"github.com/bitmagnet-io/bitmagnet/internal/processor"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol"
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -177,6 +179,30 @@ func (i *activeImport) flushLocked() {
 }
 
 func (i *activeImport) persistItems(items ...Item) error {
+	evidence := make([]moderation.Evidence, 0, len(items))
+	for _, item := range items {
+		hash := item.InfoHash
+		evidence = append(evidence, moderation.Evidence{InfoHash: &hash, Name: item.Name})
+	}
+
+	return moderation.NewService(i.dao.UnderlyingDB()).Ingest(i.ctx, evidence,
+		func(db *gorm.DB, permitted map[protocol.ID]bool) error {
+			eligible := make([]Item, 0, len(items))
+			for _, item := range items {
+				if permitted[item.InfoHash] {
+					eligible = append(eligible, item)
+				}
+			}
+
+			if len(eligible) == 0 {
+				return nil
+			}
+
+			return i.persistEligibleItems(dao.Use(db), eligible...)
+		})
+}
+
+func (i *activeImport) persistEligibleItems(tx *dao.Query, items ...Item) error {
 	var sources []*model.TorrentSource
 
 	sourcesMap := make(map[string]struct{})
@@ -220,7 +246,7 @@ func (i *activeImport) persistItems(items ...Item) error {
 		return jobErr
 	}
 
-	return i.dao.Transaction(func(tx *dao.Query) error {
+	return func() error {
 		if len(sources) > 0 {
 			if createSourcesErr := tx.TorrentSource.WithContext(i.ctx).Clauses(clause.OnConflict{
 				DoNothing: true,
@@ -258,7 +284,7 @@ func (i *activeImport) persistItems(items ...Item) error {
 		// Adapted from o51r15/bitmagnet@dd314bf47: an existing pending job has the
 		// same work, so a fingerprint collision must not roll back the import batch.
 		return tx.QueueJob.Clauses(clause.OnConflict{DoNothing: true}).Create(&job)
-	})
+	}()
 }
 
 func createTorrentModel(info Info, item Item) model.Torrent {

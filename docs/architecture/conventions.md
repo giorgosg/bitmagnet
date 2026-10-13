@@ -83,7 +83,7 @@ the unfixed code. The bar exists because it has been earned: cherry-picks here h
 compiled, vetted and passed the whole suite while carrying a shutdown deadlock and a cache
 that answered the wrong question.
 
-`dhtcrawler`, `importer`, `processor` and `blocking` have little coverage, so a change
+`dhtcrawler`, `importer` and `processor` have little coverage, so a change
 there gets a focused regression test or a standalone reproduction.
 
 Database tests **skip silently** without `TEST_POSTGRES_DSN`:

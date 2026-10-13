@@ -3,8 +3,8 @@
 `internal/moderation` owns exact harmful-content decisions keyed by the versioned
 [moderation identifier](../adr/0006-version-moderation-identifiers.md). Ordinary catalogue reads now enforce
 this ledger. The default classifier creates automatic decisions from the existing harmful
-keyword group; crawler/import enforcement and removal of legacy blocking are separate
-integrations. There is no moderation HTTP or GraphQL API yet.
+keyword group; crawler discovery and crawler/import writes enforce exact bans. Legacy
+Bloom blocking is removed. There is no moderation HTTP or GraphQL API yet.
 
 ## Keyword matching
 
@@ -51,9 +51,13 @@ trusted digest-only assertion can precede catalogue discovery. No foreign key po
 `torrents`: catalogue deletion cannot erase the decision or evidence. Filenames describe
 metadata, not verified file contents.
 
-Mutations insert on conflict and lock the exact decision row before updating private rows.
-This serializes first-time imports, automatic matches and moderator decisions for the same
-identifier. Failed history writes roll back state and evidence together. All ledger reads
+Mutations acquire a transaction advisory lock derived from the identifier, then insert
+on conflict and lock the exact decision row before updating private rows. Ingestion holds
+the same locks through catalogue writes, including identifiers without a decision row.
+Batch identifiers are locked in a stable order. Lock-key collisions only serialize work;
+membership remains an exact comparison of the complete identifier. Evidence retention and
+purge also acquire the same lock. This serializes imports, automatic matches, moderator
+decisions and crawler/import ingestion for the same identifier. Failed history writes roll back state and evidence together. All ledger reads
 force the no-cache context mode; `Get` reads state and evidence within one repeatable-read
 snapshot. The lazy fx factory opens no database for configuration-only CLI commands.
 
@@ -96,3 +100,20 @@ service, pending a permissioned moderator API.
 from a read-only repeatable-read snapshot. It omits auth/internal key-value state, moderation
 decisions, evidence/history and ban lists. See [hacking.md](../hacking.md) for connection and
 restore details; a full administrative `pg_dump` remains a separate database backup.
+
+## Ingestion and legacy cutover
+
+`Service.Discoverable` excludes only exact banned decisions. Pending records can acquire
+missing evidence and local allows permit ingestion. `Service.Ingest` rechecks under locks
+at the transaction write boundary: bans retain observed evidence without inserting torrents,
+files, hints, sources or classification work. Pending records preserve complete supplied
+paths independently of catalogue deletion and file thresholds. Sparse observations also
+copy missing existing catalogue metadata by indexed raw-infohash lookup; already retained
+uncapped paths take precedence over capped catalogue rows. Catalogue metadata stays
+hidden until a local allow; classification remains a separate operation.
+
+Ordinary GraphQL deletion and classifier category deletion remove catalogue rows only.
+They create neither harmful-content decisions nor persistent suppression. Migration `00026`
+discards the old `blocked_torrents` key and unlinks its existing large object when unshared;
+it never reads the Bloom entries or turns them into decisions. Downgrade cannot restore
+them. Old and new executables must not run concurrently against the upgraded database.

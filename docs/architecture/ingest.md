@@ -40,35 +40,23 @@ for the crawler's resource usage.
                              persistTorrents (batch)   persistSources (batch)
 ```
 
-## The four filters, in order
+## Discovery and validation
 
-An infohash is dropped at the first of these that claims it. Knowing the order explains
-most "why was this torrent not indexed" questions:
+The process-local stable `ignoreHashes` Bloom filter suppresses repeated discoveries
+under a mutex. It is a bounded load optimization and forgets hashes over time; it is
+never moderation authority. Triage checks discovered identifiers against the exact
+moderation ledger, discarding bans and permitting local allows and pending records.
+Pending discovery can acquire missing private evidence.
 
-1. **`ignoreHashes`** — a process-local `boom.StableBloomFilter` (10M cells) in
-   `crawler.go`. `testAndAdd` under a mutex. Purely an optimisation to keep load off the
-   database, but note that it is _stable_: entries evict over time, which is the only
-   reason a hash dropped here is ever reconsidered.
-2. **`blockingManager.Filter`** — the persisted blocklist, `internal/blocking`. Backed by
-   a bloom filter stored as a Postgres large object, reloaded every five minutes to pick
-   up blocks made by another process. That reload allocates and transfers 25 MB, so it
-   happens off the manager's mutex: a caller that finds one already in flight is answered
-   from the filter it has. Five minutes is already the staleness this filter permits.
-3. **Triage** ([`infohash_triage.go`](../../internal/dhtcrawler/infohash_triage.go)) — one
-   query joining `torrents` to `torrents_torrent_sources`. Four outcomes, documented in
-   the function's doc comment: fetch metainfo, rescrape, or discard.
-4. **`banning.Checker`** — applied to the _fetched_ metainfo in
-   [`request_meta_info.go`](../../internal/dhtcrawler/request_meta_info.go). A ban adds
-   the hash to the blocklist.
+Triage then joins `torrents` to `torrents_torrent_sources` to choose metainfo retrieval,
+rescraping or discard. `banning.Checker` on fetched metainfo is structural validation
+(name length, size and UTF-8), independent of harmful-content decisions. Rejection
+cancels the peer race without creating a persistent block or a suppression map.
 
-## Moderation identifier boundary
-
-[`internal/moderation`](../../internal/moderation/identifier.go) computes a membership
-identifier from a raw `protocol.ID` and provides a lazy
-[private decision ledger](moderation.md). The crawler and importer do not consume that
-ledger yet; persisted Bloom-filter blocking above continues to behave as described.
-The format and independent compatibility vectors are frozen in
-[ADR 0006](../adr/0006-version-moderation-identifiers.md).
+Migration `00026` discards `blocked_torrents` and its unshared large object. The
+legacy blocking subsystem is removed. Deleted torrents may be rediscovered if peers
+still offer them; discovery and recovery are not guaranteed. The identifier format is
+frozen in [ADR 0006](../adr/0006-version-moderation-identifiers.md).
 
 ## Fetching metainfo
 
@@ -80,7 +68,7 @@ declared metadata size and any single message.
 For each hash, the crawler requests metadata from up to five peers at once and returns
 the first permitted result. A shared request limit of `10 * ScalingFactor` bounds all
 peer connections across hashes. Failed peers are tried until one succeeds or all fail;
-a banned result blocks the hash. The winning result or crawler shutdown cancels the
+a structurally invalid result rejects the request. The winning result or crawler shutdown cancels the
 other requests, including a TCP connection stalled after its handshake begins.
 
 Everything this package reads is attacker-controlled. It is the only place in the tree
@@ -100,6 +88,12 @@ database, and it does more than its name suggests:
   On success it forwards each hash to the scrape channel. The write itself is
   `writeTorrentBatch`; the forwarding is separate because the shutdown drain below calls
   the write on its own, when there is no scrape stage left to forward to.
+- The moderation service holds per-identifier transaction locks through catalogue
+  writes and decision commits, including identifiers without an existing decision.
+  A racing ban cannot pass a stale membership check. Banned observations enrich private
+  evidence without catalogue insertion or scrape/classification forwarding. Pending
+  records retain an independent copy of all observed paths before the ordinary file cap,
+  and keep catalogue metadata hidden for a later local allow. Scraped source-count writes and imports use the same boundary.
 - Files whose display path starts with `.pad/` are skipped (BEP 47 padding), while
   `FilesCount` is still derived from the full metainfo file list.
 - `SaveFilesThreshold` (default 100) caps stored file rows; exceeding it sets

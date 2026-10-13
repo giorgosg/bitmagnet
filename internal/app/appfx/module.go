@@ -11,7 +11,6 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/app/cmd/reprocesscmd"
 	"github.com/bitmagnet-io/bitmagnet/internal/app/cmd/workercmd"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/authfx"
-	"github.com/bitmagnet-io/bitmagnet/internal/blocking/blockingfx"
 	"github.com/bitmagnet-io/bitmagnet/internal/classifier/classifierfx"
 	"github.com/bitmagnet-io/bitmagnet/internal/config/configfx"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/databasefx"
@@ -41,7 +40,6 @@ func New() fx.Option {
 	return fx.Module(
 		"app",
 		authfx.New(),
-		blockingfx.New(),
 		classifierfx.New(),
 		configfx.New(),
 		dhtcrawlerfx.New(),

@@ -19,7 +19,7 @@ fx.New(appfx.New(), loggingfx.WithLogger(), fx.Invoke(...)).Run()
 modules. Every subsystem contributes exactly one line there. As of this snapshot:
 
 ```
-authfx  blockingfx  classifierfx  configfx  databasefx  dhtcrawlerfx  dhtfx
+authfx  classifierfx  configfx  databasefx  dhtcrawlerfx  dhtfx
 gqlfx   healthfx    httpserverfx  importerfx  loggingfx  metainfofx   metricsfx
 moderationfx  processorfx  queuefx  telemetryfx  tmdbfx  torznabfx  validationfx  versionfx  workerfx
 ```

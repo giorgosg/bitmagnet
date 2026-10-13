@@ -81,7 +81,8 @@ workflow continues. Keyword matches retain pending evidence by default;
 `moderation.automatic_ban: true` instead creates automatic bans. Both stop classification
 without deletion or retries. A subsequent processing job after allow completes any missing
 classification; scheduling that job belongs to the moderator API integration. Category
-delete rules still use the separate `delete` action. See [moderation.md](moderation.md).
+delete rules still use the separate `delete` action and remove catalogue rows without
+persistent blocking or a harmful-content decision. See [moderation.md](moderation.md).
 
 ## The classifier
 

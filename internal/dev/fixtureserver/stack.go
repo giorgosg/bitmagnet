@@ -224,7 +224,7 @@ func Build(ctx context.Context, opts Options) (*Stack, error) {
 		return nil, err
 	}
 
-	// The processor and the blocking manager stay nil deliberately: each drags in
+	// The processor stays nil deliberately: it drags in
 	// a subsystem this stack has no business starting, and nothing it serves asks
 	// for them. Workers, health, the queue surface and torrent metrics used to be
 	// in that list and should not have been — they back the status, statistics

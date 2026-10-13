@@ -5,7 +5,6 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/browser_session"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/rbac"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/user"
-	"github.com/bitmagnet-io/bitmagnet/internal/blocking"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/search"
 	"github.com/bitmagnet-io/bitmagnet/internal/health"
@@ -29,7 +28,6 @@ type Resolver struct {
 	QueueManager         manager.Manager
 	TorrentMetricsClient torrentmetrics.Client
 	Processor            processor.Processor
-	BlockingManager      blocking.Manager
 	UserService          user.Service
 	APIKeyService        api_key.Service
 	RBACService          rbac.Service

@@ -101,7 +101,7 @@ change, while ordinary classification continues. Existing pending/banned decisio
 skipped on reprocessing; changing this setting does not re-decide them.
 
 The moderation ledger and classifier integration are present in this revision. The
-moderator API, review UI and ingestion cutover are separate integrations; complete those
+moderator API and review UI are separate integrations; complete those
 before deploying the moderation feature. Filenames describe metadata and do not verify
 file contents.
 
@@ -123,6 +123,7 @@ classifier:
 ```
 
 These rules delete matching catalogue records; they are not search filters. The
-processor also blocks deleted infohashes from rediscovery. Make a backup and test the
+processor does not create a harmful-content decision or persistent suppression; deleted
+torrents may be rediscovered. Make a backup and test the
 rules before reprocessing existing data. Use [reprocessing](../reprocessing/) to apply
 changed rules to torrents already in the database.
