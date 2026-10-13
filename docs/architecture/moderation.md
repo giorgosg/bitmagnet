@@ -1,10 +1,10 @@
 # Moderation ledger
 
 `internal/moderation` owns exact harmful-content decisions keyed by the versioned
-[moderation identifier](../adr/0006-version-moderation-identifiers.md). This is a persistence
-foundation: the classifier, crawler, importer and catalogue reads do not yet consume it,
-and there is no moderation HTTP or GraphQL API. Existing blocking behaviour remains until
-those integrations land together with catalogue visibility enforcement.
+[moderation identifier](../adr/0006-version-moderation-identifiers.md). Ordinary catalogue reads now enforce
+this ledger. The classifier, crawler and importer do not yet create moderation decisions,
+and there is no moderation HTTP or GraphQL API. Existing keyword deletion and legacy
+blocking remain until the ingestion cutover; this read foundation does not activate them.
 
 ## State and precedence
 
@@ -46,4 +46,33 @@ retain newly supplied evidence; purge does not withdraw a ban or allow.
 file-path search. `History` returns ordered decision events. Both use keyset cursors, default
 to 50 items and reject limits above 100. Search has no unbounded count query; it returns a
 next cursor only when another page exists. Complete evidence is loaded separately via `Get`.
-These operations are separate from ordinary catalogue queries and do not activate quarantine.
+These operations are separate from ordinary catalogue queries.
+
+## Catalogue visibility
+
+`internal/database/catalogue` owns the mandatory read predicate. Torrent search, direct
+infohash lookup, file queries and torrent-content search exclude pending/banned digests.
+PostgreSQL computes the frozen v1 SHA-256 over the context plus raw infohash bytes and
+compares it with the exact ledger primary key; no Bloom filter or catalogue-wide digest
+index is involved. Digest-only bans work before retained evidence exists.
+
+Counts and facets use the same exclusion. Dynamic tag/source/year/collection values hide
+metadata backed only by hidden torrents, including a selected value whose count is zero.
+Unassociated metadata and source/collection configuration retain their previous visibility.
+Shared content stays visible when at least one visible torrent backs it, while hidden
+associations cannot contribute to ordinary content queries. GraphQL and Torznab inherit
+these constraints, with a separate guard on GraphQL source listings. Operational metrics
+and worker counts remain operational totals.
+
+Ordinary catalogue reads force fresh database queries after caller cache options, including
+hydration and dynamic facet values. A result cached before a flag or ban cannot return
+its old names or paths. The trusted `search.MetadataSearch` is separately injected into
+classification, so classification can reuse known content metadata before a visible torrent
+exists; GraphQL and Torznab do not receive that interface. It is not a catalogue bypass
+option. Private review evidence remains accessible only through the internal moderation
+service, pending a permissioned moderator API.
+
+`task export-data` streams only visible catalogue rows and their metadata relationships
+from a read-only repeatable-read snapshot. It omits auth/internal key-value state, moderation
+decisions, evidence/history and ban lists. See [hacking.md](../hacking.md) for connection and
+restore details; a full administrative `pg_dump` remains a separate database backup.

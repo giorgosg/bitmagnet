@@ -54,6 +54,15 @@ line verbatim including a Torznab `apikey`).
 Adding a field means: edit the schema, `task gen-gql`, implement in `resolvers/`, then
 regenerate external clients in their own projects.
 
+## Catalogue visibility
+
+GraphQL torrent-content search, direct hash requests, files, tag suggestions and source
+listings exclude pending/banned records through the shared database catalogue policy.
+Counts, facets and hydrated relationships obey it too. `cached` inputs cannot return an
+older pre-quarantine result. Catalogue query permission, including administrator access,
+does not bypass this policy. Private evidence has no GraphQL surface yet. Torznab searches
+use the same mandatory exclusion. See [moderation.md](moderation.md).
+
 ## Torznab
 
 `internal/torznab` is the \*arr integration surface — what Sonarr, Radarr and Prowlarr

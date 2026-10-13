@@ -64,12 +64,28 @@ run through the generic query in `query/query.go`. Three properties are worth kn
   are separate parameterized queries, so each value stays bound through both operations.
 
 The existence check and limited CTE item strategy also pass GORM subqueries with bound
-parameters. Search no longer renders user values into SQL text. The historical
+parameters. Search no longer renders user values into SQL text. Grouping criteria extract immutable
+conditions from cloned GORM statements, so parallel items/counts/facets do not consume
+scopes on a shared statement. The historical
 `budgeted_count(text, double precision)` function in `migrations/00010_budgeted_count.sql`
 is unused by the application; it remains in existing databases for compatibility with
 older instances during an upgrade. `search/injection_integration_test.go` checks search
 strings, tag criteria and tag facet filters with both counting modes, including with
 `standard_conforming_strings` off.
+
+## Catalogue visibility
+
+Concrete catalogue search factories apply the mandatory pending/banned exclusion from
+`internal/database/catalogue` before item, count and facet queries. They force no-cache
+mode, so caller cache options cannot resurrect pre-quarantine metadata. Dynamic facet
+values and source listings also use the policy. Content metadata backed solely by hidden torrents is excluded; unassociated metadata
+retains its previous visibility. The classifier receives a separate trusted metadata lookup interface
+for content not yet present in the ordinary catalogue. See [moderation.md](moderation.md).
+
+Catalogue SQL exports apply the same policy and retain only visible relationships.
+Metadata source definitions include dependencies used only by visible torrent hints;
+unassociated definitions are preserved, while sources used solely by hidden rows are excluded.
+They are distinct from full administrative database backups.
 
 ## Migrations
 

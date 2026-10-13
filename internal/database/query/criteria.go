@@ -4,6 +4,7 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/maps"
 	"gorm.io/gen/field"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func Where(conditions ...Criteria) Option {
@@ -64,7 +65,19 @@ type RawCriteria struct {
 }
 
 func (c RawCriteria) Raw(DBContext) (RawCriteria, error) {
+	if db, ok := c.Query.(*gorm.DB); ok {
+		c.Query = criterionExpression(db)
+	}
+
 	return c, nil
+}
+
+// GORM consumes scopes when a *gorm.DB is used as a condition. Extract an
+// immutable expression from a cloned statement so item/count/facet queries can
+// reuse the criterion concurrently, including an empty grouping criterion.
+func criterionExpression(db *gorm.DB) clause.Expression {
+	cloned := db.Session(&gorm.Session{Initialized: true})
+	return clause.And(cloned.Statement.BuildCondition(cloned)...)
 }
 
 type DaoCriteria struct {
@@ -87,7 +100,7 @@ func (c DaoCriteria) Raw(ctx DBContext) (RawCriteria, error) {
 	}
 
 	return RawCriteria{
-		Query: sq,
+		Query: criterionExpression(sq),
 		Joins: c.Joins,
 	}, nil
 }
@@ -112,7 +125,7 @@ func (c OrCriteria) Raw(ctx DBContext) (RawCriteria, error) {
 
 	return RawCriteria{
 		Joins: joins,
-		Query: sq,
+		Query: criterionExpression(sq),
 	}, nil
 }
 
@@ -136,7 +149,7 @@ func (c AndCriteria) Raw(ctx DBContext) (RawCriteria, error) {
 
 	return RawCriteria{
 		Joins: joins,
-		Query: sq,
+		Query: criterionExpression(sq),
 	}, nil
 }
 
@@ -160,7 +173,7 @@ func (c NotCriteria) Raw(ctx DBContext) (RawCriteria, error) {
 
 	return RawCriteria{
 		Joins: joins,
-		Query: sq,
+		Query: criterionExpression(sq),
 	}, nil
 }
 

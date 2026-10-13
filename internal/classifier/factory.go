@@ -11,10 +11,10 @@ import (
 
 type Params struct {
 	fx.In
-	Config     Config
-	TmdbConfig tmdb.Config
-	Search     lazy.Lazy[search.Search]
-	TmdbClient lazy.Lazy[tmdb.Client]
+	Config         Config
+	TmdbConfig     tmdb.Config
+	MetadataSearch lazy.Lazy[search.MetadataSearch]
+	TmdbClient     lazy.Lazy[tmdb.Client]
 }
 
 type Result struct {
@@ -26,7 +26,7 @@ type Result struct {
 
 func New(params Params) Result {
 	lc := lazy.New(func() (Compiler, error) {
-		s, err := params.Search.Get()
+		s, err := params.MetadataSearch.Get()
 		if err != nil {
 			return nil, err
 		}

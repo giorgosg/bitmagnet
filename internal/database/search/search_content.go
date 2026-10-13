@@ -3,6 +3,7 @@ package search
 import (
 	"context"
 
+	"github.com/bitmagnet-io/bitmagnet/internal/database/catalogue"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/query"
 	"github.com/bitmagnet-io/bitmagnet/internal/maps"
@@ -21,18 +22,32 @@ type ContentSearch interface {
 	Content(ctx context.Context, options ...query.Option) (result ContentResult, err error)
 }
 
-func (s search) Content(ctx context.Context, options ...query.Option) (result ContentResult, err error) {
-	return query.GenericQuery[ContentResultItem](
-		ctx,
-		s.q,
-		query.Options(append([]query.Option{query.SelectAll()}, options...)...),
-		model.TableNameContent,
-		func(ctx context.Context, q *dao.Query) query.SubQuery {
-			return query.GenericSubQuery[dao.IContentDo]{
-				SubQuery: q.Content.WithContext(ctx).ReadDB(),
+// MetadataSearch is a trusted classification lookup, separate from ordinary
+// catalogue visibility. It is not supplied to GraphQL or Torznab.
+type MetadataSearch interface {
+	Metadata(context.Context, ...query.Option) (ContentResult, error)
+}
+type metadataSearch struct{ q *dao.Query }
+
+func (s search) Content(ctx context.Context, options ...query.Option) (ContentResult, error) {
+	return contentQuery(ctx, s.q, options, true)
+}
+
+func (s metadataSearch) Metadata(ctx context.Context, options ...query.Option) (ContentResult, error) {
+	return contentQuery(ctx, s.q, options, false)
+}
+
+func contentQuery(ctx context.Context, q *dao.Query, options []query.Option, visible bool) (ContentResult, error) {
+	return query.GenericQuery[ContentResultItem](ctx, q,
+		catalogueOptions(options),
+		model.TableNameContent, func(ctx context.Context, q *dao.Query) query.SubQuery {
+			sq := q.Content.WithContext(catalogue.Context(ctx)).ReadDB()
+			if visible {
+				sq = sq.Where(field.NewUnsafeFieldRaw(catalogue.VisibleContent("content")))
 			}
-		},
-	)
+
+			return query.GenericSubQuery[dao.IContentDo]{SubQuery: sq}
+		})
 }
 
 func ContentDefaultOption() query.Option {
@@ -81,6 +96,9 @@ func ContentCoreJoins() query.Option {
 					q.TorrentContent.ContentType.EqCol(q.Content.Type),
 					q.TorrentContent.ContentSource.EqCol(q.Content.Source),
 					q.TorrentContent.ContentID.EqCol(q.Content.ID),
+					field.NewUnsafeFieldRaw(
+						catalogue.VisibleInfoHash("torrent_contents.info_hash"),
+					),
 				},
 				Type: query.TableJoinTypeInner,
 				Dependencies: maps.NewInsertMap(

@@ -3,6 +3,7 @@ package search
 import (
 	"context"
 
+	"github.com/bitmagnet-io/bitmagnet/internal/database/catalogue"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/query"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
@@ -25,11 +26,12 @@ func (s search) TorrentContent(ctx context.Context, options ...query.Option) (To
 	return query.GenericQuery[TorrentContentResultItem](
 		ctx,
 		s.q,
-		query.Options(append([]query.Option{query.SelectAll()}, options...)...),
+		catalogueOptions(options),
 		model.TableNameTorrentContent,
 		func(ctx context.Context, q *dao.Query) query.SubQuery {
 			return query.GenericSubQuery[dao.ITorrentContentDo]{
-				SubQuery: q.TorrentContent.WithContext(ctx).ReadDB(),
+				SubQuery: q.TorrentContent.WithContext(catalogue.Context(ctx)).ReadDB().
+					Where(field.NewUnsafeFieldRaw(catalogue.VisibleInfoHash("torrent_contents.info_hash"))),
 			}
 		},
 	)

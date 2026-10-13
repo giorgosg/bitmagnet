@@ -69,6 +69,12 @@ takes a batch of infohashes and:
 `ClassifyMode` (`rematch`) and `ClassifierFlags` on the message are how the `reprocess`
 CLI command and the GraphQL `torrent.reprocess` mutation steer this.
 
+Pending/banned torrents are excluded by the shared catalogue reads used to load processing
+inputs. The classifier itself receives the separately injected `search.MetadataSearch`
+lookup for known content, preserving reuse of metadata backed by hidden or not-yet-indexed
+torrents. This read foundation does not yet change keyword actions; quarantine activation
+and classification restoration on allow are later integrations. See [moderation.md](moderation.md).
+
 ## The classifier
 
 `internal/classifier` is a small interpreted rule engine. It is the most unusual package

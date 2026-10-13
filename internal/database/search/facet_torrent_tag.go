@@ -1,8 +1,10 @@
 package search
 
 import (
+	"github.com/bitmagnet-io/bitmagnet/internal/database/catalogue"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/query"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
+	"gorm.io/gen/field"
 )
 
 const TorrentTagFacetKey = "torrent_tag"
@@ -28,7 +30,10 @@ type torrentTagFacet struct {
 func (torrentTagFacet) Values(ctx query.FacetContext) (map[string]string, error) {
 	q := ctx.Query().TorrentTag
 
-	tags, tagsErr := q.WithContext(ctx.Context()).Distinct(q.Name).Find()
+	tags, tagsErr := q.WithContext(catalogue.Context(ctx.Context())).
+		Where(field.NewUnsafeFieldRaw(catalogue.VisibleInfoHash("torrent_tags.info_hash"))).
+		Distinct(q.Name).
+		Find()
 	if tagsErr != nil {
 		return nil, tagsErr
 	}

@@ -16,7 +16,7 @@ type LocalSearch interface {
 }
 
 type localSearch struct {
-	search.Search
+	search.MetadataSearch
 }
 
 func (l localSearch) ContentByID(ctx context.Context, ref model.ContentRef) (model.Content, error) {
@@ -28,7 +28,7 @@ func (l localSearch) ContentByID(ctx context.Context, ref model.ContentRef) (mod
 		search.ContentDefaultHydrate(),
 		query.Limit(1),
 	}
-	if ref.Source == "tmdb" {
+	if ref.Source == model.SourceTmdb {
 		options = append(options, query.Where(
 			search.ContentCanonicalIdentifierCriteria(model.ContentRef{
 				Source: ref.Source,
@@ -44,7 +44,7 @@ func (l localSearch) ContentByID(ctx context.Context, ref model.ContentRef) (mod
 		))
 	}
 
-	result, err := l.Content(ctx, options...)
+	result, err := l.Metadata(ctx, options...)
 	if err != nil {
 		return model.Content{}, err
 	}
@@ -77,7 +77,7 @@ func (l localSearch) ContentBySearch(
 		)
 	}
 
-	result, searchErr := l.Content(
+	result, searchErr := l.Metadata(
 		ctx,
 		options...,
 	)

@@ -3,9 +3,11 @@ package search
 import (
 	"context"
 
+	"github.com/bitmagnet-io/bitmagnet/internal/database/catalogue"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/query"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
+	"gorm.io/gen/field"
 )
 
 type TorrentFilesResult = query.GenericResult[model.TorrentFile]
@@ -18,11 +20,12 @@ func (s search) TorrentFiles(ctx context.Context, options ...query.Option) (Torr
 	return query.GenericQuery[model.TorrentFile](
 		ctx,
 		s.q,
-		query.Options(append([]query.Option{query.SelectAll()}, options...)...),
+		catalogueOptions(options),
 		model.TableNameTorrentFile,
 		func(ctx context.Context, q *dao.Query) query.SubQuery {
 			return query.GenericSubQuery[dao.ITorrentFileDo]{
-				SubQuery: q.TorrentFile.WithContext(ctx).ReadDB(),
+				SubQuery: q.TorrentFile.WithContext(catalogue.Context(ctx)).ReadDB().
+					Where(field.NewUnsafeFieldRaw(catalogue.VisibleInfoHash("torrent_files.info_hash"))),
 			}
 		},
 	)
