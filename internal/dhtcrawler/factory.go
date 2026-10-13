@@ -8,6 +8,7 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/search"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
+	"github.com/bitmagnet-io/bitmagnet/internal/moderation"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol/dht/client"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol/dht/ktable"
@@ -26,6 +27,7 @@ const labelEntity = "entity"
 type Params struct {
 	fx.In
 	Config            Config
+	KeywordPolicy     lazy.Lazy[*moderation.KeywordPolicy]
 	KTable            ktable.Table
 	Client            lazy.Lazy[client.Client]
 	MetainfoRequester metainforequester.Requester
@@ -84,7 +86,13 @@ func New(params Params) Result {
 						return err
 					}
 
+					policy, err := params.KeywordPolicy.Get()
+					if err != nil {
+						return err
+					}
+
 					c = crawler{
+						keywordPolicy:                policy,
 						kTable:                       params.KTable,
 						client:                       cl,
 						metainfoRequester:            params.MetainfoRequester,

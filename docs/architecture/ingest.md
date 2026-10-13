@@ -88,6 +88,11 @@ database, and it does more than its name suggests:
   On success it forwards each hash to the scrape channel. The write itself is
   `writeTorrentBatch`; the forwarding is separate because the shutdown drain below calls
   the write on its own, when there is no scrape stage left to forward to.
+- Crawler and importer ingestion apply the shared harmful-keyword policy from the merged
+  classifier source before catalogue writes. Initial matches retain complete observed
+  metadata before the file cap, including a known single-file filename. This check also
+  runs when queue backpressure skips classification work. Imports without metainfo retain
+  a name without inventing paths; unmatched observations acquire no private evidence.
 - The moderation service holds per-identifier transaction locks through catalogue
   writes and decision commits, including identifiers without an existing decision.
   A racing ban cannot pass a stale membership check. Banned observations enrich private

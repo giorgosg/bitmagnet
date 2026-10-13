@@ -47,9 +47,10 @@ type Info struct {
 }
 
 type importer struct {
-	dao         *dao.Query
-	bufferSize  uint
-	maxWaitTime time.Duration
+	dao           *dao.Query
+	keywordPolicy *moderation.KeywordPolicy
+	bufferSize    uint
+	maxWaitTime   time.Duration
 }
 
 var ErrImportClosed = errors.New("import closed")
@@ -185,7 +186,14 @@ func (i *activeImport) persistItems(items ...Item) error {
 		evidence = append(evidence, moderation.Evidence{InfoHash: &hash, Name: item.Name})
 	}
 
-	return moderation.NewService(i.dao.UnderlyingDB()).Ingest(i.ctx, evidence,
+	ledger := moderation.NewService(i.dao.UnderlyingDB())
+	for _, observed := range evidence {
+		if _, err := i.keywordPolicy.Apply(i.ctx, ledger, observed); err != nil {
+			return err
+		}
+	}
+
+	return ledger.Ingest(i.ctx, evidence,
 		func(db *gorm.DB, permitted map[protocol.ID]bool) error {
 			eligible := make([]Item, 0, len(items))
 			for _, item := range items {

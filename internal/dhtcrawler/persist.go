@@ -67,6 +67,10 @@ func (c *crawler) writeTorrentBatch(
 			files = append(files, file.DisplayPath(&item.metaInfo))
 		}
 
+		if len(files) == 0 {
+			files = append(files, item.metaInfo.BestName())
+		}
+
 		evidence = append(
 			evidence,
 			moderation.Evidence{InfoHash: &hash, Name: item.metaInfo.BestName(), Files: files},
@@ -75,7 +79,15 @@ func (c *crawler) writeTorrentBatch(
 
 	var written map[protocol.ID]infoHashWithMetaInfo
 
-	err := moderation.NewService(c.dao.UnderlyingDB()).Ingest(ctx, evidence,
+	ledger := moderation.NewService(c.dao.UnderlyingDB())
+	for _, observed := range evidence {
+		if _, err := c.keywordPolicy.Apply(ctx, ledger, observed); err != nil {
+			c.logger.Errorf("error checking harmful keywords: %s", err)
+			return nil, false
+		}
+	}
+
+	err := ledger.Ingest(ctx, evidence,
 		func(db *gorm.DB, permitted map[protocol.ID]bool) error {
 			eligible := make([]infoHashWithMetaInfo, 0, len(is))
 			for _, item := range is {

@@ -10,6 +10,7 @@ import (
 	"cel.dev/cel-go/common/types/ref"
 	"github.com/bitmagnet-io/bitmagnet/internal/classifier/classification"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
+	"github.com/bitmagnet-io/bitmagnet/internal/moderation"
 	"github.com/bitmagnet-io/bitmagnet/internal/protobuf"
 )
 
@@ -28,11 +29,12 @@ type compiler struct {
 
 type compilerContext struct {
 	features
-	keywords      keywordGroups
-	celEnv        *cel.Env
-	source        any
-	path          []string
-	workflowNames map[string]struct{}
+	keywords         keywordGroups
+	moderationConfig moderation.Config
+	celEnv           *cel.Env
+	source           any
+	path             []string
+	workflowNames    map[string]struct{}
 }
 
 type compilerOption func(Source, *compilerContext) error
@@ -88,8 +90,9 @@ func (c compilerContext) fatal(cause error) error {
 
 func (c compiler) Compile(source Source) (Runner, error) {
 	ctx := &compilerContext{
-		source:        source,
-		workflowNames: source.workflowNames(),
+		moderationConfig: c.dependencies.moderationConfig,
+		source:           source,
+		workflowNames:    source.workflowNames(),
 	}
 
 	source, sourceErr := decode[Source](*ctx)

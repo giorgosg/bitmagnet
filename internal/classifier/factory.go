@@ -22,9 +22,10 @@ type Params struct {
 
 type Result struct {
 	fx.Out
-	Compiler lazy.Lazy[Compiler]
-	Source   lazy.Lazy[Source]
-	Runner   lazy.Lazy[Runner]
+	Compiler      lazy.Lazy[Compiler]
+	Source        lazy.Lazy[Source]
+	Runner        lazy.Lazy[Runner]
+	KeywordPolicy lazy.Lazy[*moderation.KeywordPolicy]
 }
 
 func New(params Params) Result {
@@ -74,6 +75,14 @@ func New(params Params) Result {
 	})
 
 	return Result{
+		KeywordPolicy: lazy.New(func() (*moderation.KeywordPolicy, error) {
+			src, err := lsrc.Get()
+			if err != nil {
+				return nil, err
+			}
+
+			return moderation.NewKeywordPolicy(src.Keywords["banned"], params.ModerationConfig)
+		}),
 		Compiler: lc,
 		Source:   lsrc,
 		Runner: lazy.New(func() (Runner, error) {

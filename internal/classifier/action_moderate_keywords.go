@@ -2,11 +2,8 @@ package classifier
 
 import (
 	"errors"
-	"fmt"
-	"strings"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/classifier/classification"
-	"github.com/bitmagnet-io/bitmagnet/internal/keywords"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
 	"github.com/bitmagnet-io/bitmagnet/internal/moderation"
 )
@@ -27,7 +24,7 @@ func (moderateKeywordsAction) compileAction(ctx compilerContext) (action, error)
 		return action{}, ctx.error(err)
 	}
 
-	regex, err := keywords.NewRegexFromKeywords(ctx.keywords["banned"]...)
+	policy, err := moderation.NewKeywordPolicy(ctx.keywords["banned"], ctx.moderationConfig)
 	if err != nil {
 		return action{}, ctx.fatal(err)
 	}
@@ -47,26 +44,6 @@ func (moderateKeywordsAction) compileAction(ctx compilerContext) (action, error)
 			}
 		}
 
-		parts := []string{ctx.torrentPb.GetBaseName()}
-
-		for _, file := range ctx.torrentPb.GetFiles() {
-			parts = append(parts, file.GetBasePath())
-		}
-
-		matches := regex.FindAllString(strings.Join(parts, " "), -1)
-		if len(matches) == 0 {
-			return ctx.result, nil
-		}
-
-		if ctx.moderation == nil {
-			return ctx.result, fmt.Errorf("%s requires moderation service", moderateKeywordsName)
-		}
-
-		status := moderation.Pending
-		if ctx.moderationConfig.AutomaticBan {
-			status = moderation.Banned
-		}
-
 		// CEL may synthesize a file from a name when metainfo is absent. Evidence
 		// records only supplied paths, or the implicit known single-file name.
 		var files []string
@@ -83,10 +60,15 @@ func (moderateKeywordsAction) compileAction(ctx compilerContext) (action, error)
 
 		evidence := moderation.Evidence{
 			InfoHash: &ctx.torrent.InfoHash, Name: ctx.torrent.Name, Files: files,
-			Rule: "keywords.banned: " + regex.String(), Matches: matches,
 		}
-		if err := ctx.moderation.ApplyAutomatic(ctx.Context, id, status, evidence); err != nil {
+
+		matched, err := policy.Apply(ctx.Context, ctx.moderation, evidence)
+		if err != nil {
 			return ctx.result, err
+		}
+
+		if !matched {
+			return ctx.result, nil
 		}
 		// A moderator may have allowed the torrent while the keywords were evaluated.
 		record, err := ctx.moderation.Get(ctx.Context, id)

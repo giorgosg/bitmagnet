@@ -82,8 +82,12 @@ configuration. Existing local content can still supply a match; use
 
 ## Harmful-keyword quarantine
 
-The included workflow sends matches from the existing `keywords.banned` group to pending
-moderation by default. Pending and banned torrents are hidden from catalogue queries,
+Crawler and importer ingestion check the merged `keywords.banned` group before catalogue
+writes, and the included workflow applies the same check to existing catalogue rows.
+Matches enter pending moderation by default. Initial crawler matches retain all observed
+paths before the file storage limit, including the implicit filename of known single-file
+metadata. Imports without file metadata retain only their observed name. Pending and banned
+torrents are hidden from catalogue queries,
 GraphQL details/files, Torznab and catalogue exports. The decision retains the torrent name,
 available complete file paths and matching rule privately for review. It adds no tag and
 stops classification without deleting metadata or repeatedly retrying the job.
@@ -105,8 +109,9 @@ moderator API and review UI are separate integrations; complete those
 before deploying the moderation feature. Filenames describe metadata and do not verify
 file contents.
 
-If you replace the default workflow, use the `moderate_keywords` action for harmful
-keyword moderation, or call the included `default` workflow. A custom keyword branch
+Ingestion checks continue to apply when you replace the default workflow. Use the
+`moderate_keywords` action or call the included `default` workflow to check existing
+catalogue rows during classification. A custom keyword branch
 using `delete` keeps catalogue-deletion semantics and cannot create a reviewable decision.
 
 ## Deletion rules

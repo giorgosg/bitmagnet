@@ -2,14 +2,20 @@
 
 `internal/moderation` owns exact harmful-content decisions keyed by the versioned
 [moderation identifier](../adr/0006-version-moderation-identifiers.md). Ordinary catalogue reads now enforce
-this ledger. The default classifier creates automatic decisions from the existing harmful
-keyword group; crawler discovery and crawler/import writes enforce exact bans. Legacy
+this ledger. Crawler/import ingestion and the default classifier share automatic decisions
+from the existing harmful keyword group; crawler discovery and crawler/import writes enforce exact bans. Legacy
 Bloom blocking is removed. There is no moderation HTTP or GraphQL API yet.
 
 ## Keyword matching
 
 `moderate_keywords` replaces the default harmful-keyword `delete` branch. It uses the
 same keyword grammar and combined base name/base file paths as the previous CEL condition.
+`KeywordPolicy` compiles the merged classifier `keywords.banned` source and is supplied to
+both ingestion factories. Crawler metadata and importer names are checked before catalogue
+writes or classification queues; harmful crawler matches retain every observed path before
+`SaveFilesThreshold` caps ordinary file rows. Ordinary metadata acquires no private evidence.
+Known single-file metainfo retains its implicit filename; imports without metainfo keep
+missing paths nil. The classifier action reuses this policy for existing catalogue rows.
 Before evaluating it, the action checks for a local allow; allowed torrents continue normal
 classification, regardless of keyword changes. Category-deletion rules remain independent.
 

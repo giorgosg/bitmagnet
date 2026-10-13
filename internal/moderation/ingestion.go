@@ -175,6 +175,10 @@ func withCatalogueEvidence(tx *gorm.DB, id Identifier, observed Evidence) (Evide
 		for _, file := range files {
 			observed.Files = append(observed.Files, file.Path)
 		}
+
+		if torrent.FilesStatus == model.FilesStatusSingle && len(observed.Files) == 0 {
+			observed.Files = append(observed.Files, torrent.Name)
+		}
 	}
 
 	return observed, nil
