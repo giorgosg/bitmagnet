@@ -15,6 +15,7 @@ import Magnes.Api.Enum.FacetLogic
 import Magnes.Api.Enum.FileType
 import Magnes.Api.Enum.Language
 import Magnes.Api.Enum.MetricsBucketDuration
+import Magnes.Api.Enum.ModerationStatus
 import Magnes.Api.Enum.QueueJobStatus
 import Magnes.Api.Enum.QueueJobsOrderByField
 import Magnes.Api.Enum.TorrentContentOrderByField
@@ -301,6 +302,118 @@ encodeListUsersInput : ListUsersInput -> Value
 encodeListUsersInput input____ =
     Encode.maybeObject
         [ ( "pagination", encodePaginationInput |> Encode.optional input____.pagination ), ( "usernameLike", Encode.string |> Encode.optional input____.usernameLike ) ]
+
+
+buildModerationDecisionInput :
+    ModerationDecisionInputRequiredFields
+    -> (ModerationDecisionInputOptionalFields -> ModerationDecisionInputOptionalFields)
+    -> ModerationDecisionInput
+buildModerationDecisionInput required____ fillOptionals____ =
+    let
+        optionals____ =
+            fillOptionals____
+                { infoHash = Absent }
+    in
+    { identifier = required____.identifier, expectedRevision = required____.expectedRevision, infoHash = optionals____.infoHash }
+
+
+type alias ModerationDecisionInputRequiredFields =
+    { identifier : String
+    , expectedRevision : String
+    }
+
+
+type alias ModerationDecisionInputOptionalFields =
+    { infoHash : OptionalArgument Magnes.Api.ScalarCodecs.Hash20 }
+
+
+{-| Type for the ModerationDecisionInput input object.
+-}
+type alias ModerationDecisionInput =
+    { identifier : String
+    , expectedRevision : String
+    , infoHash : OptionalArgument Magnes.Api.ScalarCodecs.Hash20
+    }
+
+
+{-| Encode a ModerationDecisionInput into a value that can be used as an argument.
+-}
+encodeModerationDecisionInput : ModerationDecisionInput -> Value
+encodeModerationDecisionInput input____ =
+    Encode.maybeObject
+        [ ( "identifier", Encode.string input____.identifier |> Just ), ( "expectedRevision", Encode.string input____.expectedRevision |> Just ), ( "infoHash", (Magnes.Api.ScalarCodecs.codecs |> Magnes.Api.Scalar.unwrapEncoder .codecHash20) |> Encode.optional input____.infoHash ) ]
+
+
+buildModerationPageInput :
+    (ModerationPageInputOptionalFields -> ModerationPageInputOptionalFields)
+    -> ModerationPageInput
+buildModerationPageInput fillOptionals____ =
+    let
+        optionals____ =
+            fillOptionals____
+                { limit = Absent, after = Absent }
+    in
+    { limit = optionals____.limit, after = optionals____.after }
+
+
+type alias ModerationPageInputOptionalFields =
+    { limit : OptionalArgument Int
+    , after : OptionalArgument String
+    }
+
+
+{-| Type for the ModerationPageInput input object.
+-}
+type alias ModerationPageInput =
+    { limit : OptionalArgument Int
+    , after : OptionalArgument String
+    }
+
+
+{-| Encode a ModerationPageInput into a value that can be used as an argument.
+-}
+encodeModerationPageInput : ModerationPageInput -> Value
+encodeModerationPageInput input____ =
+    Encode.maybeObject
+        [ ( "limit", Encode.int |> Encode.optional input____.limit ), ( "after", Encode.string |> Encode.optional input____.after ) ]
+
+
+buildModerationSearchInput :
+    (ModerationSearchInputOptionalFields -> ModerationSearchInputOptionalFields)
+    -> ModerationSearchInput
+buildModerationSearchInput fillOptionals____ =
+    let
+        optionals____ =
+            fillOptionals____
+                { status = Absent, query = Absent, limit = Absent, after = Absent }
+    in
+    { status = optionals____.status, query = optionals____.query, limit = optionals____.limit, after = optionals____.after }
+
+
+type alias ModerationSearchInputOptionalFields =
+    { status : OptionalArgument Magnes.Api.Enum.ModerationStatus.ModerationStatus
+    , query : OptionalArgument String
+    , limit : OptionalArgument Int
+    , after : OptionalArgument String
+    }
+
+
+{-| Type for the ModerationSearchInput input object.
+-}
+type alias ModerationSearchInput =
+    { status : OptionalArgument Magnes.Api.Enum.ModerationStatus.ModerationStatus
+    , query : OptionalArgument String
+    , limit : OptionalArgument Int
+    , after : OptionalArgument String
+    }
+
+
+{-| Encode a ModerationSearchInput into a value that can be used as an argument.
+-}
+encodeModerationSearchInput : ModerationSearchInput -> Value
+encodeModerationSearchInput input____ =
+    Encode.maybeObject
+        [ ( "status", Encode.enum Magnes.Api.Enum.ModerationStatus.toString |> Encode.optional input____.status ), ( "query", Encode.string |> Encode.optional input____.query ), ( "limit", Encode.int |> Encode.optional input____.limit ), ( "after", Encode.string |> Encode.optional input____.after ) ]
 
 
 buildPaginationInput :

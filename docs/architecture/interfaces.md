@@ -44,6 +44,11 @@ line verbatim including a Torznab `apikey`).
   namespace field being gated. The set of directives in the schema _is_ the registered set
   of GraphQL object actions — `gqlfx` extracts them from the schema AST rather than
   restating them.
+- `moderation` is a separate query/mutation Object with private direct record, evidence
+  and history checks. Its bounded private search is a separate permissioned surface and
+  leaves the ordinary catalogue guard intact;
+  decision writes use exact string revisions and server-derived actors. See
+  [moderation.md](moderation.md) and [operator usage](../moderation.md).
 - The handler accepts JSON POST and automatic persisted queries. Introspection and the
   playground at `GET /graphql` are each gated on a `graphql.*` config key and **default to
   off**; with the playground off that route is not registered, so the path 404s. Multipart
@@ -60,7 +65,7 @@ GraphQL torrent-content search, direct hash requests, files, tag suggestions and
 listings exclude pending/banned records through the shared database catalogue policy.
 Counts, facets and hydrated relationships obey it too. `cached` inputs cannot return an
 older pre-quarantine result. Catalogue query permission, including administrator access,
-does not bypass this policy. Private evidence has no GraphQL surface yet. Torznab searches
+does not bypass this policy. Private evidence requires the moderation query Permission. Torznab searches
 use the same mandatory exclusion. See [moderation.md](moderation.md).
 
 ## Torznab

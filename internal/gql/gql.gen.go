@@ -40,6 +40,9 @@ type ResolverRoot interface {
 	APIKey() APIKeyResolver
 	Content() ContentResolver
 	Invitation() InvitationResolver
+	ModerationMutation() ModerationMutationResolver
+	ModerationQuery() ModerationQueryResolver
+	ModerationRecord() ModerationRecordResolver
 	Mutation() MutationResolver
 	Query() QueryResolver
 	QueueJob() QueueJobResolver
@@ -222,11 +225,84 @@ type ComplexityRoot struct {
 		Name func(childComplexity int) int
 	}
 
+	ModerationAllowResult struct {
+		ClassificationQueued func(childComplexity int) int
+		Record               func(childComplexity int) int
+	}
+
+	ModerationEvidence struct {
+		Files    func(childComplexity int) int
+		InfoHash func(childComplexity int) int
+		Matches  func(childComplexity int) int
+		Name     func(childComplexity int) int
+		Rule     func(childComplexity int) int
+	}
+
+	ModerationHistoryEntry struct {
+		Action         func(childComplexity int) int
+		Actor          func(childComplexity int) int
+		CreatedAt      func(childComplexity int) int
+		ID             func(childComplexity int) int
+		ImportedOrigin func(childComplexity int) int
+		Origin         func(childComplexity int) int
+		Source         func(childComplexity int) int
+		Status         func(childComplexity int) int
+	}
+
+	ModerationHistoryPage struct {
+		Items func(childComplexity int) int
+		Next  func(childComplexity int) int
+	}
+
+	ModerationMutation struct {
+		Allow         func(childComplexity int, input gen.ModerationDecisionInput) int
+		Ban           func(childComplexity int, input gen.ModerationDecisionInput) int
+		Flag          func(childComplexity int, infoHash protocol.ID) int
+		PurgeEvidence func(childComplexity int, input gen.ModerationDecisionInput) int
+		Reopen        func(childComplexity int, input gen.ModerationDecisionInput) int
+	}
+
+	ModerationQuery struct {
+		Record func(childComplexity int, identifier string) int
+		Search func(childComplexity int, input gen.ModerationSearchInput) int
+	}
+
+	ModerationRecord struct {
+		CreatedAt      func(childComplexity int) int
+		Evidence       func(childComplexity int) int
+		History        func(childComplexity int, input gen.ModerationPageInput) int
+		Identifier     func(childComplexity int) int
+		ImportedOrigin func(childComplexity int) int
+		Origin         func(childComplexity int) int
+		Revision       func(childComplexity int) int
+		Source         func(childComplexity int) int
+		Status         func(childComplexity int) int
+		UpdatedAt      func(childComplexity int) int
+	}
+
+	ModerationSearchPage struct {
+		Items func(childComplexity int) int
+		Next  func(childComplexity int) int
+	}
+
+	ModerationSummary struct {
+		CreatedAt      func(childComplexity int) int
+		Identifier     func(childComplexity int) int
+		ImportedOrigin func(childComplexity int) int
+		Name           func(childComplexity int) int
+		Origin         func(childComplexity int) int
+		Revision       func(childComplexity int) int
+		Source         func(childComplexity int) int
+		Status         func(childComplexity int) int
+		UpdatedAt      func(childComplexity int) int
+	}
+
 	Mutation struct {
-		Auth    func(childComplexity int) int
-		Queue   func(childComplexity int) int
-		Self    func(childComplexity int) int
-		Torrent func(childComplexity int) int
+		Auth       func(childComplexity int) int
+		Moderation func(childComplexity int) int
+		Queue      func(childComplexity int) int
+		Self       func(childComplexity int) int
+		Torrent    func(childComplexity int) int
 	}
 
 	PasswordEntropyResult struct {
@@ -244,6 +320,7 @@ type ComplexityRoot struct {
 	Query struct {
 		Auth           func(childComplexity int) int
 		Health         func(childComplexity int) int
+		Moderation     func(childComplexity int) int
 		Queue          func(childComplexity int) int
 		Self           func(childComplexity int) int
 		Torrent        func(childComplexity int) int
@@ -572,11 +649,26 @@ type InvitationResolver interface {
 	ClaimedBy(ctx context.Context, obj *model.Invitation) (*model.User, error)
 	ExpiresAt(ctx context.Context, obj *model.Invitation) (*time.Time, error)
 }
+type ModerationMutationResolver interface {
+	Flag(ctx context.Context, obj *gen.ModerationMutation, infoHash protocol.ID) (gen.ModerationRecord, error)
+	Allow(ctx context.Context, obj *gen.ModerationMutation, input gen.ModerationDecisionInput) (gen.ModerationAllowResult, error)
+	Ban(ctx context.Context, obj *gen.ModerationMutation, input gen.ModerationDecisionInput) (gen.ModerationRecord, error)
+	Reopen(ctx context.Context, obj *gen.ModerationMutation, input gen.ModerationDecisionInput) (gen.ModerationRecord, error)
+	PurgeEvidence(ctx context.Context, obj *gen.ModerationMutation, input gen.ModerationDecisionInput) (gen.ModerationRecord, error)
+}
+type ModerationQueryResolver interface {
+	Search(ctx context.Context, obj *gen.ModerationQuery, input gen.ModerationSearchInput) (gen.ModerationSearchPage, error)
+	Record(ctx context.Context, obj *gen.ModerationQuery, identifier string) (gen.ModerationRecord, error)
+}
+type ModerationRecordResolver interface {
+	History(ctx context.Context, obj *gen.ModerationRecord, input gen.ModerationPageInput) (gen.ModerationHistoryPage, error)
+}
 type MutationResolver interface {
 	Self(ctx context.Context) (gqlmodel.SelfMutation, error)
 	Auth(ctx context.Context) (gqlmodel.AuthMutation, error)
 	Torrent(ctx context.Context) (gqlmodel.TorrentMutation, error)
 	Queue(ctx context.Context) (gqlmodel.QueueMutation, error)
+	Moderation(ctx context.Context) (gen.ModerationMutation, error)
 }
 type QueryResolver interface {
 	Version(ctx context.Context) (string, error)
@@ -587,6 +679,7 @@ type QueryResolver interface {
 	Queue(ctx context.Context) (gqlmodel.QueueQuery, error)
 	Torrent(ctx context.Context) (gqlmodel.TorrentQuery, error)
 	TorrentContent(ctx context.Context) (gqlmodel.TorrentContentQuery, error)
+	Moderation(ctx context.Context) (gen.ModerationQuery, error)
 }
 type QueueJobResolver interface {
 	RanAt(ctx context.Context, obj *model.QueueJob) (*time.Time, error)
@@ -1302,12 +1395,337 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.MetadataSource.Name(childComplexity), true
 
+	case "ModerationAllowResult.classificationQueued":
+		if e.ComplexityRoot.ModerationAllowResult.ClassificationQueued == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationAllowResult.ClassificationQueued(childComplexity), true
+	case "ModerationAllowResult.record":
+		if e.ComplexityRoot.ModerationAllowResult.Record == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationAllowResult.Record(childComplexity), true
+
+	case "ModerationEvidence.files":
+		if e.ComplexityRoot.ModerationEvidence.Files == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationEvidence.Files(childComplexity), true
+	case "ModerationEvidence.infoHash":
+		if e.ComplexityRoot.ModerationEvidence.InfoHash == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationEvidence.InfoHash(childComplexity), true
+	case "ModerationEvidence.matches":
+		if e.ComplexityRoot.ModerationEvidence.Matches == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationEvidence.Matches(childComplexity), true
+	case "ModerationEvidence.name":
+		if e.ComplexityRoot.ModerationEvidence.Name == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationEvidence.Name(childComplexity), true
+	case "ModerationEvidence.rule":
+		if e.ComplexityRoot.ModerationEvidence.Rule == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationEvidence.Rule(childComplexity), true
+
+	case "ModerationHistoryEntry.action":
+		if e.ComplexityRoot.ModerationHistoryEntry.Action == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationHistoryEntry.Action(childComplexity), true
+	case "ModerationHistoryEntry.actor":
+		if e.ComplexityRoot.ModerationHistoryEntry.Actor == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationHistoryEntry.Actor(childComplexity), true
+	case "ModerationHistoryEntry.createdAt":
+		if e.ComplexityRoot.ModerationHistoryEntry.CreatedAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationHistoryEntry.CreatedAt(childComplexity), true
+	case "ModerationHistoryEntry.id":
+		if e.ComplexityRoot.ModerationHistoryEntry.ID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationHistoryEntry.ID(childComplexity), true
+	case "ModerationHistoryEntry.importedOrigin":
+		if e.ComplexityRoot.ModerationHistoryEntry.ImportedOrigin == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationHistoryEntry.ImportedOrigin(childComplexity), true
+	case "ModerationHistoryEntry.origin":
+		if e.ComplexityRoot.ModerationHistoryEntry.Origin == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationHistoryEntry.Origin(childComplexity), true
+	case "ModerationHistoryEntry.source":
+		if e.ComplexityRoot.ModerationHistoryEntry.Source == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationHistoryEntry.Source(childComplexity), true
+	case "ModerationHistoryEntry.status":
+		if e.ComplexityRoot.ModerationHistoryEntry.Status == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationHistoryEntry.Status(childComplexity), true
+
+	case "ModerationHistoryPage.items":
+		if e.ComplexityRoot.ModerationHistoryPage.Items == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationHistoryPage.Items(childComplexity), true
+	case "ModerationHistoryPage.next":
+		if e.ComplexityRoot.ModerationHistoryPage.Next == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationHistoryPage.Next(childComplexity), true
+
+	case "ModerationMutation.allow":
+		if e.ComplexityRoot.ModerationMutation.Allow == nil {
+			break
+		}
+
+		args, err := ec.field_ModerationMutation_allow_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.ModerationMutation.Allow(childComplexity, args["input"].(gen.ModerationDecisionInput)), true
+	case "ModerationMutation.ban":
+		if e.ComplexityRoot.ModerationMutation.Ban == nil {
+			break
+		}
+
+		args, err := ec.field_ModerationMutation_ban_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.ModerationMutation.Ban(childComplexity, args["input"].(gen.ModerationDecisionInput)), true
+	case "ModerationMutation.flag":
+		if e.ComplexityRoot.ModerationMutation.Flag == nil {
+			break
+		}
+
+		args, err := ec.field_ModerationMutation_flag_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.ModerationMutation.Flag(childComplexity, args["infoHash"].(protocol.ID)), true
+	case "ModerationMutation.purgeEvidence":
+		if e.ComplexityRoot.ModerationMutation.PurgeEvidence == nil {
+			break
+		}
+
+		args, err := ec.field_ModerationMutation_purgeEvidence_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.ModerationMutation.PurgeEvidence(childComplexity, args["input"].(gen.ModerationDecisionInput)), true
+	case "ModerationMutation.reopen":
+		if e.ComplexityRoot.ModerationMutation.Reopen == nil {
+			break
+		}
+
+		args, err := ec.field_ModerationMutation_reopen_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.ModerationMutation.Reopen(childComplexity, args["input"].(gen.ModerationDecisionInput)), true
+
+	case "ModerationQuery.record":
+		if e.ComplexityRoot.ModerationQuery.Record == nil {
+			break
+		}
+
+		args, err := ec.field_ModerationQuery_record_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.ModerationQuery.Record(childComplexity, args["identifier"].(string)), true
+	case "ModerationQuery.search":
+		if e.ComplexityRoot.ModerationQuery.Search == nil {
+			break
+		}
+
+		args, err := ec.field_ModerationQuery_search_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.ModerationQuery.Search(childComplexity, args["input"].(gen.ModerationSearchInput)), true
+
+	case "ModerationRecord.createdAt":
+		if e.ComplexityRoot.ModerationRecord.CreatedAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationRecord.CreatedAt(childComplexity), true
+	case "ModerationRecord.evidence":
+		if e.ComplexityRoot.ModerationRecord.Evidence == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationRecord.Evidence(childComplexity), true
+	case "ModerationRecord.history":
+		if e.ComplexityRoot.ModerationRecord.History == nil {
+			break
+		}
+
+		args, err := ec.field_ModerationRecord_history_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.ModerationRecord.History(childComplexity, args["input"].(gen.ModerationPageInput)), true
+	case "ModerationRecord.identifier":
+		if e.ComplexityRoot.ModerationRecord.Identifier == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationRecord.Identifier(childComplexity), true
+	case "ModerationRecord.importedOrigin":
+		if e.ComplexityRoot.ModerationRecord.ImportedOrigin == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationRecord.ImportedOrigin(childComplexity), true
+	case "ModerationRecord.origin":
+		if e.ComplexityRoot.ModerationRecord.Origin == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationRecord.Origin(childComplexity), true
+	case "ModerationRecord.revision":
+		if e.ComplexityRoot.ModerationRecord.Revision == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationRecord.Revision(childComplexity), true
+	case "ModerationRecord.source":
+		if e.ComplexityRoot.ModerationRecord.Source == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationRecord.Source(childComplexity), true
+	case "ModerationRecord.status":
+		if e.ComplexityRoot.ModerationRecord.Status == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationRecord.Status(childComplexity), true
+	case "ModerationRecord.updatedAt":
+		if e.ComplexityRoot.ModerationRecord.UpdatedAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationRecord.UpdatedAt(childComplexity), true
+
+	case "ModerationSearchPage.items":
+		if e.ComplexityRoot.ModerationSearchPage.Items == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationSearchPage.Items(childComplexity), true
+	case "ModerationSearchPage.next":
+		if e.ComplexityRoot.ModerationSearchPage.Next == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationSearchPage.Next(childComplexity), true
+
+	case "ModerationSummary.createdAt":
+		if e.ComplexityRoot.ModerationSummary.CreatedAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationSummary.CreatedAt(childComplexity), true
+	case "ModerationSummary.identifier":
+		if e.ComplexityRoot.ModerationSummary.Identifier == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationSummary.Identifier(childComplexity), true
+	case "ModerationSummary.importedOrigin":
+		if e.ComplexityRoot.ModerationSummary.ImportedOrigin == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationSummary.ImportedOrigin(childComplexity), true
+	case "ModerationSummary.name":
+		if e.ComplexityRoot.ModerationSummary.Name == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationSummary.Name(childComplexity), true
+	case "ModerationSummary.origin":
+		if e.ComplexityRoot.ModerationSummary.Origin == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationSummary.Origin(childComplexity), true
+	case "ModerationSummary.revision":
+		if e.ComplexityRoot.ModerationSummary.Revision == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationSummary.Revision(childComplexity), true
+	case "ModerationSummary.source":
+		if e.ComplexityRoot.ModerationSummary.Source == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationSummary.Source(childComplexity), true
+	case "ModerationSummary.status":
+		if e.ComplexityRoot.ModerationSummary.Status == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationSummary.Status(childComplexity), true
+	case "ModerationSummary.updatedAt":
+		if e.ComplexityRoot.ModerationSummary.UpdatedAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ModerationSummary.UpdatedAt(childComplexity), true
+
 	case "Mutation.auth":
 		if e.ComplexityRoot.Mutation.Auth == nil {
 			break
 		}
 
 		return e.ComplexityRoot.Mutation.Auth(childComplexity), true
+	case "Mutation.moderation":
+		if e.ComplexityRoot.Mutation.Moderation == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Mutation.Moderation(childComplexity), true
 	case "Mutation.queue":
 		if e.ComplexityRoot.Mutation.Queue == nil {
 			break
@@ -1378,6 +1796,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.Query.Health(childComplexity), true
 
+	case "Query.moderation":
+		if e.ComplexityRoot.Query.Moderation == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Query.Moderation(childComplexity), true
 	case "Query.queue":
 		if e.ComplexityRoot.Query.Queue == nil {
 			break
@@ -2640,6 +3064,9 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 		ec.unmarshalInputLanguageFacetInput,
 		ec.unmarshalInputListInvitationsInput,
 		ec.unmarshalInputListUsersInput,
+		ec.unmarshalInputModerationDecisionInput,
+		ec.unmarshalInputModerationPageInput,
+		ec.unmarshalInputModerationSearchInput,
 		ec.unmarshalInputPaginationInput,
 		ec.unmarshalInputQueueEnqueueReprocessTorrentsBatchInput,
 		ec.unmarshalInputQueueJobQueueFacetInput,
@@ -3205,6 +3632,114 @@ type ContentCollection {
   metadataSource: MetadataSource!
   createdAt: DateTime!
   updatedAt: DateTime!
+}
+`, BuiltIn: false},
+	{Name: "../../graphql/schema/moderation.graphqls", Input: `extend type Query {
+  moderation: ModerationQuery! @auth(object: "moderation", action: "query")
+}
+
+extend type Mutation {
+  moderation: ModerationMutation! @auth(object: "moderation", action: "mutate")
+}
+
+enum ModerationStatus {
+  pending
+  allowed
+  banned
+}
+
+type ModerationQuery {
+  search(input: ModerationSearchInput!): ModerationSearchPage!
+    @auth(object: "moderation", action: "query")
+  record(identifier: String!): ModerationRecord!
+    @auth(object: "moderation", action: "query")
+}
+
+input ModerationSearchInput {
+  status: ModerationStatus
+  query: String
+  limit: Int
+  after: String
+}
+
+input ModerationPageInput {
+  limit: Int
+  after: String
+}
+
+type ModerationSearchPage {
+  items: [ModerationSummary!]!
+  next: String
+}
+
+type ModerationSummary {
+  identifier: String!
+  status: ModerationStatus!
+  origin: String!
+  importedOrigin: String
+  source: String
+  name: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  revision: String!
+}
+
+type ModerationRecord {
+  identifier: String!
+  status: ModerationStatus!
+  origin: String!
+  importedOrigin: String
+  source: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  revision: String!
+  evidence: ModerationEvidence @auth(object: "moderation", action: "query")
+  history(input: ModerationPageInput!): ModerationHistoryPage!
+    @auth(object: "moderation", action: "query")
+}
+
+type ModerationEvidence {
+  infoHash: Hash20
+  name: String!
+  files: [String!]
+  rule: String!
+  matches: [String!]
+}
+
+type ModerationHistoryPage {
+  items: [ModerationHistoryEntry!]!
+  next: String
+}
+
+type ModerationHistoryEntry {
+  id: String!
+  action: String!
+  status: ModerationStatus!
+  origin: String!
+  importedOrigin: String
+  source: String
+  actor: String!
+  createdAt: DateTime!
+}
+
+input ModerationDecisionInput {
+  identifier: String!
+  expectedRevision: String!
+  infoHash: Hash20
+}
+
+type ModerationMutation {
+  flag(infoHash: Hash20!): ModerationRecord!
+  allow(input: ModerationDecisionInput!): ModerationAllowResult!
+  ban(input: ModerationDecisionInput!): ModerationRecord!
+  reopen(input: ModerationDecisionInput!): ModerationRecord!
+  purgeEvidence(input: ModerationDecisionInput!): ModerationRecord!
+}
+
+# classificationQueued reports pending normal classification work arranged by this allow.
+type ModerationAllowResult {
+  record: ModerationRecord!
+  classificationQueued: Boolean!
 }
 `, BuiltIn: false},
 	{Name: "../../graphql/schema/mutation.graphqls", Input: `type Mutation {
@@ -4024,6 +4559,150 @@ func (ec *executionContext) childFields_MetadataSource(ctx context.Context, fiel
 		return ec.fieldContext_MetadataSource_name(ctx, field)
 	}
 	return nil, fmt.Errorf("no field named %q was found under type MetadataSource", field.Name)
+}
+
+func (ec *executionContext) childFields_ModerationAllowResult(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "record":
+		return ec.fieldContext_ModerationAllowResult_record(ctx, field)
+	case "classificationQueued":
+		return ec.fieldContext_ModerationAllowResult_classificationQueued(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type ModerationAllowResult", field.Name)
+}
+
+func (ec *executionContext) childFields_ModerationEvidence(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "infoHash":
+		return ec.fieldContext_ModerationEvidence_infoHash(ctx, field)
+	case "name":
+		return ec.fieldContext_ModerationEvidence_name(ctx, field)
+	case "files":
+		return ec.fieldContext_ModerationEvidence_files(ctx, field)
+	case "rule":
+		return ec.fieldContext_ModerationEvidence_rule(ctx, field)
+	case "matches":
+		return ec.fieldContext_ModerationEvidence_matches(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type ModerationEvidence", field.Name)
+}
+
+func (ec *executionContext) childFields_ModerationHistoryEntry(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "id":
+		return ec.fieldContext_ModerationHistoryEntry_id(ctx, field)
+	case "action":
+		return ec.fieldContext_ModerationHistoryEntry_action(ctx, field)
+	case "status":
+		return ec.fieldContext_ModerationHistoryEntry_status(ctx, field)
+	case "origin":
+		return ec.fieldContext_ModerationHistoryEntry_origin(ctx, field)
+	case "importedOrigin":
+		return ec.fieldContext_ModerationHistoryEntry_importedOrigin(ctx, field)
+	case "source":
+		return ec.fieldContext_ModerationHistoryEntry_source(ctx, field)
+	case "actor":
+		return ec.fieldContext_ModerationHistoryEntry_actor(ctx, field)
+	case "createdAt":
+		return ec.fieldContext_ModerationHistoryEntry_createdAt(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type ModerationHistoryEntry", field.Name)
+}
+
+func (ec *executionContext) childFields_ModerationHistoryPage(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "items":
+		return ec.fieldContext_ModerationHistoryPage_items(ctx, field)
+	case "next":
+		return ec.fieldContext_ModerationHistoryPage_next(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type ModerationHistoryPage", field.Name)
+}
+
+func (ec *executionContext) childFields_ModerationMutation(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "flag":
+		return ec.fieldContext_ModerationMutation_flag(ctx, field)
+	case "allow":
+		return ec.fieldContext_ModerationMutation_allow(ctx, field)
+	case "ban":
+		return ec.fieldContext_ModerationMutation_ban(ctx, field)
+	case "reopen":
+		return ec.fieldContext_ModerationMutation_reopen(ctx, field)
+	case "purgeEvidence":
+		return ec.fieldContext_ModerationMutation_purgeEvidence(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type ModerationMutation", field.Name)
+}
+
+func (ec *executionContext) childFields_ModerationQuery(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "search":
+		return ec.fieldContext_ModerationQuery_search(ctx, field)
+	case "record":
+		return ec.fieldContext_ModerationQuery_record(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type ModerationQuery", field.Name)
+}
+
+func (ec *executionContext) childFields_ModerationRecord(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "identifier":
+		return ec.fieldContext_ModerationRecord_identifier(ctx, field)
+	case "status":
+		return ec.fieldContext_ModerationRecord_status(ctx, field)
+	case "origin":
+		return ec.fieldContext_ModerationRecord_origin(ctx, field)
+	case "importedOrigin":
+		return ec.fieldContext_ModerationRecord_importedOrigin(ctx, field)
+	case "source":
+		return ec.fieldContext_ModerationRecord_source(ctx, field)
+	case "createdAt":
+		return ec.fieldContext_ModerationRecord_createdAt(ctx, field)
+	case "updatedAt":
+		return ec.fieldContext_ModerationRecord_updatedAt(ctx, field)
+	case "revision":
+		return ec.fieldContext_ModerationRecord_revision(ctx, field)
+	case "evidence":
+		return ec.fieldContext_ModerationRecord_evidence(ctx, field)
+	case "history":
+		return ec.fieldContext_ModerationRecord_history(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type ModerationRecord", field.Name)
+}
+
+func (ec *executionContext) childFields_ModerationSearchPage(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "items":
+		return ec.fieldContext_ModerationSearchPage_items(ctx, field)
+	case "next":
+		return ec.fieldContext_ModerationSearchPage_next(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type ModerationSearchPage", field.Name)
+}
+
+func (ec *executionContext) childFields_ModerationSummary(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "identifier":
+		return ec.fieldContext_ModerationSummary_identifier(ctx, field)
+	case "status":
+		return ec.fieldContext_ModerationSummary_status(ctx, field)
+	case "origin":
+		return ec.fieldContext_ModerationSummary_origin(ctx, field)
+	case "importedOrigin":
+		return ec.fieldContext_ModerationSummary_importedOrigin(ctx, field)
+	case "source":
+		return ec.fieldContext_ModerationSummary_source(ctx, field)
+	case "name":
+		return ec.fieldContext_ModerationSummary_name(ctx, field)
+	case "createdAt":
+		return ec.fieldContext_ModerationSummary_createdAt(ctx, field)
+	case "updatedAt":
+		return ec.fieldContext_ModerationSummary_updatedAt(ctx, field)
+	case "revision":
+		return ec.fieldContext_ModerationSummary_revision(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type ModerationSummary", field.Name)
 }
 
 func (ec *executionContext) childFields_PasswordEntropyResult(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
@@ -4932,6 +5611,118 @@ func (ec *executionContext) field_AuthQuery_listUsers_args(ctx context.Context, 
 	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input",
 		func(ctx context.Context, v any) (*gen.ListUsersInput, error) {
 			return ec.unmarshalOListUsersInput2ᚖgithubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐListUsersInput(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_ModerationMutation_allow_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input",
+		func(ctx context.Context, v any) (gen.ModerationDecisionInput, error) {
+			return ec.unmarshalNModerationDecisionInput2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationDecisionInput(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_ModerationMutation_ban_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input",
+		func(ctx context.Context, v any) (gen.ModerationDecisionInput, error) {
+			return ec.unmarshalNModerationDecisionInput2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationDecisionInput(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_ModerationMutation_flag_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "infoHash",
+		func(ctx context.Context, v any) (protocol.ID, error) {
+			return ec.unmarshalNHash202githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋprotocolᚐID(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["infoHash"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_ModerationMutation_purgeEvidence_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input",
+		func(ctx context.Context, v any) (gen.ModerationDecisionInput, error) {
+			return ec.unmarshalNModerationDecisionInput2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationDecisionInput(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_ModerationMutation_reopen_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input",
+		func(ctx context.Context, v any) (gen.ModerationDecisionInput, error) {
+			return ec.unmarshalNModerationDecisionInput2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationDecisionInput(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_ModerationQuery_record_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "identifier",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNString2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["identifier"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_ModerationQuery_search_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input",
+		func(ctx context.Context, v any) (gen.ModerationSearchInput, error) {
+			return ec.unmarshalNModerationSearchInput2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationSearchInput(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_ModerationRecord_history_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input",
+		func(ctx context.Context, v any) (gen.ModerationPageInput, error) {
+			return ec.unmarshalNModerationPageInput2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationPageInput(ctx, v)
 		})
 	if err != nil {
 		return nil, err
@@ -8003,6 +8794,1337 @@ func (ec *executionContext) fieldContext_MetadataSource_name(_ context.Context, 
 	return graphql.NewScalarFieldContext("MetadataSource", field, false, false, errors.New("field of type String does not have child fields"))
 }
 
+func (ec *executionContext) _ModerationAllowResult_record(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationAllowResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationAllowResult_record(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Record, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v gen.ModerationRecord) graphql.Marshaler {
+			return ec.marshalNModerationRecord2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationRecord(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationAllowResult_record(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ModerationAllowResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_ModerationRecord(ctx, field)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ModerationAllowResult_classificationQueued(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationAllowResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationAllowResult_classificationQueued(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ClassificationQueued, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v bool) graphql.Marshaler {
+			return ec.marshalNBoolean2bool(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationAllowResult_classificationQueued(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationAllowResult", field, false, false, errors.New("field of type Boolean does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationEvidence_infoHash(ctx context.Context, field graphql.CollectedField, obj *model.ModerationEvidenceData) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationEvidence_infoHash(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.InfoHash, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *protocol.ID) graphql.Marshaler {
+			return ec.marshalOHash202ᚖgithubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋprotocolᚐID(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationEvidence_infoHash(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationEvidence", field, false, false, errors.New("field of type Hash20 does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationEvidence_name(ctx context.Context, field graphql.CollectedField, obj *model.ModerationEvidenceData) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationEvidence_name(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Name, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationEvidence_name(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationEvidence", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationEvidence_files(ctx context.Context, field graphql.CollectedField, obj *model.ModerationEvidenceData) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationEvidence_files(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Files, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []string) graphql.Marshaler {
+			return ec.marshalOString2ᚕstringᚄ(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationEvidence_files(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationEvidence", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationEvidence_rule(ctx context.Context, field graphql.CollectedField, obj *model.ModerationEvidenceData) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationEvidence_rule(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Rule, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationEvidence_rule(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationEvidence", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationEvidence_matches(ctx context.Context, field graphql.CollectedField, obj *model.ModerationEvidenceData) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationEvidence_matches(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Matches, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []string) graphql.Marshaler {
+			return ec.marshalOString2ᚕstringᚄ(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationEvidence_matches(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationEvidence", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationHistoryEntry_id(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationHistoryEntry) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationHistoryEntry_id(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationHistoryEntry_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationHistoryEntry", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationHistoryEntry_action(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationHistoryEntry) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationHistoryEntry_action(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Action, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationHistoryEntry_action(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationHistoryEntry", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationHistoryEntry_status(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationHistoryEntry) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationHistoryEntry_status(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Status, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v gen.ModerationStatus) graphql.Marshaler {
+			return ec.marshalNModerationStatus2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationStatus(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationHistoryEntry_status(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationHistoryEntry", field, false, false, errors.New("field of type ModerationStatus does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationHistoryEntry_origin(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationHistoryEntry) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationHistoryEntry_origin(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Origin, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationHistoryEntry_origin(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationHistoryEntry", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationHistoryEntry_importedOrigin(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationHistoryEntry) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationHistoryEntry_importedOrigin(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ImportedOrigin, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationHistoryEntry_importedOrigin(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationHistoryEntry", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationHistoryEntry_source(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationHistoryEntry) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationHistoryEntry_source(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Source, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationHistoryEntry_source(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationHistoryEntry", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationHistoryEntry_actor(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationHistoryEntry) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationHistoryEntry_actor(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Actor, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationHistoryEntry_actor(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationHistoryEntry", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationHistoryEntry_createdAt(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationHistoryEntry) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationHistoryEntry_createdAt(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.CreatedAt, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v time.Time) graphql.Marshaler {
+			return ec.marshalNDateTime2timeᚐTime(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationHistoryEntry_createdAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationHistoryEntry", field, false, false, errors.New("field of type DateTime does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationHistoryPage_items(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationHistoryPage) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationHistoryPage_items(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Items, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []gen.ModerationHistoryEntry) graphql.Marshaler {
+			return ec.marshalNModerationHistoryEntry2ᚕgithubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationHistoryEntryᚄ(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationHistoryPage_items(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ModerationHistoryPage",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_ModerationHistoryEntry(ctx, field)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ModerationHistoryPage_next(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationHistoryPage) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationHistoryPage_next(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Next, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationHistoryPage_next(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationHistoryPage", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationMutation_flag(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationMutation) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationMutation_flag(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.ModerationMutation().Flag(ctx, obj, fc.Args["infoHash"].(protocol.ID))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v gen.ModerationRecord) graphql.Marshaler {
+			return ec.marshalNModerationRecord2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationRecord(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationMutation_flag(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ModerationMutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_ModerationRecord(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_ModerationMutation_flag_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ModerationMutation_allow(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationMutation) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationMutation_allow(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.ModerationMutation().Allow(ctx, obj, fc.Args["input"].(gen.ModerationDecisionInput))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v gen.ModerationAllowResult) graphql.Marshaler {
+			return ec.marshalNModerationAllowResult2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationAllowResult(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationMutation_allow(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ModerationMutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_ModerationAllowResult(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_ModerationMutation_allow_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ModerationMutation_ban(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationMutation) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationMutation_ban(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.ModerationMutation().Ban(ctx, obj, fc.Args["input"].(gen.ModerationDecisionInput))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v gen.ModerationRecord) graphql.Marshaler {
+			return ec.marshalNModerationRecord2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationRecord(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationMutation_ban(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ModerationMutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_ModerationRecord(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_ModerationMutation_ban_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ModerationMutation_reopen(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationMutation) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationMutation_reopen(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.ModerationMutation().Reopen(ctx, obj, fc.Args["input"].(gen.ModerationDecisionInput))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v gen.ModerationRecord) graphql.Marshaler {
+			return ec.marshalNModerationRecord2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationRecord(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationMutation_reopen(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ModerationMutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_ModerationRecord(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_ModerationMutation_reopen_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ModerationMutation_purgeEvidence(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationMutation) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationMutation_purgeEvidence(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.ModerationMutation().PurgeEvidence(ctx, obj, fc.Args["input"].(gen.ModerationDecisionInput))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v gen.ModerationRecord) graphql.Marshaler {
+			return ec.marshalNModerationRecord2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationRecord(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationMutation_purgeEvidence(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ModerationMutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_ModerationRecord(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_ModerationMutation_purgeEvidence_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ModerationQuery_search(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationQuery) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationQuery_search(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.ModerationQuery().Search(ctx, obj, fc.Args["input"].(gen.ModerationSearchInput))
+		},
+		func(ctx context.Context, next graphql.Resolver) graphql.Resolver {
+			directive0 := next
+
+			directive1 := func(ctx context.Context) (any, error) {
+				object, err := ec.unmarshalNString2string(ctx, "moderation")
+				if err != nil {
+					var zeroVal gen.ModerationSearchPage
+					return zeroVal, err
+				}
+				action, err := ec.unmarshalNString2string(ctx, "query")
+				if err != nil {
+					var zeroVal gen.ModerationSearchPage
+					return zeroVal, err
+				}
+				if ec.Directives.Auth == nil {
+					var zeroVal gen.ModerationSearchPage
+					return zeroVal, errors.New("directive auth is not implemented")
+				}
+				return ec.Directives.Auth(ctx, obj, directive0, object, action)
+			}
+
+			next = directive1
+			return next
+		},
+		func(ctx context.Context, selections ast.SelectionSet, v gen.ModerationSearchPage) graphql.Marshaler {
+			return ec.marshalNModerationSearchPage2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationSearchPage(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationQuery_search(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ModerationQuery",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_ModerationSearchPage(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_ModerationQuery_search_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ModerationQuery_record(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationQuery) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationQuery_record(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.ModerationQuery().Record(ctx, obj, fc.Args["identifier"].(string))
+		},
+		func(ctx context.Context, next graphql.Resolver) graphql.Resolver {
+			directive0 := next
+
+			directive1 := func(ctx context.Context) (any, error) {
+				object, err := ec.unmarshalNString2string(ctx, "moderation")
+				if err != nil {
+					var zeroVal gen.ModerationRecord
+					return zeroVal, err
+				}
+				action, err := ec.unmarshalNString2string(ctx, "query")
+				if err != nil {
+					var zeroVal gen.ModerationRecord
+					return zeroVal, err
+				}
+				if ec.Directives.Auth == nil {
+					var zeroVal gen.ModerationRecord
+					return zeroVal, errors.New("directive auth is not implemented")
+				}
+				return ec.Directives.Auth(ctx, obj, directive0, object, action)
+			}
+
+			next = directive1
+			return next
+		},
+		func(ctx context.Context, selections ast.SelectionSet, v gen.ModerationRecord) graphql.Marshaler {
+			return ec.marshalNModerationRecord2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationRecord(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationQuery_record(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ModerationQuery",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_ModerationRecord(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_ModerationQuery_record_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ModerationRecord_identifier(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationRecord) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationRecord_identifier(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Identifier, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationRecord_identifier(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationRecord", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationRecord_status(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationRecord) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationRecord_status(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Status, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v gen.ModerationStatus) graphql.Marshaler {
+			return ec.marshalNModerationStatus2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationStatus(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationRecord_status(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationRecord", field, false, false, errors.New("field of type ModerationStatus does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationRecord_origin(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationRecord) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationRecord_origin(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Origin, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationRecord_origin(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationRecord", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationRecord_importedOrigin(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationRecord) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationRecord_importedOrigin(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ImportedOrigin, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationRecord_importedOrigin(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationRecord", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationRecord_source(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationRecord) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationRecord_source(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Source, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationRecord_source(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationRecord", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationRecord_createdAt(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationRecord) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationRecord_createdAt(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.CreatedAt, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v time.Time) graphql.Marshaler {
+			return ec.marshalNDateTime2timeᚐTime(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationRecord_createdAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationRecord", field, false, false, errors.New("field of type DateTime does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationRecord_updatedAt(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationRecord) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationRecord_updatedAt(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.UpdatedAt, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v time.Time) graphql.Marshaler {
+			return ec.marshalNDateTime2timeᚐTime(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationRecord_updatedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationRecord", field, false, false, errors.New("field of type DateTime does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationRecord_revision(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationRecord) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationRecord_revision(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Revision, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationRecord_revision(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationRecord", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationRecord_evidence(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationRecord) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationRecord_evidence(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Evidence, nil
+		},
+		func(ctx context.Context, next graphql.Resolver) graphql.Resolver {
+			directive0 := next
+
+			directive1 := func(ctx context.Context) (any, error) {
+				object, err := ec.unmarshalNString2string(ctx, "moderation")
+				if err != nil {
+					var zeroVal *model.ModerationEvidenceData
+					return zeroVal, err
+				}
+				action, err := ec.unmarshalNString2string(ctx, "query")
+				if err != nil {
+					var zeroVal *model.ModerationEvidenceData
+					return zeroVal, err
+				}
+				if ec.Directives.Auth == nil {
+					var zeroVal *model.ModerationEvidenceData
+					return zeroVal, errors.New("directive auth is not implemented")
+				}
+				return ec.Directives.Auth(ctx, obj, directive0, object, action)
+			}
+
+			next = directive1
+			return next
+		},
+		func(ctx context.Context, selections ast.SelectionSet, v *model.ModerationEvidenceData) graphql.Marshaler {
+			return ec.marshalOModerationEvidence2ᚖgithubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋmodelᚐModerationEvidenceData(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationRecord_evidence(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ModerationRecord",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_ModerationEvidence(ctx, field)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ModerationRecord_history(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationRecord) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationRecord_history(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.ModerationRecord().History(ctx, obj, fc.Args["input"].(gen.ModerationPageInput))
+		},
+		func(ctx context.Context, next graphql.Resolver) graphql.Resolver {
+			directive0 := next
+
+			directive1 := func(ctx context.Context) (any, error) {
+				object, err := ec.unmarshalNString2string(ctx, "moderation")
+				if err != nil {
+					var zeroVal gen.ModerationHistoryPage
+					return zeroVal, err
+				}
+				action, err := ec.unmarshalNString2string(ctx, "query")
+				if err != nil {
+					var zeroVal gen.ModerationHistoryPage
+					return zeroVal, err
+				}
+				if ec.Directives.Auth == nil {
+					var zeroVal gen.ModerationHistoryPage
+					return zeroVal, errors.New("directive auth is not implemented")
+				}
+				return ec.Directives.Auth(ctx, obj, directive0, object, action)
+			}
+
+			next = directive1
+			return next
+		},
+		func(ctx context.Context, selections ast.SelectionSet, v gen.ModerationHistoryPage) graphql.Marshaler {
+			return ec.marshalNModerationHistoryPage2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationHistoryPage(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationRecord_history(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ModerationRecord",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_ModerationHistoryPage(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_ModerationRecord_history_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ModerationSearchPage_items(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationSearchPage) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationSearchPage_items(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Items, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []gen.ModerationSummary) graphql.Marshaler {
+			return ec.marshalNModerationSummary2ᚕgithubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationSummaryᚄ(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationSearchPage_items(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ModerationSearchPage",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_ModerationSummary(ctx, field)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ModerationSearchPage_next(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationSearchPage) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationSearchPage_next(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Next, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationSearchPage_next(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationSearchPage", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationSummary_identifier(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationSummary) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationSummary_identifier(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Identifier, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationSummary_identifier(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationSummary", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationSummary_status(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationSummary) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationSummary_status(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Status, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v gen.ModerationStatus) graphql.Marshaler {
+			return ec.marshalNModerationStatus2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationStatus(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationSummary_status(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationSummary", field, false, false, errors.New("field of type ModerationStatus does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationSummary_origin(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationSummary) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationSummary_origin(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Origin, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationSummary_origin(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationSummary", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationSummary_importedOrigin(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationSummary) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationSummary_importedOrigin(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ImportedOrigin, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationSummary_importedOrigin(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationSummary", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationSummary_source(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationSummary) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationSummary_source(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Source, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationSummary_source(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationSummary", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationSummary_name(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationSummary) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationSummary_name(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Name, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationSummary_name(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationSummary", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationSummary_createdAt(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationSummary) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationSummary_createdAt(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.CreatedAt, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v time.Time) graphql.Marshaler {
+			return ec.marshalNDateTime2timeᚐTime(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationSummary_createdAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationSummary", field, false, false, errors.New("field of type DateTime does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationSummary_updatedAt(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationSummary) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationSummary_updatedAt(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.UpdatedAt, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v time.Time) graphql.Marshaler {
+			return ec.marshalNDateTime2timeᚐTime(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationSummary_updatedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationSummary", field, false, false, errors.New("field of type DateTime does not have child fields"))
+}
+
+func (ec *executionContext) _ModerationSummary_revision(ctx context.Context, field graphql.CollectedField, obj *gen.ModerationSummary) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ModerationSummary_revision(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Revision, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ModerationSummary_revision(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ModerationSummary", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
 func (ec *executionContext) _Mutation_self(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -8195,6 +10317,61 @@ func (ec *executionContext) fieldContext_Mutation_queue(_ context.Context, field
 		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return ec.childFields_QueueMutation(ctx, field)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_moderation(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Mutation_moderation(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Mutation().Moderation(ctx)
+		},
+		func(ctx context.Context, next graphql.Resolver) graphql.Resolver {
+			directive0 := next
+
+			directive1 := func(ctx context.Context) (any, error) {
+				object, err := ec.unmarshalNString2string(ctx, "moderation")
+				if err != nil {
+					var zeroVal gen.ModerationMutation
+					return zeroVal, err
+				}
+				action, err := ec.unmarshalNString2string(ctx, "mutate")
+				if err != nil {
+					var zeroVal gen.ModerationMutation
+					return zeroVal, err
+				}
+				if ec.Directives.Auth == nil {
+					var zeroVal gen.ModerationMutation
+					return zeroVal, errors.New("directive auth is not implemented")
+				}
+				return ec.Directives.Auth(ctx, nil, directive0, object, action)
+			}
+
+			next = directive1
+			return next
+		},
+		func(ctx context.Context, selections ast.SelectionSet, v gen.ModerationMutation) graphql.Marshaler {
+			return ec.marshalNModerationMutation2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationMutation(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Mutation_moderation(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_ModerationMutation(ctx, field)
 		},
 	}
 	return fc, nil
@@ -8759,6 +10936,61 @@ func (ec *executionContext) fieldContext_Query_torrentContent(_ context.Context,
 		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return ec.childFields_TorrentContentQuery(ctx, field)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_moderation(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Query_moderation(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Query().Moderation(ctx)
+		},
+		func(ctx context.Context, next graphql.Resolver) graphql.Resolver {
+			directive0 := next
+
+			directive1 := func(ctx context.Context) (any, error) {
+				object, err := ec.unmarshalNString2string(ctx, "moderation")
+				if err != nil {
+					var zeroVal gen.ModerationQuery
+					return zeroVal, err
+				}
+				action, err := ec.unmarshalNString2string(ctx, "query")
+				if err != nil {
+					var zeroVal gen.ModerationQuery
+					return zeroVal, err
+				}
+				if ec.Directives.Auth == nil {
+					var zeroVal gen.ModerationQuery
+					return zeroVal, errors.New("directive auth is not implemented")
+				}
+				return ec.Directives.Auth(ctx, nil, directive0, object, action)
+			}
+
+			next = directive1
+			return next
+		},
+		func(ctx context.Context, selections ast.SelectionSet, v gen.ModerationQuery) graphql.Marshaler {
+			return ec.marshalNModerationQuery2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationQuery(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Query_moderation(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_ModerationQuery(ctx, field)
 		},
 	}
 	return fc, nil
@@ -15077,6 +17309,138 @@ func (ec *executionContext) unmarshalInputListUsersInput(ctx context.Context, ob
 	return it, nil
 }
 
+func (ec *executionContext) unmarshalInputModerationDecisionInput(ctx context.Context, obj any) (gen.ModerationDecisionInput, error) {
+	var it gen.ModerationDecisionInput
+	if obj == nil {
+		return it, nil
+	}
+
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"identifier", "expectedRevision", "infoHash"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "identifier":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("identifier"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Identifier = data
+		case "expectedRevision":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("expectedRevision"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ExpectedRevision = data
+		case "infoHash":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("infoHash"))
+			data, err := ec.unmarshalOHash202ᚖgithubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋprotocolᚐID(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.InfoHash = graphql.OmittableOf(data)
+		}
+	}
+	return it, nil
+}
+
+func (ec *executionContext) unmarshalInputModerationPageInput(ctx context.Context, obj any) (gen.ModerationPageInput, error) {
+	var it gen.ModerationPageInput
+	if obj == nil {
+		return it, nil
+	}
+
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"limit", "after"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "limit":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("limit"))
+			data, err := ec.unmarshalOInt2ᚖint(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Limit = graphql.OmittableOf(data)
+		case "after":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("after"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.After = graphql.OmittableOf(data)
+		}
+	}
+	return it, nil
+}
+
+func (ec *executionContext) unmarshalInputModerationSearchInput(ctx context.Context, obj any) (gen.ModerationSearchInput, error) {
+	var it gen.ModerationSearchInput
+	if obj == nil {
+		return it, nil
+	}
+
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"status", "query", "limit", "after"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "status":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("status"))
+			data, err := ec.unmarshalOModerationStatus2ᚖgithubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationStatus(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Status = graphql.OmittableOf(data)
+		case "query":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("query"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Query = graphql.OmittableOf(data)
+		case "limit":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("limit"))
+			data, err := ec.unmarshalOInt2ᚖint(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Limit = graphql.OmittableOf(data)
+		case "after":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("after"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.After = graphql.OmittableOf(data)
+		}
+	}
+	return it, nil
+}
+
 func (ec *executionContext) unmarshalInputPaginationInput(ctx context.Context, obj any) (gen.PaginationInput, error) {
 	var it gen.PaginationInput
 	if obj == nil {
@@ -18149,6 +20513,792 @@ func (ec *executionContext) _MetadataSource(ctx context.Context, sel ast.Selecti
 	return out
 }
 
+var moderationAllowResultImplementors = []string{"ModerationAllowResult"}
+
+func (ec *executionContext) _ModerationAllowResult(ctx context.Context, sel ast.SelectionSet, obj *gen.ModerationAllowResult) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, moderationAllowResultImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ModerationAllowResult")
+		case "record":
+			out.Values[i] = ec._ModerationAllowResult_record(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "classificationQueued":
+			out.Values[i] = ec._ModerationAllowResult_classificationQueued(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
+var moderationEvidenceImplementors = []string{"ModerationEvidence"}
+
+func (ec *executionContext) _ModerationEvidence(ctx context.Context, sel ast.SelectionSet, obj *model.ModerationEvidenceData) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, moderationEvidenceImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ModerationEvidence")
+		case "infoHash":
+			out.Values[i] = ec._ModerationEvidence_infoHash(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "name":
+			out.Values[i] = ec._ModerationEvidence_name(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "files":
+			out.Values[i] = ec._ModerationEvidence_files(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "rule":
+			out.Values[i] = ec._ModerationEvidence_rule(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "matches":
+			out.Values[i] = ec._ModerationEvidence_matches(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
+var moderationHistoryEntryImplementors = []string{"ModerationHistoryEntry"}
+
+func (ec *executionContext) _ModerationHistoryEntry(ctx context.Context, sel ast.SelectionSet, obj *gen.ModerationHistoryEntry) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, moderationHistoryEntryImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ModerationHistoryEntry")
+		case "id":
+			out.Values[i] = ec._ModerationHistoryEntry_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "action":
+			out.Values[i] = ec._ModerationHistoryEntry_action(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "status":
+			out.Values[i] = ec._ModerationHistoryEntry_status(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "origin":
+			out.Values[i] = ec._ModerationHistoryEntry_origin(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "importedOrigin":
+			out.Values[i] = ec._ModerationHistoryEntry_importedOrigin(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "source":
+			out.Values[i] = ec._ModerationHistoryEntry_source(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "actor":
+			out.Values[i] = ec._ModerationHistoryEntry_actor(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "createdAt":
+			out.Values[i] = ec._ModerationHistoryEntry_createdAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
+var moderationHistoryPageImplementors = []string{"ModerationHistoryPage"}
+
+func (ec *executionContext) _ModerationHistoryPage(ctx context.Context, sel ast.SelectionSet, obj *gen.ModerationHistoryPage) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, moderationHistoryPageImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ModerationHistoryPage")
+		case "items":
+			out.Values[i] = ec._ModerationHistoryPage_items(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "next":
+			out.Values[i] = ec._ModerationHistoryPage_next(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
+var moderationMutationImplementors = []string{"ModerationMutation"}
+
+func (ec *executionContext) _ModerationMutation(ctx context.Context, sel ast.SelectionSet, obj *gen.ModerationMutation) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, moderationMutationImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ModerationMutation")
+		case "flag":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._ModerationMutation_flag(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "allow":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._ModerationMutation_allow(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "ban":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._ModerationMutation_ban(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "reopen":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._ModerationMutation_reopen(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "purgeEvidence":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._ModerationMutation_purgeEvidence(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
+var moderationQueryImplementors = []string{"ModerationQuery"}
+
+func (ec *executionContext) _ModerationQuery(ctx context.Context, sel ast.SelectionSet, obj *gen.ModerationQuery) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, moderationQueryImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ModerationQuery")
+		case "search":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._ModerationQuery_search(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "record":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._ModerationQuery_record(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
+var moderationRecordImplementors = []string{"ModerationRecord"}
+
+func (ec *executionContext) _ModerationRecord(ctx context.Context, sel ast.SelectionSet, obj *gen.ModerationRecord) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, moderationRecordImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ModerationRecord")
+		case "identifier":
+			out.Values[i] = ec._ModerationRecord_identifier(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "status":
+			out.Values[i] = ec._ModerationRecord_status(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "origin":
+			out.Values[i] = ec._ModerationRecord_origin(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "importedOrigin":
+			out.Values[i] = ec._ModerationRecord_importedOrigin(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "source":
+			out.Values[i] = ec._ModerationRecord_source(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "createdAt":
+			out.Values[i] = ec._ModerationRecord_createdAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "updatedAt":
+			out.Values[i] = ec._ModerationRecord_updatedAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "revision":
+			out.Values[i] = ec._ModerationRecord_revision(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "evidence":
+			out.Values[i] = ec._ModerationRecord_evidence(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "history":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._ModerationRecord_history(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
+var moderationSearchPageImplementors = []string{"ModerationSearchPage"}
+
+func (ec *executionContext) _ModerationSearchPage(ctx context.Context, sel ast.SelectionSet, obj *gen.ModerationSearchPage) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, moderationSearchPageImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ModerationSearchPage")
+		case "items":
+			out.Values[i] = ec._ModerationSearchPage_items(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "next":
+			out.Values[i] = ec._ModerationSearchPage_next(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
+var moderationSummaryImplementors = []string{"ModerationSummary"}
+
+func (ec *executionContext) _ModerationSummary(ctx context.Context, sel ast.SelectionSet, obj *gen.ModerationSummary) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, moderationSummaryImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ModerationSummary")
+		case "identifier":
+			out.Values[i] = ec._ModerationSummary_identifier(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "status":
+			out.Values[i] = ec._ModerationSummary_status(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "origin":
+			out.Values[i] = ec._ModerationSummary_origin(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "importedOrigin":
+			out.Values[i] = ec._ModerationSummary_importedOrigin(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "source":
+			out.Values[i] = ec._ModerationSummary_source(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "name":
+			out.Values[i] = ec._ModerationSummary_name(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "createdAt":
+			out.Values[i] = ec._ModerationSummary_createdAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "updatedAt":
+			out.Values[i] = ec._ModerationSummary_updatedAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "revision":
+			out.Values[i] = ec._ModerationSummary_revision(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
 var mutationImplementors = []string{"Mutation"}
 
 func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet) graphql.Marshaler {
@@ -18193,6 +21343,13 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 		case "queue":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_queue(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "moderation":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_moderation(ctx, field)
 			})
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
@@ -18498,6 +21655,28 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 					}
 				}()
 				res = ec._Query_torrentContent(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "moderation":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_moderation(ctx, field)
 				if res == graphql.Null {
 					atomic.AddUint32(&fs.Invalids, 1)
 				}
@@ -22558,6 +25737,95 @@ func (ec *executionContext) marshalNMetricsBucketDuration2githubᚗcomᚋbitmagn
 	return v
 }
 
+func (ec *executionContext) marshalNModerationAllowResult2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationAllowResult(ctx context.Context, sel ast.SelectionSet, v gen.ModerationAllowResult) graphql.Marshaler {
+	return ec._ModerationAllowResult(ctx, sel, &v)
+}
+
+func (ec *executionContext) unmarshalNModerationDecisionInput2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationDecisionInput(ctx context.Context, v any) (gen.ModerationDecisionInput, error) {
+	res, err := ec.unmarshalInputModerationDecisionInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNModerationHistoryEntry2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationHistoryEntry(ctx context.Context, sel ast.SelectionSet, v gen.ModerationHistoryEntry) graphql.Marshaler {
+	return ec._ModerationHistoryEntry(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNModerationHistoryEntry2ᚕgithubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationHistoryEntryᚄ(ctx context.Context, sel ast.SelectionSet, v []gen.ModerationHistoryEntry) graphql.Marshaler {
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalNModerationHistoryEntry2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationHistoryEntry(ctx, sel, v[i])
+	})
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNModerationHistoryPage2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationHistoryPage(ctx context.Context, sel ast.SelectionSet, v gen.ModerationHistoryPage) graphql.Marshaler {
+	return ec._ModerationHistoryPage(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNModerationMutation2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationMutation(ctx context.Context, sel ast.SelectionSet, v gen.ModerationMutation) graphql.Marshaler {
+	return ec._ModerationMutation(ctx, sel, &v)
+}
+
+func (ec *executionContext) unmarshalNModerationPageInput2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationPageInput(ctx context.Context, v any) (gen.ModerationPageInput, error) {
+	res, err := ec.unmarshalInputModerationPageInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNModerationQuery2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationQuery(ctx context.Context, sel ast.SelectionSet, v gen.ModerationQuery) graphql.Marshaler {
+	return ec._ModerationQuery(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNModerationRecord2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationRecord(ctx context.Context, sel ast.SelectionSet, v gen.ModerationRecord) graphql.Marshaler {
+	return ec._ModerationRecord(ctx, sel, &v)
+}
+
+func (ec *executionContext) unmarshalNModerationSearchInput2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationSearchInput(ctx context.Context, v any) (gen.ModerationSearchInput, error) {
+	res, err := ec.unmarshalInputModerationSearchInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNModerationSearchPage2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationSearchPage(ctx context.Context, sel ast.SelectionSet, v gen.ModerationSearchPage) graphql.Marshaler {
+	return ec._ModerationSearchPage(ctx, sel, &v)
+}
+
+func (ec *executionContext) unmarshalNModerationStatus2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationStatus(ctx context.Context, v any) (gen.ModerationStatus, error) {
+	var res gen.ModerationStatus
+	err := res.UnmarshalGQL(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNModerationStatus2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationStatus(ctx context.Context, sel ast.SelectionSet, v gen.ModerationStatus) graphql.Marshaler {
+	return v
+}
+
+func (ec *executionContext) marshalNModerationSummary2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationSummary(ctx context.Context, sel ast.SelectionSet, v gen.ModerationSummary) graphql.Marshaler {
+	return ec._ModerationSummary(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNModerationSummary2ᚕgithubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationSummaryᚄ(ctx context.Context, sel ast.SelectionSet, v []gen.ModerationSummary) graphql.Marshaler {
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalNModerationSummary2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationSummary(ctx, sel, v[i])
+	})
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
 func (ec *executionContext) marshalNPasswordEntropyResult2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐPasswordEntropyResult(ctx context.Context, sel ast.SelectionSet, v gen.PasswordEntropyResult) graphql.Marshaler {
 	return ec._PasswordEntropyResult(ctx, sel, &v)
 }
@@ -23624,6 +26892,22 @@ func (ec *executionContext) marshalOHash202ᚕgithubᚗcomᚋbitmagnetᚑioᚋbi
 	return ret
 }
 
+func (ec *executionContext) unmarshalOHash202ᚖgithubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋprotocolᚐID(ctx context.Context, v any) (*protocol.ID, error) {
+	if v == nil {
+		return nil, nil
+	}
+	var res = new(protocol.ID)
+	err := res.UnmarshalGQL(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalOHash202ᚖgithubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋprotocolᚐID(ctx context.Context, sel ast.SelectionSet, v *protocol.ID) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return v
+}
+
 func (ec *executionContext) unmarshalOInt2githubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋmodelᚐNullUint(ctx context.Context, v any) (model.NullUint, error) {
 	var res model.NullUint
 	err := res.UnmarshalGQL(v)
@@ -23812,6 +27096,29 @@ func (ec *executionContext) unmarshalOListUsersInput2ᚖgithubᚗcomᚋbitmagnet
 	}
 	res, err := ec.unmarshalInputListUsersInput(ctx, v)
 	return &res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalOModerationEvidence2ᚖgithubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋmodelᚐModerationEvidenceData(ctx context.Context, sel ast.SelectionSet, v *model.ModerationEvidenceData) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return ec._ModerationEvidence(ctx, sel, v)
+}
+
+func (ec *executionContext) unmarshalOModerationStatus2ᚖgithubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationStatus(ctx context.Context, v any) (*gen.ModerationStatus, error) {
+	if v == nil {
+		return nil, nil
+	}
+	var res = new(gen.ModerationStatus)
+	err := res.UnmarshalGQL(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalOModerationStatus2ᚖgithubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐModerationStatus(ctx context.Context, sel ast.SelectionSet, v *gen.ModerationStatus) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return v
 }
 
 func (ec *executionContext) unmarshalOPaginationInput2ᚖgithubᚗcomᚋbitmagnetᚑioᚋbitmagnetᚋinternalᚋgqlᚋgqlmodelᚋgenᚐPaginationInput(ctx context.Context, v any) (*gen.PaginationInput, error) {

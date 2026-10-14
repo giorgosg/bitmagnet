@@ -7,6 +7,7 @@ import (
 
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/api_key"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/user"
+	"github.com/bitmagnet-io/bitmagnet/internal/moderation"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -20,6 +21,20 @@ var wantPresentations = []struct {
 	code    string
 	message string
 }{
+	{
+		moderation.ErrInvalidEvidence,
+		"MODERATION_INVALID_INFOHASH",
+		"moderation evidence infohash does not match identifier",
+	},
+	{
+		moderation.ErrConflict,
+		"MODERATION_CONFLICT",
+		"moderation record changed; reload before reviewing",
+	},
+	{moderation.ErrInvalidTransition, "MODERATION_INVALID_TRANSITION", "invalid moderation transition"},
+	{moderation.ErrNotFound, "MODERATION_NOT_FOUND", "moderation record not found"},
+	{moderation.ErrInvalidPage, "MODERATION_INVALID_PAGE", "invalid moderation page"},
+	{moderation.ErrInvalidIdentifier, "MODERATION_INVALID_IDENTIFIER", "invalid moderation identifier"},
 	{user.ErrCredentialsInvalid, ErrorCodeInvalidCredentials, "invalid username or password"},
 	{user.ErrDisabled, ErrorCodeUserDisabled, "account is disabled"},
 	{user.ErrLoginRequestLimiter, ErrorCodeLoginThrottled, "too many login requests"},

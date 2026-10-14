@@ -75,6 +75,15 @@ type HistoryPage struct {
 
 const lockForUpdate = "UPDATE"
 
+// PostgreSQL stores microseconds. Under the identifier lock, each changed record
+// advances past its prior revision even when a writer's clock moved backwards.
+const nextRevisionSQL = "GREATEST(clock_timestamp(), updated_at + INTERVAL '1 microsecond')"
+
+func advanceRevision(tx *gorm.DB, id Identifier) error {
+	return tx.Model(&model.ModerationDecision{}).Where("identifier = ?", id.String()).
+		UpdateColumn("updated_at", gorm.Expr(nextRevisionSQL)).Error
+}
+
 type Service struct{ db *gorm.DB }
 
 func NewService(db *gorm.DB) *Service { return &Service{db: db} }
@@ -162,7 +171,7 @@ func (s *Service) change(ctx context.Context, id Identifier, c decisionChange) e
 					"origin":          string(c.origin),
 					"imported_origin": string(c.importedOrigin),
 					"source":          c.source,
-					"updated_at":      time.Now().UTC(),
+					"updated_at":      gorm.Expr(nextRevisionSQL),
 				}).
 				Error; err != nil {
 				return err
@@ -393,6 +402,10 @@ func (s *Service) PurgeEvidence(ctx context.Context, id Identifier) error {
 			return err
 		}
 
+		if err := advanceRevision(tx, id); err != nil {
+			return err
+		}
+
 		return tx.Create(
 			&model.ModerationHistory{
 				Identifier: id.String(),
@@ -592,7 +605,11 @@ func retainEvidence(tx *gorm.DB, id Identifier, evidence Evidence) (bool, error)
 	}
 
 	private := model.ModerationEvidence{Identifier: id.String(), Data: evidence}
+
 	err = tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&private).Error
+	if err == nil {
+		err = advanceRevision(tx, id)
+	}
 
 	return err == nil, err
 }

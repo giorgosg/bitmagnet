@@ -19,6 +19,7 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
 	"github.com/bitmagnet-io/bitmagnet/internal/metrics/queuemetrics"
 	"github.com/bitmagnet-io/bitmagnet/internal/metrics/torrentmetrics"
+	"github.com/bitmagnet-io/bitmagnet/internal/moderation"
 	"github.com/bitmagnet-io/bitmagnet/internal/processor"
 	"github.com/bitmagnet-io/bitmagnet/internal/queue/manager"
 	"github.com/bitmagnet-io/bitmagnet/internal/worker"
@@ -111,7 +112,13 @@ func New() fx.Option {
 							return nil, err
 						}
 
+						moderator, err := p.Moderation.Get()
+						if err != nil {
+							return nil, err
+						}
+
 						return &resolvers.Resolver{
+							Moderation:           moderator,
 							Dao:                  d,
 							Search:               s,
 							Checker:              ch,
@@ -150,6 +157,7 @@ type Params struct {
 	QueueManager         lazy.Lazy[manager.Manager]
 	TorrentMetricsClient lazy.Lazy[torrentmetrics.Client]
 	Processor            lazy.Lazy[processor.Processor]
+	Moderation           lazy.Lazy[*moderation.Service]
 	UserService          user.Service
 	APIKeyService        api_key.Service
 	RBACService          rbac.Service

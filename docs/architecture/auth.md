@@ -210,7 +210,7 @@ marker.
 
 `authconfig.AnonymousReadSurface` now serves only the development fixture's explicit
 `--anonymous-access` option. It selects registered read actions except `auth`, `pprof`,
-and `metrics`, so the browser harness can exercise an open catalogue. Its allow-list
+`metrics` and `moderation`, so the browser harness can exercise an open catalogue. Its allow-list
 continues to exclude new action verbs by default. The object-name exclusions are string
 literals because `authconfig` cannot import `http_auth` without a cycle; a test pins
 them against the registered actions.
@@ -487,3 +487,12 @@ disconnecting mid-response. Keep any new logging sink inside the redaction.
 
 _Known defects and improvement ideas referenced above are kept as untracked
 `docs/issues/*.local.md` notes, which a given checkout may or may not have._
+
+## Moderation Object actions
+
+`graphql:moderation:query` and `graphql:moderation:mutate` are registered from the schema,
+without new baseline grants or a new core Role. Direct records, private evidence and history
+require the query action, including private fields selected from mutation results. Ordinary
+catalogue reads and tag edits confer no moderation access. Actor identifiers come from the
+resolved request Identity; the input contains no reviewer identity. See
+[moderator operations](../moderation.md).

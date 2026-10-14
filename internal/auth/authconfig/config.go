@@ -106,6 +106,8 @@ const authObject = "auth"
 // authconfig_test, which can import both, pins these strings against the real
 // object actions so a rename fails loudly instead of quietly lapsing.
 var anonymousExcludedObjects = map[string]struct{}{
+	// Private review evidence is never part of the fixture catalogue grant.
+	"moderation": {},
 	// Auth administration, excluded because an anonymous caller with putRole
 	// could grant the anon role every action.
 	authObject: {},
