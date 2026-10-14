@@ -115,6 +115,7 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#100](https://github.com/giorgosg/magnes/pull/100)  | Exact ingestion bans and discard of legacy blocking                              | local                                                                | Legacy discovery, racing bans, first-match/full/single-file evidence, ordinary deletes, upgrade and queue retry seen red                            |
 | [#101](https://github.com/giorgosg/magnes/pull/101)  | Permissioned private review reads and atomic moderator decisions                 | local                                                                | Query/allow, private-read leak, empty revision, stale evidence and clock ordering observed red; PostgreSQL API, rollback, conflict and queue checks |
 | [#102](https://github.com/giorgosg/magnes/pull/102)  | Private searchable moderation review UI and confirmed decisions                  | local                                                                | Browser workflow/access, flag detail routing and unrelated-refresh recovery seen red; PostgreSQL, Elm, browser and lint checks pass                 |
+| [#103](https://github.com/giorgosg/magnes/pull/103)  | Export reviewed bans as an explicit permissioned JSON download                   | local — harmful-content moderation                                   | API download 404, missing browser link and cookie 403 seen red; multipage/snapshot/privacy/Permission checks and real downloads pass                |
 
 ## In flight
 

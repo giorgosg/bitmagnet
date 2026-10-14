@@ -440,3 +440,11 @@ Private moderation search, direct evidence and history require
 Administrators can grant these Object actions to a custom Role or scoped API key; the
 fixture's anonymous catalogue grant excludes them. Evidence/history selected from mutation
 results require the query action as well. See [moderator operations](moderation.md). See [architecture/moderation.md](architecture/moderation.md).
+
+The explicit ban-file download uses `http:moderation:export`, separately from query and
+mutate. It has no baseline grant. `GET /graphql/moderation/export` accepts a permissioned
+browser cookie or bearer credential; the cookie remains scoped to `/graphql` and its
+resolver accepts this exact additional read-only path. Other HTTP surfaces do not borrow
+browser authority. Forward this path through the same HTTPS proxy as `/graphql` and include
+`moderation` when configuring an explicit HTTP option list. See
+[moderator sharing](moderation.md) and the [file contract](moderation-ban-file.md).

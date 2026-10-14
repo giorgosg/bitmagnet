@@ -15,15 +15,16 @@ The sort is load-bearing: `"auth"` sorts before `"graphql"`, `"import"` and `"to
 which guarantees the identity middleware is mounted before any handler that reads an
 identity back out.
 
-| Key          | Package                         | Route(s)                                                       |
-| ------------ | ------------------------------- | -------------------------------------------------------------- |
-| `auth`       | `internal/auth/http_auth`       | middleware only, no route                                      |
-| `graphql`    | `internal/gql/httpserver`       | `POST /graphql`; `GET /graphql` (playground) only when enabled |
-| `import`     | `internal/importer/httpserver`  | `POST /import`                                                 |
-| `prometheus` | `internal/telemetry/httpserver` | `/metrics`                                                     |
-| `pprof`      | `internal/telemetry/httpserver` | `/debug/pprof/*`                                               |
-| `static`     | `internal/httpserver/static`    | bundled Elm UI or configured directory at `/ui`                |
-| `torznab`    | `internal/torznab/httpserver`   | `/torznab/*`                                                   |
+| Key          | Package                          | Route(s)                                                       |
+| ------------ | -------------------------------- | -------------------------------------------------------------- |
+| `auth`       | `internal/auth/http_auth`        | middleware only, no route                                      |
+| `graphql`    | `internal/gql/httpserver`        | `POST /graphql`; `GET /graphql` (playground) only when enabled |
+| `moderation` | `internal/moderation/httpserver` | `GET /graphql/moderation/export`                               |
+| `import`     | `internal/importer/httpserver`   | `POST /import`                                                 |
+| `prometheus` | `internal/telemetry/httpserver`  | `/metrics`                                                     |
+| `pprof`      | `internal/telemetry/httpserver`  | `/debug/pprof/*`                                               |
+| `static`     | `internal/httpserver/static`     | bundled Elm UI or configured directory at `/ui`                |
+| `torznab`    | `internal/torznab/httpserver`    | `/torznab/*`                                                   |
 
 Before the options run, `httpserver.NewEngine` sets `SetTrustedProxies(config.TrustedProxies)`
 — empty by default, meaning `X-Forwarded-For` is not believed and `ClientIP()` is the real
@@ -132,7 +133,10 @@ stable filenames on disk. A reverse proxy can instead serve the UI and API toget
 The `/moderation` UI area uses only the private moderation namespace. Its route/menu
 require query and its decision controls require mutate. Search/history request bounded
 50-item pages; exact revisions and request epochs protect against stale decisions and
-late responses. Private review offers no catalogue download controls. See
+late responses. Private review offers no catalogue download controls. Separate ban-file links require
+`http:moderation:export`; the server independently enforces that action on its streaming
+read-only attachment route. The [file contract](../moderation-ban-file.md) excludes all
+private metadata. See
 [UI behavior](../../webui/docs/moderation.md).
 
 ## CORS

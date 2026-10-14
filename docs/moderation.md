@@ -12,6 +12,7 @@ mutation {
       objectActions: [
         { namespace: "graphql", object: "moderation", action: "query" }
         { namespace: "graphql", object: "moderation", action: "mutate" }
+        { namespace: "http", object: "moderation", action: "export" }
       ]
     ) {
       name
@@ -22,7 +23,8 @@ mutation {
 
 This is a custom Role, not a new core Role. The query action permits private review
 search, evidence and history; the mutate action permits decisions. Ordinary catalogue
-Permissions and tag editing do not grant either. API keys remain bounded by both their
+Permissions and tag editing do not grant them. The separate `http:moderation:export`
+action permits sharing ban files; private query or mutate alone does not grant export. API keys remain bounded by both their
 own selected Object actions and their owner's Role. Actor identifiers come from the
 server-resolved User or API key, never request input.
 
@@ -100,5 +102,18 @@ raw hashes have `MODERATION_NOT_FOUND`, `MODERATION_INVALID_IDENTIFIER`,
 
 Ordinary GraphQL and Torznab reads keep applying the same pending/banned exclusion, even
 for moderators. Private metadata is available only through the moderation query Permission.
-Explicit sharing files are a separate integration; user reporting
-and anonymous submissions are not part of this surface.
+In the moderation area, **Export reviewed bans** downloads only currently banned local
+moderator decisions. **Export reviewed and automatic bans** deliberately adds local
+automatic bans with their origin retained. Both require the export Permission; search and
+status controls do not narrow the file. Imported assertions, pending/allowed decisions and
+all private evidence/history are excluded. Downloaded files contain membership digests and
+decision origins, not magnets or private metadata. See the
+[frozen version-1 format and privacy limit](moderation-ban-file.md).
+
+Machine clients can send a bearer API key with the selected export Object action to
+`GET /graphql/moderation/export`, optionally with `?includeAutomatic=true`. Its owner's
+Role must also permit export. Browser downloads use the existing secure `/graphql` cookie
+scope through this exact additional read-only path. Reverse proxies must forward it to the
+API. Include `moderation` in an explicit `http_server.options` list to mount the route.
+Ordinary `task export-data` remains a visible-catalogue SQL export without ban files.
+No file import, background sharing, user reporting or anonymous submission is added here.

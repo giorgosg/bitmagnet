@@ -14,6 +14,10 @@ import (
 
 const cookiePath = "/graphql"
 
+// ModerationExportPath is the one additional read-only browser download path.
+// The cookie keeps its /graphql scope; other HTTP surfaces cannot borrow it.
+const ModerationExportPath = "/graphql/moderation/export"
+
 var (
 	errHTTPContextRequired = errors.New("browser session cookie requires an HTTP request context")
 	errOriginRequired      = errors.New("browser session request requires an Origin")
@@ -39,7 +43,7 @@ func NewCookie(cfg authconfig.Config) Cookie {
 }
 
 func (c cookie) Credential(request *http.Request) (string, bool) {
-	if request.URL.Path != cookiePath {
+	if request.URL.Path != cookiePath && request.URL.Path != ModerationExportPath {
 		return "", false
 	}
 

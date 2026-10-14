@@ -14,20 +14,21 @@ These are _working notes_. New Magnes user documentation lives in
 
 ## Which page, and when
 
-| Read                                           | When                                                                                  |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------- |
-| [hacking.md](hacking.md)                       | Making a change: toolchain, feature shape, GraphQL, migrations, testing at real scale |
-| [architecture/](architecture/README.md)        | Getting oriented: what each subsystem is, how it connects, where a change goes        |
-| [porting.md](porting.md)                       | Measuring, reviewing, or cherry-picking from a fork or an upstream PR                 |
-| [forks/](forks/README.md)                      | Choosing which downstream repo a change should come from                              |
-| [upstream-status.md](upstream-status.md)       | Sending a change upstream, or weighing whether the `next` rewrite makes it moot       |
-| [integration-status.md](integration-status.md) | Checking whether a candidate is already merged, queued, or rejected                   |
-| [auth.md](auth.md)                             | Configuring or deploying authentication, or running behind a reverse proxy            |
-| [moderation.md](moderation.md)                 | Granting moderator Permissions and reviewing private evidence and decisions           |
-| [adr/](adr/)                                   | A decision constrains future changes and the reason will not be obvious from the code |
-| `agents/`                                      | Filing an issue, applying a triage label, or looking for domain docs — **local only** |
-| `issues/`                                      | Review findings: what is confirmed, fixed, or rejected, and why — **local only**      |
-| `ideas/`                                       | Weighing what to work on next rather than how to do it — **local only**               |
+| Read                                             | When                                                                                  |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| [hacking.md](hacking.md)                         | Making a change: toolchain, feature shape, GraphQL, migrations, testing at real scale |
+| [architecture/](architecture/README.md)          | Getting oriented: what each subsystem is, how it connects, where a change goes        |
+| [porting.md](porting.md)                         | Measuring, reviewing, or cherry-picking from a fork or an upstream PR                 |
+| [forks/](forks/README.md)                        | Choosing which downstream repo a change should come from                              |
+| [upstream-status.md](upstream-status.md)         | Sending a change upstream, or weighing whether the `next` rewrite makes it moot       |
+| [integration-status.md](integration-status.md)   | Checking whether a candidate is already merged, queued, or rejected                   |
+| [auth.md](auth.md)                               | Configuring or deploying authentication, or running behind a reverse proxy            |
+| [moderation-ban-file.md](moderation-ban-file.md) | Frozen shareable ban-file format, provenance and membership privacy limit             |
+| [moderation.md](moderation.md)                   | Granting moderator Permissions and reviewing private evidence and decisions           |
+| [adr/](adr/)                                     | A decision constrains future changes and the reason will not be obvious from the code |
+| `agents/`                                        | Filing an issue, applying a triage label, or looking for domain docs — **local only** |
+| `issues/`                                        | Review findings: what is confirmed, fixed, or rejected, and why — **local only**      |
+| `ideas/`                                         | Weighing what to work on next rather than how to do it — **local only**               |
 
 ## Keeping these pages true
 

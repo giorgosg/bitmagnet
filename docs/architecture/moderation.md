@@ -151,3 +151,18 @@ They create neither harmful-content decisions nor persistent suppression. Migrat
 discards the old `blocked_torrents` key and unlinks its existing large object when unshared;
 it never reads the Bloom entries or turns them into decisions. Downgrade cannot restore
 them. Old and new executables must not run concurrently against the upgraded database.
+
+## Explicit ban-file export
+
+`Service.Export` streams shareable `BanEntry` values from decision rows only: local
+moderator bans by default, local automatic bans only with deliberate inclusion. Imported,
+pending and allowed decisions are excluded. Bounded 100-row keyset reads share one read-only
+repeatable-read snapshot and force no-cache mode. Private records/evidence/history are not
+serialization inputs. `BanFile` freezes the small envelope and optional whole-file source
+label; the download omits that label. See the [version-1 file contract](../moderation-ban-file.md).
+
+The `moderation` HTTP option mounts `GET /graphql/moderation/export` and enforces the
+separate `http:moderation:export` action before opening the lazy service. It fails closed
+without an authenticator and sends no-store JSON attachments. The exact read-only path is
+allowed by the browser-cookie resolver without broadening its `/graphql` cookie scope.
+File import remains a later integration.

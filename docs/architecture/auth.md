@@ -130,7 +130,7 @@ Three enforcement points, deliberately not one:
   third credential type here: an operator with the web UI open had their JWT attached by
   the middleware, so Torznab answered `200` to a request carrying no `apikey` at all.
 - **Everything else** — `http_auth.Guard`, used by `/import`, `/metrics`, and
-  `/debug/pprof`. All three fail closed, and all three resolve the anonymous identity
+  `/debug/pprof`, and the explicit moderation export. These fail closed, and resolve the anonymous identity
   themselves when nothing is on the context, so authorization follows the permission
   model rather than how the server happened to be assembled.
 
@@ -495,4 +495,7 @@ without new baseline grants or a new core Role. Direct records, private evidence
 require the query action, including private fields selected from mutation results. Ordinary
 catalogue reads and tag edits confer no moderation access. Actor identifiers come from the
 resolved request Identity; the input contains no reviewer identity. See
-[moderator operations](../moderation.md).
+[moderator operations](../moderation.md). Explicit ban-file download instead requires
+`http:moderation:export`, registered by the HTTP action provider without a baseline grant.
+Its exact `GET /graphql/moderation/export` path accepts browser credentials inside the
+existing `/graphql` cookie scope; other HTTP paths remain outside that contract.
