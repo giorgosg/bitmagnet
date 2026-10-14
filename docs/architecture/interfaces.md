@@ -45,7 +45,8 @@ line verbatim including a Torznab `apikey`).
   of GraphQL object actions — `gqlfx` extracts them from the schema AST rather than
   restating them.
 - `moderation` is a separate query/mutation Object with private direct record, evidence
-  and history checks. Its bounded search never bypasses the ordinary catalogue predicate;
+  and history checks. Its bounded private search is a separate permissioned surface and
+  leaves the ordinary catalogue guard intact;
   decision writes use exact string revisions and server-derived actors. See
   [moderation.md](moderation.md) and [operator usage](../moderation.md).
 - The handler accepts JSON POST and automatic persisted queries. Introspection and the

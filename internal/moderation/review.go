@@ -17,9 +17,14 @@ var (
 	ErrInvalidIdentifier = errors.New("invalid moderation identifier")
 )
 
+// ReviewAction identifies an explicit moderator decision.
+type ReviewAction string
+
 const (
-	reviewAllowAction  = "allow"
-	reviewReopenAction = "reopen"
+	ReviewAllow         ReviewAction = "allow"
+	ReviewBan           ReviewAction = "ban"
+	ReviewReopen        ReviewAction = "reopen"
+	ReviewPurgeEvidence ReviewAction = "purge"
 )
 
 // FlagCatalogue retains server-loaded metadata, including quarantined catalogue rows.
@@ -82,7 +87,7 @@ type ReviewResult struct {
 func (s *Service) Review(
 	ctx context.Context,
 	id Identifier,
-	action string,
+	action ReviewAction,
 	expected time.Time,
 	actor string,
 	suppliedHash *protocol.ID,
@@ -119,32 +124,26 @@ func (s *Service) Review(
 		var err error
 
 		switch action {
-		case reviewAllowAction:
+		case ReviewAllow:
 			if stored.Status == string(Allowed) {
 				return ErrInvalidTransition
 			}
 
 			err = service.Allow(ctx, id, actor)
-		case "ban":
+		case ReviewBan:
 			if stored.Status == string(Banned) && stored.Origin == string(Moderator) {
 				return ErrInvalidTransition
 			}
 
 			err = service.Ban(ctx, id, actor)
-		case reviewReopenAction:
+		case ReviewReopen:
 			if stored.Status == string(Pending) {
 				return ErrInvalidTransition
 			}
 
 			err = service.Reopen(ctx, id, actor)
-		case "purge":
+		case ReviewPurgeEvidence:
 			err = service.PurgeEvidence(ctx, id)
-			if err == nil {
-				err = tx.Model(&model.ModerationDecision{}).
-					Where("identifier = ?", id.String()).
-					Update("updated_at", time.Now().UTC()).
-					Error
-			}
 		default:
 			return ErrInvalidTransition
 		}
@@ -158,7 +157,7 @@ func (s *Service) Review(
 			return err
 		}
 
-		if action != reviewAllowAction {
+		if action != ReviewAllow {
 			return nil
 		}
 

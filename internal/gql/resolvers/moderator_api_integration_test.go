@@ -569,3 +569,40 @@ func TestModeratorAllowPurgedMetadataUsesValidatedHash(t *testing.T) {
 		string(allowed.Data),
 	)
 }
+
+func TestModeratorSearchRevisionRejectsChangedEvidence(t *testing.T) {
+	t.Parallel()
+	server, db, _, moderator := moderatorServer(t)
+	hashes := dbtest.ModerationCatalogue(t, db)
+	request := `{moderation{search(input:{status:pending,limit:1}){items{identifier revision}}}}`
+	before := query(t, server, moderator, request)
+	requireNoGqlErrors(t, before)
+
+	var observed moderationSearchResponse
+	require.NoError(t, json.Unmarshal(before.Data, &observed))
+	require.Len(t, observed.Moderation.Search.Items, 1)
+	item := observed.Moderation.Search.Items[0]
+	id := moderation.IdentifierForInfoHash(hashes[1])
+	require.Equal(t, id.String(), item.Identifier)
+	require.NoError(t, moderation.NewService(db.Gorm).RetainEvidence(t.Context(), id,
+		moderation.Evidence{Files: []string{"changed/harmless.txt"}}))
+
+	mutation := fmt.Sprintf(
+		`mutation{moderation{allow(input:{identifier:%q,expectedRevision:%q}){record{status}}}}`,
+		item.Identifier,
+		item.Revision,
+	)
+	requireGraphQLErrorCode(t, query(t, server, moderator, mutation), "MODERATION_CONFLICT")
+	latest := query(t, server, moderator, request)
+	requireNoGqlErrors(t, latest)
+
+	var current moderationSearchResponse
+	require.NoError(t, json.Unmarshal(latest.Data, &current))
+	require.Len(t, current.Moderation.Search.Items, 1)
+	require.NotEqual(t, item.Revision, current.Moderation.Search.Items[0].Revision)
+	allowed := query(t, server, moderator, fmt.Sprintf(
+		`mutation{moderation{allow(input:{identifier:%q,expectedRevision:%q}){record{status}}}}`,
+		item.Identifier, current.Moderation.Search.Items[0].Revision))
+	requireNoGqlErrors(t, allowed)
+	require.Contains(t, string(allowed.Data), `"status":"allowed"`)
+}

@@ -79,7 +79,7 @@ func moderationActor(ctx context.Context) (string, error) {
 func (r *Resolver) reviewModeration(
 	ctx context.Context,
 	input gen.ModerationDecisionInput,
-	action string,
+	action moderation.ReviewAction,
 ) (moderation.ReviewResult, error) {
 	id, err := moderationIdentifier(input.Identifier)
 	if err != nil {
@@ -114,7 +114,7 @@ func (r *Resolver) reviewModeration(
 func (r *Resolver) changeModeration(
 	ctx context.Context,
 	input gen.ModerationDecisionInput,
-	action string,
+	action moderation.ReviewAction,
 ) (gen.ModerationRecord, error) {
 	result, err := r.reviewModeration(ctx, input, action)
 	return moderationRecord(result.Record), err

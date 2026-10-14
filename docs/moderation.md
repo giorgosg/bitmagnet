@@ -51,7 +51,9 @@ already exists is refused; use explicit reopen to reassess it.
 digest `identifier` and the exact `expectedRevision` string returned by the latest record
 or summary. Keep this string intact; `updatedAt` is for display, and clients with
 millisecond date precision must not recreate the revision from it. A stale revision returns
-`MODERATION_CONFLICT`; reload and review the current record before retrying.
+`MODERATION_CONFLICT`; reload and review the current record before retrying. Changed private
+evidence or a purge also invalidates the revision, even when the decision's status stays the
+same. Repeating unchanged evidence does not invalidate a review.
 
 Allow returns `{record, classificationQueued}`. The decision, its history and any needed
 normal classification job commit atomically. It immediately restores ordinary visibility

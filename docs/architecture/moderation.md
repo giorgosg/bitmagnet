@@ -83,7 +83,10 @@ mutation result. The fixture's anonymous catalogue grant excludes moderation.
 `FlagCatalogue` loads observed metadata by its known raw infohash while holding the decision
 lock. `Review` compares an exact timestamp revision under that same lock; stale requests
 return a conflict instead of overwriting another review. The API serializes revisions as
-opaque strings so browser date codecs cannot truncate microseconds. Actor identifiers are
+opaque strings so browser date codecs cannot truncate microseconds. Changed private evidence,
+including ingestion enrichment and direct purge, advances the same decision revision within
+its transaction. Revisions advance strictly at PostgreSQL microsecond precision even when
+clocks disagree; unchanged evidence and idempotent assertions preserve their revision. Actor identifiers are
 resolved from the authenticated User/API key. A successful allow inserts the normal
 processor job in the transaction when catalogue metadata exists without classification.
 Retained evidence supplies its raw hash, or a caller may supply a hash whose digest is

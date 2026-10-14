@@ -28,23 +28,23 @@ func (r *moderationMutationResolver) Flag(ctx context.Context, obj *gen.Moderati
 
 // Allow is the resolver for the allow field.
 func (r *moderationMutationResolver) Allow(ctx context.Context, obj *gen.ModerationMutation, input gen.ModerationDecisionInput) (gen.ModerationAllowResult, error) {
-	result, err := r.reviewModeration(ctx, input, "allow")
+	result, err := r.reviewModeration(ctx, input, moderation.ReviewAllow)
 	return gen.ModerationAllowResult{Record: moderationRecord(result.Record), ClassificationQueued: result.ClassificationQueued}, err
 }
 
 // Ban is the resolver for the ban field.
 func (r *moderationMutationResolver) Ban(ctx context.Context, obj *gen.ModerationMutation, input gen.ModerationDecisionInput) (gen.ModerationRecord, error) {
-	return r.changeModeration(ctx, input, "ban")
+	return r.changeModeration(ctx, input, moderation.ReviewBan)
 }
 
 // Reopen is the resolver for the reopen field.
 func (r *moderationMutationResolver) Reopen(ctx context.Context, obj *gen.ModerationMutation, input gen.ModerationDecisionInput) (gen.ModerationRecord, error) {
-	return r.changeModeration(ctx, input, "reopen")
+	return r.changeModeration(ctx, input, moderation.ReviewReopen)
 }
 
 // PurgeEvidence is the resolver for the purgeEvidence field.
 func (r *moderationMutationResolver) PurgeEvidence(ctx context.Context, obj *gen.ModerationMutation, input gen.ModerationDecisionInput) (gen.ModerationRecord, error) {
-	return r.changeModeration(ctx, input, "purge")
+	return r.changeModeration(ctx, input, moderation.ReviewPurgeEvidence)
 }
 
 // Search is the resolver for the search field.

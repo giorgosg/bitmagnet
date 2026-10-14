@@ -210,7 +210,7 @@ marker.
 
 `authconfig.AnonymousReadSurface` now serves only the development fixture's explicit
 `--anonymous-access` option. It selects registered read actions except `auth`, `pprof`,
-and `metrics`, so the browser harness can exercise an open catalogue. Its allow-list
+`metrics` and `moderation`, so the browser harness can exercise an open catalogue. Its allow-list
 continues to exclude new action verbs by default. The object-name exclusions are string
 literals because `authconfig` cannot import `http_auth` without a cycle; a test pins
 them against the registered actions.
