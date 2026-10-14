@@ -279,6 +279,10 @@ instance, was not run on 2026-10-11, when it was changed to generate into `.dev/
 Confirm before committing: the schema should include `Self`, `User`, `Role`, `APIKey`,
 `Invitation`, `AuthQuery` and `AuthMutation`.
 
+The moderation integration regenerated this client from the SDL for the private moderation
+queries and decision inputs/results. Revisions are strings because the shared `DateTime`
+codec stores `Time.Posix` milliseconds and would lose PostgreSQL revision precision.
+
 Commit the result — a checkout should build without reaching an instance.
 
 ### Introspection is off by default

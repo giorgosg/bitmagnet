@@ -434,5 +434,9 @@ The default allowed headers are `Content-Type`, `Authorization`, `X-Api-Key` and
 Catalogue query permission does not expose pending/banned torrent metadata. Ordinary
 GraphQL and Torznab reads, including files, direct hash requests, suggestions, facets and
 source listings, enforce the exact moderation ledger irrespective of the caller's role.
-Private moderation evidence currently has only an internal service interface; the
-permissioned moderator API is a later integration. See [architecture/moderation.md](architecture/moderation.md).
+Private moderation search, direct evidence and history require
+`graphql:moderation:query`; flag, allow, ban, reopen and purge require
+`graphql:moderation:mutate`. Catalogue/tag Permissions do not imply moderation access.
+Administrators can grant these Object actions to a custom Role or scoped API key; the
+fixture's anonymous catalogue grant excludes them. Evidence/history selected from mutation
+results require the query action as well. See [moderator operations](moderation.md). See [architecture/moderation.md](architecture/moderation.md).

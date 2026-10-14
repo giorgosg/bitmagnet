@@ -487,3 +487,12 @@ disconnecting mid-response. Keep any new logging sink inside the redaction.
 
 _Known defects and improvement ideas referenced above are kept as untracked
 `docs/issues/*.local.md` notes, which a given checkout may or may not have._
+
+## Moderation Object actions
+
+`graphql:moderation:query` and `graphql:moderation:mutate` are registered from the schema,
+without new baseline grants or a new core Role. Direct records, private evidence and history
+require the query action, including private fields selected from mutation results. Ordinary
+catalogue reads and tag edits confer no moderation access. Actor identifiers come from the
+resolved request Identity; the input contains no reviewer identity. See
+[moderator operations](../moderation.md).

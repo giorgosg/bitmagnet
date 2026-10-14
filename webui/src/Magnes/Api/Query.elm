@@ -71,3 +71,10 @@ torrentContent :
     -> SelectionSet decodesTo RootQuery
 torrentContent object____ =
     Object.selectionForCompositeField "torrentContent" [] object____ Basics.identity
+
+
+moderation :
+    SelectionSet decodesTo Magnes.Api.Object.ModerationQuery
+    -> SelectionSet decodesTo RootQuery
+moderation object____ =
+    Object.selectionForCompositeField "moderation" [] object____ Basics.identity

@@ -39,6 +39,7 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
 	"github.com/bitmagnet-io/bitmagnet/internal/metrics/queuemetrics"
 	"github.com/bitmagnet-io/bitmagnet/internal/metrics/torrentmetrics"
+	"github.com/bitmagnet-io/bitmagnet/internal/moderation"
 	"github.com/bitmagnet-io/bitmagnet/internal/queue/manager"
 	torznab_httpserver "github.com/bitmagnet-io/bitmagnet/internal/torznab/httpserver"
 	"github.com/bitmagnet-io/bitmagnet/internal/version"
@@ -234,6 +235,7 @@ func Build(ctx context.Context, opts Options) (*Stack, error) {
 	// `queue.jobs` and `torrent.listSources` need nothing beyond Search and the
 	// dao, and answered before any of this.
 	schema := newSchema(&resolvers.Resolver{
+		Moderation:         moderation.NewService(query.UnderlyingDB()),
 		Dao:                query,
 		Search:             searchService,
 		Workers:            workerRegistry,

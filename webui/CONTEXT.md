@@ -43,3 +43,18 @@ _Avoid_: Group, tier, access level
 **Anonymous access**:
 The instance setting that determines whether callers without a usable credential may use non-baseline operations. It is a property of the bitmagnet instance, not of an Identity.
 _Avoid_: Auth enabled, public mode, open mode
+
+### Moderation
+
+**Moderation record**:
+The exact pending, allowed or banned decision for a versioned torrent digest. Its private
+evidence and history are separate from ordinary catalogue data.
+
+**Moderator**:
+An Identity with the explicit moderation Object actions. Ordinary catalogue reading and
+tag editing do not imply this Permission; `moderator` can be a custom Role name.
+
+**Revision**:
+The opaque string returned with a moderation record or summary and passed unchanged as
+`expectedRevision` for a decision. `updatedAt` is a display timestamp and must not be
+converted back into a revision.

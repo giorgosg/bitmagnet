@@ -45,3 +45,10 @@ queue :
     -> SelectionSet decodesTo RootMutation
 queue object____ =
     Object.selectionForCompositeField "queue" [] object____ Basics.identity
+
+
+moderation :
+    SelectionSet decodesTo Magnes.Api.Object.ModerationMutation
+    -> SelectionSet decodesTo RootMutation
+moderation object____ =
+    Object.selectionForCompositeField "moderation" [] object____ Basics.identity

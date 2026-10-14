@@ -126,6 +126,88 @@ type LoginResult struct {
 	Permissions []Permission `json:"permissions"`
 }
 
+type ModerationAllowResult struct {
+	Record               ModerationRecord `json:"record"`
+	ClassificationQueued bool             `json:"classificationQueued"`
+}
+
+type ModerationDecisionInput struct {
+	Identifier       string                          `json:"identifier"`
+	ExpectedRevision string                          `json:"expectedRevision"`
+	InfoHash         graphql.Omittable[*protocol.ID] `json:"infoHash,omitempty"`
+}
+
+type ModerationHistoryEntry struct {
+	ID             string           `json:"id"`
+	Action         string           `json:"action"`
+	Status         ModerationStatus `json:"status"`
+	Origin         string           `json:"origin"`
+	ImportedOrigin *string          `json:"importedOrigin,omitempty"`
+	Source         *string          `json:"source,omitempty"`
+	Actor          string           `json:"actor"`
+	CreatedAt      time.Time        `json:"createdAt"`
+}
+
+type ModerationHistoryPage struct {
+	Items []ModerationHistoryEntry `json:"items"`
+	Next  *string                  `json:"next,omitempty"`
+}
+
+type ModerationMutation struct {
+	Flag          ModerationRecord      `json:"flag"`
+	Allow         ModerationAllowResult `json:"allow"`
+	Ban           ModerationRecord      `json:"ban"`
+	Reopen        ModerationRecord      `json:"reopen"`
+	PurgeEvidence ModerationRecord      `json:"purgeEvidence"`
+}
+
+type ModerationPageInput struct {
+	Limit graphql.Omittable[*int]    `json:"limit,omitempty"`
+	After graphql.Omittable[*string] `json:"after,omitempty"`
+}
+
+type ModerationQuery struct {
+	Search ModerationSearchPage `json:"search"`
+	Record ModerationRecord     `json:"record"`
+}
+
+type ModerationRecord struct {
+	Identifier     string                        `json:"identifier"`
+	Status         ModerationStatus              `json:"status"`
+	Origin         string                        `json:"origin"`
+	ImportedOrigin *string                       `json:"importedOrigin,omitempty"`
+	Source         *string                       `json:"source,omitempty"`
+	CreatedAt      time.Time                     `json:"createdAt"`
+	UpdatedAt      time.Time                     `json:"updatedAt"`
+	Revision       string                        `json:"revision"`
+	Evidence       *model.ModerationEvidenceData `json:"evidence,omitempty"`
+	History        ModerationHistoryPage         `json:"history"`
+}
+
+type ModerationSearchInput struct {
+	Status graphql.Omittable[*ModerationStatus] `json:"status,omitempty"`
+	Query  graphql.Omittable[*string]           `json:"query,omitempty"`
+	Limit  graphql.Omittable[*int]              `json:"limit,omitempty"`
+	After  graphql.Omittable[*string]           `json:"after,omitempty"`
+}
+
+type ModerationSearchPage struct {
+	Items []ModerationSummary `json:"items"`
+	Next  *string             `json:"next,omitempty"`
+}
+
+type ModerationSummary struct {
+	Identifier     string           `json:"identifier"`
+	Status         ModerationStatus `json:"status"`
+	Origin         string           `json:"origin"`
+	ImportedOrigin *string          `json:"importedOrigin,omitempty"`
+	Source         *string          `json:"source,omitempty"`
+	Name           *string          `json:"name,omitempty"`
+	CreatedAt      time.Time        `json:"createdAt"`
+	UpdatedAt      time.Time        `json:"updatedAt"`
+	Revision       string           `json:"revision"`
+}
+
 type Mutation struct {
 }
 
@@ -539,6 +621,63 @@ func (e *MetricsBucketDuration) UnmarshalJSON(b []byte) error {
 }
 
 func (e MetricsBucketDuration) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
+}
+
+type ModerationStatus string
+
+const (
+	ModerationStatusPending ModerationStatus = "pending"
+	ModerationStatusAllowed ModerationStatus = "allowed"
+	ModerationStatusBanned  ModerationStatus = "banned"
+)
+
+var AllModerationStatus = []ModerationStatus{
+	ModerationStatusPending,
+	ModerationStatusAllowed,
+	ModerationStatusBanned,
+}
+
+func (e ModerationStatus) IsValid() bool {
+	switch e {
+	case ModerationStatusPending, ModerationStatusAllowed, ModerationStatusBanned:
+		return true
+	}
+	return false
+}
+
+func (e ModerationStatus) String() string {
+	return string(e)
+}
+
+func (e *ModerationStatus) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = ModerationStatus(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid ModerationStatus", str)
+	}
+	return nil
+}
+
+func (e ModerationStatus) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *ModerationStatus) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e ModerationStatus) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	e.MarshalGQL(&buf)
 	return buf.Bytes(), nil

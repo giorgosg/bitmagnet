@@ -1,0 +1,107 @@
+extend type Query {
+  moderation: ModerationQuery! @auth(object: "moderation", action: "query")
+}
+
+extend type Mutation {
+  moderation: ModerationMutation! @auth(object: "moderation", action: "mutate")
+}
+
+enum ModerationStatus {
+  pending
+  allowed
+  banned
+}
+
+type ModerationQuery {
+  search(input: ModerationSearchInput!): ModerationSearchPage!
+    @auth(object: "moderation", action: "query")
+  record(identifier: String!): ModerationRecord!
+    @auth(object: "moderation", action: "query")
+}
+
+input ModerationSearchInput {
+  status: ModerationStatus
+  query: String
+  limit: Int
+  after: String
+}
+
+input ModerationPageInput {
+  limit: Int
+  after: String
+}
+
+type ModerationSearchPage {
+  items: [ModerationSummary!]!
+  next: String
+}
+
+type ModerationSummary {
+  identifier: String!
+  status: ModerationStatus!
+  origin: String!
+  importedOrigin: String
+  source: String
+  name: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  revision: String!
+}
+
+type ModerationRecord {
+  identifier: String!
+  status: ModerationStatus!
+  origin: String!
+  importedOrigin: String
+  source: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  revision: String!
+  evidence: ModerationEvidence @auth(object: "moderation", action: "query")
+  history(input: ModerationPageInput!): ModerationHistoryPage!
+    @auth(object: "moderation", action: "query")
+}
+
+type ModerationEvidence {
+  infoHash: Hash20
+  name: String!
+  files: [String!]
+  rule: String!
+  matches: [String!]
+}
+
+type ModerationHistoryPage {
+  items: [ModerationHistoryEntry!]!
+  next: String
+}
+
+type ModerationHistoryEntry {
+  id: String!
+  action: String!
+  status: ModerationStatus!
+  origin: String!
+  importedOrigin: String
+  source: String
+  actor: String!
+  createdAt: DateTime!
+}
+
+input ModerationDecisionInput {
+  identifier: String!
+  expectedRevision: String!
+  infoHash: Hash20
+}
+
+type ModerationMutation {
+  flag(infoHash: Hash20!): ModerationRecord!
+  allow(input: ModerationDecisionInput!): ModerationAllowResult!
+  ban(input: ModerationDecisionInput!): ModerationRecord!
+  reopen(input: ModerationDecisionInput!): ModerationRecord!
+  purgeEvidence(input: ModerationDecisionInput!): ModerationRecord!
+}
+
+# classificationQueued reports pending normal classification work arranged by this allow.
+type ModerationAllowResult {
+  record: ModerationRecord!
+  classificationQueued: Boolean!
+}

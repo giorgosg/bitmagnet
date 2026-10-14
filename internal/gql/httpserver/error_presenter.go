@@ -8,6 +8,7 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/api_key"
 	"github.com/bitmagnet-io/bitmagnet/internal/auth/user"
 	gqlauth "github.com/bitmagnet-io/bitmagnet/internal/gql/auth"
+	"github.com/bitmagnet-io/bitmagnet/internal/moderation"
 	"github.com/vektah/gqlparser/v2/gqlerror"
 )
 
@@ -68,6 +69,12 @@ func (c errorClassification) presentation() errorPresentation {
 // public code. It covers more than package user since createAPIKey started
 // refusing unregistered object actions.
 var serviceErrorPresentations = []errorClassification{
+	{target: moderation.ErrInvalidEvidence, code: "MODERATION_INVALID_INFOHASH"},
+	{target: moderation.ErrConflict, code: "MODERATION_CONFLICT"},
+	{target: moderation.ErrInvalidTransition, code: "MODERATION_INVALID_TRANSITION"},
+	{target: moderation.ErrNotFound, code: "MODERATION_NOT_FOUND"},
+	{target: moderation.ErrInvalidPage, code: "MODERATION_INVALID_PAGE"},
+	{target: moderation.ErrInvalidIdentifier, code: "MODERATION_INVALID_IDENTIFIER"},
 	{target: user.ErrCredentialsInvalid, code: ErrorCodeInvalidCredentials},
 	{target: user.ErrDisabled, code: ErrorCodeUserDisabled},
 	{target: user.ErrLoginRequestLimiter, code: ErrorCodeLoginThrottled},

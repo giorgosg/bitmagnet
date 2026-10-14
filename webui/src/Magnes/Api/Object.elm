@@ -93,6 +93,42 @@ type MetadataSource
     = MetadataSource
 
 
+type ModerationAllowResult
+    = ModerationAllowResult
+
+
+type ModerationEvidence
+    = ModerationEvidence
+
+
+type ModerationHistoryEntry
+    = ModerationHistoryEntry
+
+
+type ModerationHistoryPage
+    = ModerationHistoryPage
+
+
+type ModerationMutation
+    = ModerationMutation
+
+
+type ModerationQuery
+    = ModerationQuery
+
+
+type ModerationRecord
+    = ModerationRecord
+
+
+type ModerationSearchPage
+    = ModerationSearchPage
+
+
+type ModerationSummary
+    = ModerationSummary
+
+
 type PasswordEntropyResult
     = PasswordEntropyResult
 

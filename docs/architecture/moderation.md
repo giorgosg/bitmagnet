@@ -4,7 +4,7 @@
 [moderation identifier](../adr/0006-version-moderation-identifiers.md). Ordinary catalogue reads now enforce
 this ledger. Crawler/import ingestion and the default classifier share automatic decisions
 from the existing harmful keyword group; crawler discovery and crawler/import writes enforce exact bans. Legacy
-Bloom blocking is removed. There is no moderation HTTP or GraphQL API yet.
+Bloom blocking is removed. The permissioned GraphQL moderation surface exposes private review records and decisions; see [operator usage](../moderation.md).
 
 ## Keyword matching
 
@@ -30,7 +30,7 @@ The service serializes assertions with moderator decisions; an allow made during
 wins and classification continues when observed by the action. Existing pending/banned
 processing inputs are skipped rather than retried as missing hashes. Switching the mode
 changes new matches, not existing decisions. After allow, a processing job can complete
-missing classification; the later moderator API integration schedules it.
+missing classification; the moderator API schedules missing classification atomically with the allow.
 
 ## State and precedence
 
@@ -46,7 +46,7 @@ and its history atomically. Flags on existing records and repeated assertions ar
 `RetainEvidence` separately enriches pending/banned metadata without changing a decision;
 missing fields preserve existing metadata and duplicate evidence does not append history.
 An optional raw infohash must produce the record's identifier. Local allows skip enrichment.
-These are internal operations; later API wiring must authorize private reads and mutations.
+The GraphQL adapter authorizes private reads and mutations with separate `graphql:moderation:query` and `graphql:moderation:mutate` Object actions.
 
 ## Storage and transactions
 
@@ -76,7 +76,20 @@ retain newly supplied evidence; purge does not withdraw a ban or allow.
 file-path search. `History` returns ordered decision events. Both use keyset cursors, default
 to 50 items and reject limits above 100. Search has no unbounded count query; it returns a
 next cursor only when another page exists. Complete evidence is loaded separately via `Get`.
-These operations are separate from ordinary catalogue queries.
+These operations are separate from ordinary catalogue queries. Direct record, evidence and
+history fields also enforce the private query action, including evidence selected from a
+mutation result. The fixture's anonymous catalogue grant excludes moderation.
+
+`FlagCatalogue` loads observed metadata by its known raw infohash while holding the decision
+lock. `Review` compares an exact timestamp revision under that same lock; stale requests
+return a conflict instead of overwriting another review. The API serializes revisions as
+opaque strings so browser date codecs cannot truncate microseconds. Actor identifiers are
+resolved from the authenticated User/API key. A successful allow inserts the normal
+processor job in the transaction when catalogue metadata exists without classification.
+Retained evidence supplies its raw hash, or a caller may supply a hash whose digest is
+validated. Digest-only/purged records still allow without a hash; no digest scan or private
+evidence reconstruction is performed. The response states whether classification work is
+queued. Purge also changes the revision, preventing stale decisions after private deletion.
 
 ## Catalogue visibility
 
@@ -99,8 +112,8 @@ hydration and dynamic facet values. A result cached before a flag or ban cannot 
 its old names or paths. The trusted `search.MetadataSearch` is separately injected into
 classification, so classification can reuse known content metadata before a visible torrent
 exists; GraphQL and Torznab do not receive that interface. It is not a catalogue bypass
-option. Private review evidence remains accessible only through the internal moderation
-service, pending a permissioned moderator API.
+option. Private review evidence is available through the separate permissioned moderation
+GraphQL surface.
 
 `task export-data` streams only visible catalogue rows and their metadata relationships
 from a read-only repeatable-read snapshot. It omits auth/internal key-value state, moderation
