@@ -1988,3 +1988,47 @@ main {
 .queue-admin-types {
   margin: 0.25rem 0 0 1.5rem;
 }
+
+/* Private review uses the same page and native controls as administration. */
+.moderation-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.moderation-tabs [aria-current="page"] {
+  font-weight: 700;
+  text-decoration-thickness: 2px;
+}
+
+.moderation-page form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.moderation-page input {
+  min-width: 12rem;
+  max-width: 100%;
+}
+
+.moderation-page pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.moderation-page li {
+  margin: 0.75rem 0;
+}
+
+.moderation-page button {
+  margin: 0.25rem;
+}
+
+.moderation-page dd {
+  overflow-wrap: anywhere;
+}

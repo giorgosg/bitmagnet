@@ -26,6 +26,7 @@ import Login
 import Magnes.Api.Enum.ContentType as ContentType
 import Magnes.Api.Enum.FilesStatus exposing (FilesStatus(..))
 import Magnes.Api.Enum.QueueJobStatus exposing (QueueJobStatus)
+import Moderation
 import Operations
 import PasswordChange
 import PasswordEntropy
@@ -209,6 +210,7 @@ type alias Model =
     -- the scope it was asked about, by which `QueueAdmin.counted` drops one about a scope no
     -- longer chosen. What the page keeps as the person moves, or as their Identity changes, is
     -- `QueueAdmin.settle`'s to decide, after every update (see `update`).
+    , moderation : Moderation.State
     , queueAdmin : QueueAdmin.State
     }
 
@@ -402,6 +404,7 @@ init flags url key =
       , jobs = QueueJobs.empty
       , torrentStats = StatsLook.empty
       , queueStats = StatsLook.empty
+      , moderation = moderationState route
       , queueAdmin = QueueAdmin.empty
       , users = Users.empty
       , usersEpoch = 0
@@ -636,6 +639,7 @@ type Msg
     | StatsRefreshRequested
     | GotTorrentStats Int (Result (Graphql.Http.Error TorrentStats.Statistics) TorrentStats.Statistics)
     | GotQueueStats Int (Result (Graphql.Http.Error QueueStats.Statistics) QueueStats.Statistics)
+    | ModerationMsg Int Moderation.Msg
     | QueueAdminQueueToggled String
     | QueueAdminStatusToggled QueueJobStatus
     | QueueAdminFormEdited QueueAdmin.Edit
@@ -1673,7 +1677,18 @@ updateModel msg model =
                 -- what to look at, and the statistics pages pick their events (and the queue's
                 -- queues) out of the answer they have. The chart stays, drawn as the route now says,
                 -- and the timer is the subscription's to restart.
-                ( { model | route = route }, Cmd.none )
+                ( { model
+                    | route = route
+                    , moderation =
+                        case route of
+                            Route.Moderation params ->
+                                Moderation.withFlagContext params model.moderation
+
+                            _ ->
+                                model.moderation
+                  }
+                , Cmd.none
+                )
 
             else
                 let
@@ -1685,6 +1700,7 @@ updateModel msg model =
                     leaving =
                         { model
                             | users = Users.empty
+                            , moderation = moderationState route
                             , usersEpoch = model.usersEpoch + 1
                             , userTyping = model.userTyping + 1
                             , roles = Roles.empty
@@ -1930,6 +1946,84 @@ updateModel msg model =
 
         JobsChosen params ->
             ( model, Nav.pushUrl model.key (Route.toHref model.basePath (Route.QueueJobs params)) )
+
+        ModerationMsg epoch moderationMsg ->
+            if epoch /= model.epoch || Route.guard model.basePath model.identity model.route /= Route.Allowed then
+                ( model, Cmd.none )
+
+            else
+                case model.route of
+                    Route.Moderation params ->
+                        case moderationMsg of
+                            Moderation.Navigate destination ->
+                                ( model, Nav.pushUrl model.key (Route.toHref model.basePath (Route.Moderation destination)) )
+
+                            Moderation.GotDecision (Ok ( record, _ )) ->
+                                moderationAccepted epoch moderationMsg record.identifier params model
+
+                            Moderation.GotFlag _ (Ok ( record, _ )) ->
+                                moderationAccepted epoch moderationMsg record.identifier params model
+
+                            Moderation.GotRecord _ (Ok _) ->
+                                let
+                                    ( updated, cmd ) =
+                                        updateModeration epoch moderationMsg model
+                                in
+                                ( updated
+                                , Cmd.batch
+                                    [ cmd
+                                    , if params.uncertainFlag /= updated.moderation.uncertainFlag then
+                                        Nav.replaceUrl model.key (Route.toHref model.basePath (Route.Moderation { params | uncertainFlag = updated.moderation.uncertainFlag }))
+
+                                      else
+                                        Cmd.none
+                                    ]
+                                )
+
+                            Moderation.GotFlag _ (Err error) ->
+                                onRequestFailure error
+                                    model
+                                    (\_ current ->
+                                        let
+                                            ( updated, cmd ) =
+                                                updateModeration epoch moderationMsg current
+                                        in
+                                        ( updated
+                                        , Cmd.batch
+                                            [ cmd
+                                            , case updated.moderation.uncertainFlag of
+                                                Just hash ->
+                                                    Nav.replaceUrl model.key (Route.toHref model.basePath (Route.Moderation { params | uncertainFlag = Just hash }))
+
+                                                Nothing ->
+                                                    Cmd.none
+                                            ]
+                                        )
+                                    )
+
+                            Moderation.Refresh _ ->
+                                let
+                                    next =
+                                        model.epoch + 1
+                                in
+                                ( { model | epoch = next, moderation = Moderation.empty params }
+                                , Moderation.fetch model.apiUrl params |> Cmd.map (ModerationMsg next)
+                                )
+
+                            Moderation.GotPage (Err error) ->
+                                onRequestFailure error model (\_ current -> updateModeration epoch moderationMsg current)
+
+                            Moderation.GotRecord _ (Err error) ->
+                                onRequestFailure error model (\_ current -> updateModeration epoch moderationMsg current)
+
+                            Moderation.GotDecision (Err error) ->
+                                onRequestFailure error model (\_ current -> updateModeration epoch moderationMsg current)
+
+                            _ ->
+                                updateModeration epoch moderationMsg model
+
+                    _ ->
+                        ( model, Cmd.none )
 
         QueueAdminQueueToggled queue ->
             let
@@ -2567,6 +2661,9 @@ lookAgain nudge model =
             Route.AdminInvitations ->
                 ( model, Cmd.none )
 
+            Route.Moderation _ ->
+                ( model, Cmd.none )
+
             Route.AdminQueue ->
                 ( model, Cmd.none )
 
@@ -2912,6 +3009,9 @@ routeNeedsSearch route =
         Route.AdminInvitations ->
             False
 
+        Route.Moderation _ ->
+            False
+
         Route.AdminQueue ->
             False
 
@@ -2983,6 +3083,7 @@ beginIdentityRefresh reason model =
         -- older answer from landing; this keeps the older data from being held.
         , invitations = Invitations.empty
         , users = Users.empty
+        , moderation = moderationState model.route
         , usersEpoch = model.usersEpoch + 1
         , roles = Roles.empty
         , rolesEpoch = model.rolesEpoch + 1
@@ -3117,6 +3218,9 @@ load identity apiUrl epochs route =
 
         Route.AdminInvitations ->
             ( Blank, Invitations.fetch apiUrl 0 (GotInvitations epochs.identity) )
+
+        Route.Moderation params ->
+            ( Blank, Moderation.fetch apiUrl params |> Cmd.map (ModerationMsg epochs.query) )
 
         Route.AdminQueue ->
             ( Blank
@@ -3339,6 +3443,9 @@ documentTitle model =
 
         Route.AdminInvitations ->
             "Invitations — magnes"
+
+        Route.Moderation _ ->
+            "moderation — magnes"
 
         Route.AdminQueue ->
             "queue administration — magnes"
@@ -3602,6 +3709,9 @@ viewAllowedRoute model =
 
         Route.AdminInvitations ->
             Invitations.view model.basePath model.zone invitationsMessages model.identity model.invitations
+
+        Route.Moderation params ->
+            Moderation.view model.basePath model.zone model.identity params model.moderation |> Html.map (ModerationMsg model.epoch)
 
         Route.AdminQueue ->
             QueueAdmin.view model.basePath queueAdminMessages model.queueAdmin
@@ -4074,3 +4184,40 @@ magnetIcon =
         , attribute "aria-hidden" "true"
         ]
         [ Svg.path [ SvgAttr.d "M3 20V12a9 9 0 0 1 18 0v8h-5v-8a4 4 0 0 0-8 0v8Z" ] [] ]
+
+
+moderationState : Route -> Moderation.State
+moderationState route =
+    case route of
+        Route.Moderation params ->
+            Moderation.empty params
+
+        _ ->
+            Moderation.empty Route.emptyModeration
+
+
+updateModeration : Int -> Moderation.Msg -> Model -> ( Model, Cmd Msg )
+updateModeration epoch msg model =
+    let
+        ( state, cmd ) =
+            Moderation.update model.apiUrl model.identity msg model.moderation
+    in
+    ( { model | moderation = state }, Cmd.map (ModerationMsg epoch) cmd )
+
+
+moderationAccepted : Int -> Moderation.Msg -> String -> Route.ModerationParams -> Model -> ( Model, Cmd Msg )
+moderationAccepted epoch msg identifier params model =
+    let
+        ( updated, cmd ) =
+            updateModeration epoch msg model
+    in
+    ( updated
+    , Cmd.batch
+        [ cmd
+        , if params.identifier /= Just identifier then
+            Nav.pushUrl model.key (Route.toHref model.basePath (Route.Moderation { params | identifier = Just identifier, uncertainFlag = Nothing }))
+
+          else
+            Cmd.none
+        ]
+    )

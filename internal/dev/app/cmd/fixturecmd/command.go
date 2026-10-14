@@ -131,6 +131,10 @@ func flags() []cli.Flag {
 			Value: defaults.AnonymousAccess,
 		},
 		&cli.BoolFlag{
+			Name:  "seed-moderation-data",
+			Usage: "add harmless synthetic moderation reviews and offline classification",
+		},
+		&cli.BoolFlag{
 			Name: "seed-dashboard-data",
 			Usage: "give the status, statistics and queue pages data in the recent window " +
 				"they open on; the seed corpus is a months-old snapshot with no queue jobs at all",
@@ -218,6 +222,7 @@ func (c *command) serve(cliCtx *cli.Context) error {
 		Logger:                    c.logger,
 		JWTSecret:                 cfg.JWTSecret,
 		SeedDashboardData:         seedDashboardData,
+		SeedModerationData:        cliCtx.Bool("seed-moderation-data"),
 	})
 	if err != nil {
 		return err

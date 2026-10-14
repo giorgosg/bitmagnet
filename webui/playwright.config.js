@@ -41,7 +41,7 @@ const baseURL = `https://localhost:${port}`;
 // Resolved against the working directory, which npm scripts set to the repository root.
 process.env.MAGNES_E2E_CREDENTIALS = path.resolve(".dev/e2e-credentials.json");
 
-const queueChangingSpecs = ["**/queue-admin.spec.js"];
+const queueChangingSpecs = ["**/queue-admin.spec.js", "**/moderation.spec.js"];
 const anonymousChangingSpecs = ["**/anonymous-role.spec.js"];
 
 const credentialFree = {

@@ -37,6 +37,7 @@ const credentialsPath = process.env.MAGNES_E2E_CREDENTIALS;
 // them up rather than reaching for a knob left here for it.
 const fixtureFlags = [
   "--anonymous-access=true",
+  "--seed-moderation-data=true",
   "--invitation-required=true",
   "--login-requests-per-minute=6000",
   "--login-request-burst=600",
