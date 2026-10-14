@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "identifierFormat": "sha256-btih-v1",
+  "source": "Harmless compatibility fixture",
+  "entries": [
+    {
+      "digest": "20fed20512528a3e12b7bcda59b0c84eff6bbe33007773edc0ecc785d2c450b6",
+      "origin": "moderator"
+    },
+    {
+      "digest": "9afaa45890d2acf0f8760eb8c7bcb8f55193d8eadf816f1165a02410b68912be",
+      "origin": "automatic"
+    }
+  ]
+}

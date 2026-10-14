@@ -11,7 +11,7 @@ import Graphql.Http
 import Graphql.OptionalArgument exposing (OptionalArgument(..))
 import Graphql.SelectionSet as SelectionSet exposing (with)
 import Html exposing (Html, a, button, dd, div, dl, dt, form, h1, h2, h3, input, label, li, p, pre, text, ul)
-import Html.Attributes exposing (attribute, class, disabled, href, id, maxlength, type_, value)
+import Html.Attributes exposing (attribute, class, disabled, download, href, id, maxlength, type_, value)
 import Html.Events exposing (onClick, onInput, onSubmit)
 import Identity
 import Magnes.Api.Enum.ModerationStatus as Status exposing (ModerationStatus)
@@ -381,8 +381,8 @@ decide apiUrl action record =
         |> Graphql.Http.send GotDecision
 
 
-view : Route.BasePath -> Time.Zone -> Identity.Identity -> Route.ModerationParams -> State -> Html Msg
-view mount zone identity routeParams state =
+view : String -> Route.BasePath -> Time.Zone -> Identity.Identity -> Route.ModerationParams -> State -> Html Msg
+view apiUrl mount zone identity routeParams state =
     let
         params =
             { routeParams | uncertainFlag = state.uncertainFlag }
@@ -390,6 +390,17 @@ view mount zone identity routeParams state =
     div [ class "page moderation-page" ]
         [ h1 [] [ text "Moderation" ]
         , p [] [ text "Private metadata review. Filenames do not verify file contents." ]
+        , if Identity.can { namespace = "http", object = "moderation", action = "export" } identity then
+            div []
+                [ h2 [] [ text "Share bans" ]
+                , p [] [ text "Export local reviewed bans as membership identifiers without private metadata. Imported assertions are excluded. Including automatic bans preserves their origin." ]
+                , a [ href (apiUrl ++ "/moderation/export"), download "moderation-bans-v1.json" ] [ text "Export reviewed bans" ]
+                , text " · "
+                , a [ href (apiUrl ++ "/moderation/export?includeAutomatic=true"), download "moderation-bans-v1.json" ] [ text "Export reviewed and automatic bans" ]
+                ]
+
+          else
+            text ""
         , div [ class "moderation-tabs" ]
             (List.map
                 (\status ->

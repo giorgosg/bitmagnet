@@ -40,6 +40,7 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/metrics/queuemetrics"
 	"github.com/bitmagnet-io/bitmagnet/internal/metrics/torrentmetrics"
 	"github.com/bitmagnet-io/bitmagnet/internal/moderation"
+	moderationhttpserver "github.com/bitmagnet-io/bitmagnet/internal/moderation/httpserver"
 	"github.com/bitmagnet-io/bitmagnet/internal/processor"
 	"github.com/bitmagnet-io/bitmagnet/internal/queue/manager"
 	torznab_httpserver "github.com/bitmagnet-io/bitmagnet/internal/torznab/httpserver"
@@ -282,6 +283,11 @@ func Build(ctx context.Context, opts Options) (*Stack, error) {
 	}).Option
 	if err := graphQLOption.Apply(engine); err != nil {
 		return nil, fmt.Errorf("fixtureserver: applying the graphql option: %w", err)
+	}
+
+	ledgerLazy := lazy.New(func() (*moderation.Service, error) { return ledger, nil })
+	if err := moderationhttpserver.New(ledgerLazy, authenticator).Apply(engine); err != nil {
+		return nil, fmt.Errorf("fixtureserver: applying moderation option: %w", err)
 	}
 
 	return &Stack{

@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import {
   expect,
   test,
@@ -17,6 +18,54 @@ test("a moderator reaches the private review queue", async ({
   await signInAt(page, credentials, "/moderation", "Moderation");
   await expect(
     page.getByRole("link", { name: "Allowed", exact: true }),
+  ).toBeVisible();
+});
+
+test("downloads only shareable local bans with automatic origin on deliberate inclusion", async ({
+  page,
+  credentials,
+}, testInfo) => {
+  await signInAt(page, credentials, "/moderation", "Moderation");
+  const downloadFile = async (label) => {
+    const pending = page.waitForEvent("download");
+    await page.getByRole("link", { name: label, exact: true }).click();
+    const download = await pending;
+    expect(download.suggestedFilename()).toBe("moderation-bans-v1.json");
+    expect(await download.failure()).toBeNull();
+    const saved = testInfo.outputPath(
+      label.includes("automatic")
+        ? "moderation-bans-automatic.json"
+        : "moderation-bans-reviewed.json",
+    );
+    await download.saveAs(saved);
+    return JSON.parse(await fs.readFile(saved, "utf8"));
+  };
+  const reviewed = await downloadFile("Export reviewed bans");
+  expect(Object.keys(reviewed).sort()).toEqual([
+    "entries",
+    "identifierFormat",
+    "version",
+  ]);
+  expect(reviewed.version).toBe(1);
+  expect(reviewed.identifierFormat).toBe("sha256-btih-v1");
+  expect(reviewed.entries).toEqual([
+    {
+      digest:
+        "10b514348d2b2f2c4c530f249918be96529db6afcb6480ed0f476a6e7f5e8417",
+      origin: "moderator",
+    },
+  ]);
+  const automatic = await downloadFile("Export reviewed and automatic bans");
+  expect(automatic.entries).toEqual(expect.arrayContaining(reviewed.entries));
+  expect(automatic.entries).toHaveLength(2);
+  expect(automatic.entries).toContainEqual({
+    digest: "e34312e8ab124d4db5b5f99ae20fae6a11b48ad3eda2b7de6c5f9c564204fd69",
+    origin: "automatic",
+  });
+  for (const entry of automatic.entries)
+    expect(Object.keys(entry).sort()).toEqual(["digest", "origin"]);
+  await expect(
+    page.getByRole("heading", { name: "Moderation", exact: true }),
   ).toBeVisible();
 });
 
@@ -66,7 +115,7 @@ test("pending review can be allowed, classified, searched and explicitly reopene
   await expect(
     page
       .locator(".moderation-page")
-      .getByRole("link", { name: /magnet|download/i }),
+      .getByRole("link", { name: /magnet|download torrent/i }),
   ).toHaveCount(0);
   await expect(page.locator('a[href^="magnet:"]')).toHaveCount(0);
   await page.goto(`/search?q=${encodeURIComponent(name(1))}`);
@@ -187,7 +236,7 @@ test("a digest-only record remains reviewable and purge keeps its decision", asy
   await expect(
     page
       .locator(".moderation-page")
-      .getByRole("link", { name: /magnet|download/i }),
+      .getByRole("link", { name: /magnet|download torrent/i }),
   ).toHaveCount(0);
   await decide(page, "Allow", "allowed");
   await expect(page.getByRole("status")).not.toContainText(
@@ -429,6 +478,11 @@ test("private query Permission alone reads evidence but offers no decision contr
         them.getByRole("button", { name: caption, exact: true }),
       ).toHaveCount(0);
     }
+    await expect(
+      them.getByRole("link", { name: /^Export reviewed/ }),
+    ).toHaveCount(0);
+    const refusedExport = await them.request.get("/graphql/moderation/export");
+    expect(refusedExport.status()).toBe(403);
     const action = await graphql(
       them,
       `

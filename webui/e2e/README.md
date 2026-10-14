@@ -143,7 +143,8 @@ the last day.
 missing file metadata, a digest-only ban and more than one list page. The real classifier
 and processor run with external APIs and local matching disabled. The workflow allows,
 explicitly reprocesses, searches allowed and ordinary results, then reopens and bans; it
-also checks flag/purge, bounded history, ordinary reader/editor and read-only-reviewer
+also checks real reviewed/automatic ban-file downloads and their public field set,
+flag/purge, bounded history, ordinary reader/editor and read-only-reviewer
 Permissions, conflicts, failed/lost/late responses and unavailable metadata.
 
 `queue-admin.spec.js` (ticket 07 in `.scratch/dashboard`) purges failed jobs from one queue

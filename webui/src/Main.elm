@@ -3711,7 +3711,7 @@ viewAllowedRoute model =
             Invitations.view model.basePath model.zone invitationsMessages model.identity model.invitations
 
         Route.Moderation params ->
-            Moderation.view model.basePath model.zone model.identity params model.moderation |> Html.map (ModerationMsg model.epoch)
+            Moderation.view model.apiUrl model.basePath model.zone model.identity params model.moderation |> Html.map (ModerationMsg model.epoch)
 
         Route.AdminQueue ->
             QueueAdmin.view model.basePath queueAdminMessages model.queueAdmin

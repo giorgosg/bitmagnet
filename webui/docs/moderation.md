@@ -61,3 +61,22 @@ offline classifier/processor, searches ordinary and allowed results, then reopen
 It also checks bounded search/history, digest-only and missing-file evidence, flagging,
 permission refusals, stale decisions, failed searches, lost mutation answers and late
 responses. It runs in the queue-changing project because allows add processor jobs.
+
+## Sharing ban files
+
+The moderation area offers **Export reviewed bans** and the separate deliberate
+**Export reviewed and automatic bans** link only with `http:moderation:export`. Query or
+mutate alone does not grant sharing. These download the whole eligible ledger snapshot,
+independent of the selected review status, search or opened record. No state is changed.
+Imported, pending and allowed decisions never appear; automatic inclusion retains its
+origin. The server enforces the export Permission separately. See the
+[frozen format, harmless fixture and membership-test privacy limit](../../docs/moderation-ban-file.md).
+
+The links use the API URL followed by `/moderation/export`, within the existing `/graphql`
+browser-cookie scope. The development proxy forwards that exact path too. The registry
+search checked `elm/html` 1.0.1, including its Elm 0.19 constraint and `Html.Attributes`
+source: the existing `download` attribute lets the browser stream an attachment directly.
+`elm/file` 1.0.5 provides downloads from in-memory strings/bytes, which would buffer the
+whole file in the UI; native links need no new dependency. The actual browser test reads
+the downloaded reviewed and automatic JSON files and checks their exact public fields,
+while a reviewer without export sees no links and receives HTTP 403 from the server.

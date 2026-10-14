@@ -83,9 +83,9 @@ function ensureCertificate() {
   );
 }
 
-function proxyGraphql(req, res) {
+function proxyApi(req, res, pathname) {
   const transport = upstream.protocol === "https:" ? https : http;
-  const target = new URL("/graphql", upstream);
+  const target = new URL(pathname, upstream);
   const proxy = transport.request(
     {
       protocol: target.protocol,
@@ -112,8 +112,10 @@ function proxyGraphql(req, res) {
 
 function serve(req, res) {
   const requestUrl = new URL(req.url, "https://localhost");
-  if (requestUrl.pathname === "/graphql") {
-    proxyGraphql(req, res);
+  if (
+    ["/graphql", "/graphql/moderation/export"].includes(requestUrl.pathname)
+  ) {
+    proxyApi(req, res, requestUrl.pathname);
     return;
   }
 

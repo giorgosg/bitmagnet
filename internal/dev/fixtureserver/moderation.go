@@ -102,5 +102,32 @@ func newModerationFixture(
 		return nil, err
 	}
 
+	// Shareable local automatic bans remain distinct from imported reviewed assertions.
+	if err = ledger.ApplyAutomatic(
+		ctx,
+		moderation.IdentifierForInfoHash(protocol.ID{0xfa, 0xb7, 91}),
+		moderation.Banned,
+		moderation.Evidence{Name: "Harmless automatic private handbook"},
+	); err != nil {
+		return nil, err
+	}
+
+	if err = ledger.ApplyImport(
+		ctx,
+		moderation.IdentifierForInfoHash(protocol.ID{0xfa, 0xb7, 92}),
+		moderation.Moderator,
+		"Harmless imported private source",
+	); err != nil {
+		return nil, err
+	}
+
+	if err = ledger.RetainEvidence(
+		ctx,
+		moderation.IdentifierForInfoHash(protocol.ID{0xfa, 0xb7, 92}),
+		moderation.Evidence{Name: "Harmless imported private handbook"},
+	); err != nil {
+		return nil, err
+	}
+
 	return p, nil
 }
