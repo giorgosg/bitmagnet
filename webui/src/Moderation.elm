@@ -1,4 +1,4 @@
-module Moderation exposing (Decision(..), Msg(..), State, empty, fetch, update, view)
+module Moderation exposing (Decision(..), Msg(..), State, empty, fetch, update, view, withFlagContext)
 
 {-| Private review uses its own API, never the catalogue's download controls.
 Revisions are opaque strings, passed back exactly as received.
@@ -43,7 +43,7 @@ type alias Page =
 
 
 type alias Evidence =
-    { name : String, files : Maybe (List String), rule : String, matches : Maybe (List String) }
+    { name : String, files : Maybe (List String), rule : String, matches : Maybe (List String), infoHash : Maybe Scalar.Hash20 }
 
 
 type alias Event =
@@ -69,12 +69,13 @@ type alias State =
     , confirmation : Maybe Decision
     , error : Maybe String
     , notice : Maybe String
+    , uncertainFlag : Maybe String
     }
 
 
 empty : Route.ModerationParams -> State
 empty params =
-    { query = params.query, hash = "", page = Nothing, record = Nothing, loading = True, working = False, blocked = False, confirmation = Nothing, error = Nothing, notice = Nothing }
+    { query = params.query, hash = "", page = Nothing, record = Nothing, loading = True, working = False, blocked = False, confirmation = Nothing, error = Nothing, notice = Nothing, uncertainFlag = params.uncertainFlag }
 
 
 type Decision
@@ -96,6 +97,7 @@ type Msg
     | Cancel
     | Confirm
     | Flag
+    | GotFlag String (Result (Graphql.Http.Error ( Record, Bool )) ( Record, Bool ))
     | GotDecision (Result (Graphql.Http.Error ( Record, Bool )) ( Record, Bool ))
     | MoreHistory
 
@@ -133,7 +135,7 @@ recordSelection after =
         |> with Record.source
         |> with Record.revision
         |> with Record.updatedAt
-        |> with (Record.evidence (SelectionSet.map4 Evidence Evidence.name Evidence.files Evidence.rule Evidence.matches))
+        |> with (Record.evidence (SelectionSet.map5 Evidence Evidence.name Evidence.files Evidence.rule Evidence.matches Evidence.infoHash))
         |> with
             (Record.history { input = Input.buildModerationPageInput (\opts -> { opts | limit = Present 50, after = optional after }) }
                 (SelectionSet.map2 History
@@ -160,7 +162,7 @@ update apiUrl identity msg state =
             ( { state | hash = hash }, Cmd.none )
 
         Search params ->
-            ( state, cmdNavigate { params | query = state.query, after = Nothing, identifier = Nothing } )
+            ( state, cmdNavigate { params | query = state.query, after = Nothing, identifier = Nothing, uncertainFlag = state.uncertainFlag } )
 
         Navigate _ ->
             ( state, Cmd.none )
@@ -200,7 +202,35 @@ update apiUrl identity msg state =
                         ( { state | loading = True, record = Nothing }, fetchRecord apiUrl record.identifier Nothing False )
 
                     else
-                        ( { state | record = Just current, loading = False, blocked = False, error = Nothing }, Cmd.none )
+                        let
+                            foundFlagTarget =
+                                case state.uncertainFlag of
+                                    Just hash ->
+                                        (current.evidence |> Maybe.andThen .infoHash) == Just (Scalar.Hash20 hash)
+
+                                    Nothing ->
+                                        False
+                        in
+                        ( { state
+                            | record = Just current
+                            , loading = False
+                            , blocked = False
+                            , error = Nothing
+                            , uncertainFlag =
+                                if foundFlagTarget then
+                                    Nothing
+
+                                else
+                                    state.uncertainFlag
+                            , notice =
+                                if foundFlagTarget then
+                                    Just "Review record found for the requested infohash. The current decision is shown below."
+
+                                else
+                                    state.notice
+                          }
+                        , Cmd.none
+                        )
 
                 Err error ->
                     ( { state | loading = False, error = Just (ApiError.toMessage (ApiError.fromError error)) }, Cmd.none )
@@ -232,11 +262,27 @@ update apiUrl identity msg state =
                 ( { state | working = True, notice = Nothing, error = Nothing }
                 , Magnes.Api.Mutation.moderation (Mutation.flag { infoHash = Scalar.Hash20 (String.toLower (String.trim state.hash)) } (recordSelection Nothing |> SelectionSet.map (\record -> ( record, False ))))
                     |> Bitmagnet.mutationRequest apiUrl
-                    |> Graphql.Http.send GotDecision
+                    |> Graphql.Http.send (GotFlag (String.toLower (String.trim state.hash)))
                 )
 
             else
                 ( state, Cmd.none )
+
+        GotFlag hash result ->
+            case result of
+                Ok accepted ->
+                    update apiUrl identity (GotDecision (Ok accepted)) state
+
+                Err error ->
+                    let
+                        failure =
+                            ApiError.fromError error
+                    in
+                    if ApiError.mayHaveActed failure then
+                        ( { state | working = False, blocked = True, notice = Nothing, error = Nothing, uncertainFlag = Just hash }, Cmd.none )
+
+                    else
+                        ( { state | working = False, blocked = True, notice = Nothing, error = Just ("The flag was not saved. " ++ ApiError.toMessage failure) }, Cmd.none )
 
         GotDecision result ->
             case result of
@@ -302,7 +348,7 @@ cmdNavigate params =
 
 canAct : Identity.Identity -> State -> Bool
 canAct identity state =
-    Identity.can (Identity.graphql "moderation" "mutate") identity && not state.working && not state.loading && not state.blocked
+    Identity.can (Identity.graphql "moderation" "mutate") identity && not state.working && not state.loading && not state.blocked && state.uncertainFlag == Nothing
 
 
 validHash : String -> Bool
@@ -336,7 +382,11 @@ decide apiUrl action record =
 
 
 view : Route.BasePath -> Time.Zone -> Identity.Identity -> Route.ModerationParams -> State -> Html Msg
-view mount zone identity params state =
+view mount zone identity routeParams state =
+    let
+        params =
+            { routeParams | uncertainFlag = state.uncertainFlag }
+    in
     div [ class "page moderation-page" ]
         [ h1 [] [ text "Moderation" ]
         , p [] [ text "Private metadata review. Filenames do not verify file contents." ]
@@ -363,6 +413,16 @@ view mount zone identity params state =
             , button [ type_ "submit", disabled state.working ] [ text "Search decisions" ]
             ]
         , button [ type_ "button", onClick (Refresh params), disabled (state.working || state.loading) ] [ text "Refresh review" ]
+        , case state.uncertainFlag of
+            Just hash ->
+                div [ class "notice error", attribute "role" "alert" ]
+                    [ p [] [ text ("The flag outcome is unknown. Requested infohash: " ++ hash ++ ". Refreshing another record cannot resolve this request. Search the decision lists and open the requested torrent's retained evidence to inspect its current decision.") ]
+                    , p [] [ text "Dismissing this warning does not confirm whether the flag was saved." ]
+                    , a [ href (Route.toHref mount (Route.Moderation { routeParams | uncertainFlag = Nothing })) ] [ text "Dismiss unknown flag warning" ]
+                    ]
+
+            Nothing ->
+                text ""
         , Maybe.map (\error -> p [ class "notice error", attribute "role" "alert" ] [ text error ]) state.error |> Maybe.withDefault (text "")
         , Maybe.map (\notice -> p [ class "notice", attribute "role" "status" ] [ text notice ]) state.notice |> Maybe.withDefault (text "")
         , if state.loading then
@@ -543,3 +603,12 @@ provenance event =
     List.filterMap identity [ event.importedOrigin, event.source ]
         |> List.map ((++) " · ")
         |> String.concat
+
+
+withFlagContext : Route.ModerationParams -> State -> State
+withFlagContext params state =
+    if state.uncertainFlag == params.uncertainFlag then
+        state
+
+    else
+        { state | uncertainFlag = params.uncertainFlag, blocked = False }

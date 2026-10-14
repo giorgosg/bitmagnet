@@ -1677,7 +1677,18 @@ updateModel msg model =
                 -- what to look at, and the statistics pages pick their events (and the queue's
                 -- queues) out of the answer they have. The chart stays, drawn as the route now says,
                 -- and the timer is the subscription's to restart.
-                ( { model | route = route }, Cmd.none )
+                ( { model
+                    | route = route
+                    , moderation =
+                        case route of
+                            Route.Moderation params ->
+                                Moderation.withFlagContext params model.moderation
+
+                            _ ->
+                                model.moderation
+                  }
+                , Cmd.none
+                )
 
             else
                 let
@@ -1948,20 +1959,47 @@ updateModel msg model =
                                 ( model, Nav.pushUrl model.key (Route.toHref model.basePath (Route.Moderation destination)) )
 
                             Moderation.GotDecision (Ok ( record, _ )) ->
+                                moderationAccepted epoch moderationMsg record.identifier params model
+
+                            Moderation.GotFlag _ (Ok ( record, _ )) ->
+                                moderationAccepted epoch moderationMsg record.identifier params model
+
+                            Moderation.GotRecord _ (Ok _) ->
                                 let
-                                    ( state, cmd ) =
-                                        Moderation.update model.apiUrl model.identity moderationMsg model.moderation
+                                    ( updated, cmd ) =
+                                        updateModeration epoch moderationMsg model
                                 in
-                                ( { model | moderation = state }
+                                ( updated
                                 , Cmd.batch
-                                    [ Cmd.map (ModerationMsg epoch) cmd
-                                    , if params.identifier == Nothing then
-                                        Nav.pushUrl model.key (Route.toHref model.basePath (Route.Moderation { params | identifier = Just record.identifier }))
+                                    [ cmd
+                                    , if params.uncertainFlag /= updated.moderation.uncertainFlag then
+                                        Nav.replaceUrl model.key (Route.toHref model.basePath (Route.Moderation { params | uncertainFlag = updated.moderation.uncertainFlag }))
 
                                       else
                                         Cmd.none
                                     ]
                                 )
+
+                            Moderation.GotFlag _ (Err error) ->
+                                onRequestFailure error
+                                    model
+                                    (\_ current ->
+                                        let
+                                            ( updated, cmd ) =
+                                                updateModeration epoch moderationMsg current
+                                        in
+                                        ( updated
+                                        , Cmd.batch
+                                            [ cmd
+                                            , case updated.moderation.uncertainFlag of
+                                                Just hash ->
+                                                    Nav.replaceUrl model.key (Route.toHref model.basePath (Route.Moderation { params | uncertainFlag = Just hash }))
+
+                                                Nothing ->
+                                                    Cmd.none
+                                            ]
+                                        )
+                                    )
 
                             Moderation.Refresh _ ->
                                 let
@@ -4165,3 +4203,21 @@ updateModeration epoch msg model =
             Moderation.update model.apiUrl model.identity msg model.moderation
     in
     ( { model | moderation = state }, Cmd.map (ModerationMsg epoch) cmd )
+
+
+moderationAccepted : Int -> Moderation.Msg -> String -> Route.ModerationParams -> Model -> ( Model, Cmd Msg )
+moderationAccepted epoch msg identifier params model =
+    let
+        ( updated, cmd ) =
+            updateModeration epoch msg model
+    in
+    ( updated
+    , Cmd.batch
+        [ cmd
+        , if params.identifier /= Just identifier then
+            Nav.pushUrl model.key (Route.toHref model.basePath (Route.Moderation { params | identifier = Just identifier, uncertainFlag = Nothing }))
+
+          else
+            Cmd.none
+        ]
+    )

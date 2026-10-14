@@ -32,8 +32,20 @@ banned. Ordinary category deletion remains independent.
 
 The exact opaque `revision` is passed unchanged as `expectedRevision`; the millisecond
 `DateTime` codec is used only to display `updatedAt`. Conflicts and refusals never display
-success. A lost answer reports an unknown outcome. Both require **Refresh review** before
-another decision. Refresh advances the request epoch and clears the previous look. Leaving
+success. A lost answer reports an unknown outcome. For record decisions, conflicts and lost
+answers require **Refresh review** before
+another decision. Successful flagging opens the returned record, including when the flag
+started from a different detail page. Its URL, refresh and reload all address that record.
+
+A lost flag response is separate from a decision on the currently opened record. Its requested
+infohash is retained in the private review URL so refresh, navigation and reload keep the
+unknown outcome visible. Refreshing another record cannot settle it. Opening retained evidence
+for that exact infohash confirms the current review record without claiming the lost flag
+response succeeded, and clears the uncertain target from the URL. Missing evidence cannot
+settle this lookup. **Dismiss unknown flag warning**
+explicitly removes the warning and says that dismissal does not confirm a saved flag.
+
+Refresh advances the request epoch and clears the previous look. Leaving
 the route or refreshing Identity clears private data and discards old answers. A history
 page from a changed revision restarts history so events from different revisions are not
 combined.

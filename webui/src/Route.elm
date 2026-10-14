@@ -45,12 +45,13 @@ type alias ModerationParams =
     , query : String
     , after : Maybe String
     , identifier : Maybe String
+    , uncertainFlag : Maybe String
     }
 
 
 emptyModeration : ModerationParams
 emptyModeration =
-    { status = ModerationStatus.Pending, query = "", after = Nothing, identifier = Nothing }
+    { status = ModerationStatus.Pending, query = "", after = Nothing, identifier = Nothing, uncertainFlag = Nothing }
 
 
 type alias LoginParams =
@@ -185,8 +186,8 @@ parser =
         , Parser.map AdminRoles (s "admin" </> s "roles")
         , Parser.map AdminInvitations (s "admin" </> s "invitations")
         , Parser.map AdminQueue (s "admin" </> s "queue")
-        , Parser.map (\status query after record -> Moderation { status = status |> Maybe.andThen ModerationStatus.fromString |> Maybe.withDefault ModerationStatus.Pending, query = Maybe.withDefault "" query, after = after, identifier = record })
-            (s "moderation" <?> Query.string "status" <?> Query.string "q" <?> Query.string "after" <?> Query.string "record")
+        , Parser.map (\status query after record flag -> Moderation { status = status |> Maybe.andThen ModerationStatus.fromString |> Maybe.withDefault ModerationStatus.Pending, query = Maybe.withDefault "" query, after = after, identifier = record, uncertainFlag = flag |> Maybe.andThen validInfoHash })
+            (s "moderation" <?> Query.string "status" <?> Query.string "q" <?> Query.string "after" <?> Query.string "record" <?> Query.string "uncertainFlag")
         , Parser.map Status (s "status")
         , Parser.map jobsWith
             (s "queue"
@@ -468,8 +469,8 @@ question route =
         AdminInvitations ->
             route
 
-        Moderation _ ->
-            route
+        Moderation params ->
+            Moderation { params | uncertainFlag = Nothing }
 
         AdminQueue ->
             route
@@ -551,6 +552,7 @@ toHref (BasePath prefix) route =
                                 Just (Builder.string "q" params.query)
                             , Maybe.map (Builder.string "after") params.after
                             , Maybe.map (Builder.string "record") params.identifier
+                            , Maybe.map (Builder.string "uncertainFlag") params.uncertainFlag
                             ]
                         )
 
@@ -856,3 +858,12 @@ require object refusal identity =
 
     else
         Refused refusal
+
+
+validInfoHash : String -> Maybe String
+validInfoHash raw =
+    if String.length raw == 40 && String.all Char.isHexDigit raw then
+        Just (String.toLower raw)
+
+    else
+        Nothing

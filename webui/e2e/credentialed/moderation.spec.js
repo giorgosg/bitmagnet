@@ -568,3 +568,133 @@ test("a delayed search answer cannot replace the newer search", async ({
     page.getByRole("link", { name: name(7), exact: true }),
   ).toBeVisible();
 });
+
+test("flagging from another record moves the detail route and survives refresh and reload", async ({
+  page,
+  credentials,
+}) => {
+  await signInAt(page, credentials, "/moderation", "Moderation");
+  await openReview(page, 4);
+  const previousIdentifier = new URL(page.url()).searchParams.get("record");
+  await page.getByLabel("Torrent infohash").fill(hash(66));
+  await page.getByRole("button", { name: "Flag for review" }).click();
+  await expect(
+    page.getByText("Harmless catalogue handbook 66.pdf", { exact: true }),
+  ).toBeVisible();
+  await expect(page).not.toHaveURL(new RegExp(`record=${previousIdentifier}`));
+  const targetURL = page.url();
+  await page.getByRole("button", { name: "Refresh review" }).click();
+  await expect(
+    page.getByText("Harmless catalogue handbook 66.pdf", { exact: true }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(targetURL);
+  await page.reload();
+  await expect(
+    page.getByText("Harmless catalogue handbook 66.pdf", { exact: true }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(targetURL);
+});
+
+test("a lost flag answer stays associated with its torrent when another record refreshes", async ({
+  page,
+  credentials,
+}) => {
+  await signInAt(page, credentials, "/moderation", "Moderation");
+  await openReview(page, 5);
+  const previousIdentifier = new URL(page.url()).searchParams.get("record");
+  await page.route("**/graphql", async (route) => {
+    if ((route.request().postData() ?? "").includes("flag(")) {
+      await route.fetch();
+      await route.abort("failed");
+    } else await route.continue();
+  });
+  await page.getByLabel("Torrent infohash").fill(hash(67));
+  await page.getByRole("button", { name: "Flag for review" }).click();
+  await expect(page.getByRole("alert")).toContainText("outcome is unknown.");
+  await expect(page.getByText(/Saved:/)).toHaveCount(0);
+  await page.unroute("**/graphql");
+  await page.getByRole("button", { name: "Refresh review" }).click();
+  await expect(page.getByText(name(5), { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`record=${previousIdentifier}`));
+  await expect(page.getByRole("alert")).toContainText(
+    "The flag outcome is unknown.",
+  );
+  await expect(page.getByRole("alert")).toContainText(hash(67));
+  await expect(
+    page.getByRole("button", { name: "Flag for review" }),
+  ).toBeDisabled();
+  await expect(page.getByText(/Saved:/)).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByText(name(5), { exact: true })).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText(
+    "The flag outcome is unknown.",
+  );
+  await expect(page.getByRole("alert")).toContainText(hash(67));
+  await expect(
+    page.getByRole("button", { name: "Allow", exact: true }),
+  ).toBeDisabled();
+  await expect(page.getByText(/Saved:/)).toHaveCount(0);
+  await page
+    .getByLabel("Find a moderation record")
+    .fill("Harmless catalogue handbook 67.pdf");
+  await page.getByRole("button", { name: "Search decisions" }).click();
+  await expect(page.getByRole("alert")).toContainText(hash(67));
+  await page
+    .getByRole("link", {
+      name: "Harmless catalogue handbook 67.pdf",
+      exact: true,
+    })
+    .click();
+  await expect(
+    page.getByText("Harmless catalogue handbook 67.pdf", { exact: true }),
+  ).toBeVisible();
+  await expect(page).not.toHaveURL(new RegExp(`record=${previousIdentifier}`));
+  await expect(page.getByRole("status")).toContainText(
+    "Review record found for the requested infohash.",
+  );
+  await expect(page).not.toHaveURL(/uncertainFlag=/);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByText(/Saved:/)).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Allow", exact: true }),
+  ).toBeEnabled();
+  await page.getByRole("button", { name: "Refresh review" }).click();
+  await expect(
+    page.getByText("Harmless catalogue handbook 67.pdf", { exact: true }),
+  ).toBeVisible();
+});
+
+test("dismissing an unknown flag warning acknowledges uncertainty without success", async ({
+  page,
+  credentials,
+}) => {
+  await signInAt(page, credentials, "/moderation", "Moderation");
+  await openReview(page, 8);
+  await page.route("**/graphql", async (route) => {
+    if ((route.request().postData() ?? "").includes("flag("))
+      await route.abort("failed");
+    else await route.continue();
+  });
+  await page.getByLabel("Torrent infohash").fill(hash(68));
+  await page.getByRole("button", { name: "Flag for review" }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "The flag outcome is unknown.",
+  );
+  await expect(page.getByRole("alert")).toContainText(
+    "Dismissing this warning does not confirm whether the flag was saved.",
+  );
+  await expect(
+    page.getByRole("button", { name: "Allow", exact: true }),
+  ).toBeDisabled();
+  await page.unroute("**/graphql");
+  await page
+    .getByRole("link", { name: "Dismiss unknown flag warning" })
+    .click();
+  await expect(page).not.toHaveURL(/uncertainFlag=/);
+  await expect(page.getByText(name(8), { exact: true })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Allow", exact: true }),
+  ).toBeEnabled();
+  await expect(page.getByText(/Saved:/)).toHaveCount(0);
+});

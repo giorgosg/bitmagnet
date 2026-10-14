@@ -38,8 +38,12 @@ Flag a known catalogue infohash with **Flag for review**. Allow, Ban and Reopen 
 confirmation; **Purge evidence** separately confirms permanent clearing of retained metadata
 and prior private history while keeping the decision. After allow, the page reports if normal
 classification is queued. A stale decision must be refreshed before another action. When an
-answer is lost, the outcome is unknown until refreshed; the page never reports unconfirmed
-success. See [UI behavior](../webui/docs/moderation.md).
+decision answer is lost, refresh the record to inspect its current state; the page never reports unconfirmed
+success. A successful flag opens its returned record. If a flag answer is lost, the page
+retains its requested infohash through refresh/reload; refreshing a different record cannot
+settle it. Open matching retained evidence to inspect the current decision. Dismissing the
+unknown-flag warning explicitly acknowledges uncertainty and does not confirm success.
+See [UI behavior](../webui/docs/moderation.md).
 
 ## Search and review
 

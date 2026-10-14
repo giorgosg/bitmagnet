@@ -20,12 +20,20 @@ suite =
                         Route.basePath "/magnes"
 
                     route =
-                        Route.Moderation { status = Status.Allowed, query = "full/path manual.pdf", after = Just "opaque+/cursor=", identifier = Just (String.repeat 64 "a") }
+                        Route.Moderation { status = Status.Allowed, query = "full/path manual.pdf", after = Just "opaque+/cursor=", identifier = Just (String.repeat 64 "a"), uncertainFlag = Just (String.repeat 40 "b") }
                 in
                 Route.toHref mount route
                     |> (\path -> Url.fromString ("https://example.test" ++ path))
                     |> Maybe.map (Route.fromUrl mount)
                     |> Expect.equal (Just route)
+        , test "uncertain flag context changes the warning without asking a different private question" <|
+            \_ ->
+                let
+                    params =
+                        Route.emptyModeration
+                in
+                Route.sameQuestion (Route.Moderation params) (Route.Moderation { params | uncertainFlag = Just (String.repeat 40 "b") })
+                    |> Expect.equal True
         , test "catalogue reader and editor Permissions cannot enter private review" <|
             \_ ->
                 [ Identity.Anonymous [ Identity.graphql "torrentContent" "query" ]

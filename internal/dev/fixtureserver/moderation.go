@@ -50,7 +50,7 @@ func newModerationFixture(
 
 	now := time.Now().UTC()
 
-	for i := range 66 {
+	for i := range 68 {
 		hash := protocol.ID{0xfa, 0xb7, byte(i)}
 
 		name := fmt.Sprintf("Harmless synthetic review marker handbook %02d.pdf", i)
@@ -60,6 +60,8 @@ func newModerationFixture(
 
 		if i == 0 {
 			name = "Harmless catalogue handbook.pdf"
+		} else if i >= 66 {
+			name = fmt.Sprintf("Harmless catalogue handbook %02d.pdf", i)
 		}
 
 		filesStatus := model.FilesStatusMulti

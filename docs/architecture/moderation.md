@@ -101,7 +101,10 @@ private surface with 50-item cursors, opens complete evidence/history separately
 the exact opaque revision for confirmed decisions. Query Permission admits the route and
 mutate Permission admits actions. It clears private state when Identity changes and rejects
 late answers after navigation or refresh. Conflicts and unknown mutation outcomes require a
-fresh review. Digest-only records remain actionable. See [the UI guide](../../webui/docs/moderation.md).
+fresh review. Flag results route to their returned identifier. Lost flag answers retain the
+requested infohash as uncertain review context; only matching observed evidence resolves
+that lookup, while an explicit dismissal acknowledges uncertainty without confirming a write.
+Digest-only records remain actionable. See [the UI guide](../../webui/docs/moderation.md).
 
 ## Catalogue visibility
 
