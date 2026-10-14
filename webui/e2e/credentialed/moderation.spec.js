@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 import {
   expect,
   test,
@@ -473,6 +474,8 @@ test("private query Permission alone reads evidence but offers no decision contr
       "Reopen",
       "Purge evidence",
       "Flag for review",
+      "Select ban file",
+      "Import selected bans",
     ]) {
       await expect(
         them.getByRole("button", { name: caption, exact: true }),
@@ -751,4 +754,164 @@ test("dismissing an unknown flag warning acknowledges uncertainty without succes
     page.getByRole("button", { name: "Allow", exact: true }),
   ).toBeEnabled();
   await expect(page.getByText(/Saved:/)).toHaveCount(0);
+});
+
+test("a selected trusted ban file imports additively and rejects a malformed file", async ({
+  page,
+  credentials,
+}) => {
+  await signInAt(page, credentials, "/moderation", "Moderation");
+  const select = async (file) => {
+    const pending = page.waitForEvent("filechooser");
+    await page
+      .getByRole("button", { name: "Select ban file", exact: true })
+      .click();
+    await (await pending).setFiles(file);
+  };
+  const fixture = path.resolve(
+    "../internal/moderation/testdata/ban-file-v1.json",
+  );
+  await select(fixture);
+  await expect(
+    page.getByText("ban-file-v1.json", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Import selected bans", exact: true })
+    .click();
+  await expect(
+    page.getByRole("status").filter({ hasText: /^Ban file accepted:/ }),
+  ).toContainText("Ban file accepted: 2 distinct identifiers.");
+  await select(fixture);
+  await page
+    .getByRole("button", { name: "Import selected bans", exact: true })
+    .click();
+  await expect(
+    page.getByRole("status").filter({ hasText: /^Ban file accepted:/ }),
+  ).toContainText("Ban file accepted: 2 distinct identifiers.");
+  await select({
+    name: "truncated.json",
+    mimeType: "application/json",
+    buffer: Buffer.from('{"version":1,"entries":['),
+  });
+  await page
+    .getByRole("button", { name: "Import selected bans", exact: true })
+    .click();
+  await expect(page.getByRole("alert")).toContainText(
+    "The ban file was rejected. No bans were applied.",
+  );
+  await expect(page.getByText(/Ban file accepted:/)).toHaveCount(0);
+});
+
+test("a lost ban-file answer reports uncertainty and safely retries the same selected file", async ({
+  page,
+  credentials,
+}) => {
+  await signInAt(page, credentials, "/moderation", "Moderation");
+  const pending = page.waitForEvent("filechooser");
+  await page
+    .getByRole("button", { name: "Select ban file", exact: true })
+    .click();
+  await (
+    await pending
+  ).setFiles(path.resolve("../internal/moderation/testdata/ban-file-v1.json"));
+  await page.route("**/graphql/moderation/import", async (route) => {
+    await route.fetch();
+    await route.abort("failed");
+  });
+  await page
+    .getByRole("button", { name: "Import selected bans", exact: true })
+    .click();
+  await expect(page.getByRole("alert")).toContainText(
+    "The import outcome is unknown.",
+  );
+  await expect(page.getByText(/Ban file accepted:/)).toHaveCount(0);
+  await page.unroute("**/graphql/moderation/import");
+  await page
+    .getByRole("button", { name: "Import selected bans", exact: true })
+    .click();
+  await expect(
+    page.getByRole("status").filter({ hasText: /^Ban file accepted:/ }),
+  ).toContainText("Ban file accepted: 2 distinct identifiers.");
+});
+
+test("an old ban-file upload answer cannot repaint after navigation", async ({
+  page,
+  credentials,
+}) => {
+  await signInAt(page, credentials, "/moderation", "Moderation");
+  const pending = page.waitForEvent("filechooser");
+  await page
+    .getByRole("button", { name: "Select ban file", exact: true })
+    .click();
+  await (
+    await pending
+  ).setFiles(path.resolve("../internal/moderation/testdata/ban-file-v1.json"));
+  let release;
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  let entered;
+  const ready = new Promise((resolve) => {
+    entered = resolve;
+  });
+  await page.route("**/graphql/moderation/import", async (route) => {
+    const response = await route.fetch();
+    entered();
+    await held;
+    await route.fulfill({ response });
+  });
+  await page
+    .getByRole("button", { name: "Import selected bans", exact: true })
+    .click();
+  await ready;
+  await page.getByRole("link", { name: "Allowed", exact: true }).click();
+  release();
+  await expect(
+    page.getByRole("status").filter({ hasText: /^Loading moderation/ }),
+  ).toHaveCount(0);
+  await expect(page.getByText(/Ban file accepted:/)).toHaveCount(0);
+  await expect(page.getByText("ban-file-v1.json", { exact: true })).toHaveCount(
+    0,
+  );
+});
+
+test("removing import Permission before upload refreshes Identity without false success", async ({
+  page,
+  browser,
+  request,
+  issuer,
+  credentials,
+}) => {
+  const role = uniqueName("e2e-import");
+  await signInAt(page, credentials, "/admin/roles", "Create a Role");
+  await createRole(page, role, ["moderation::query", "moderation::import"]);
+  await inAnotherBrowser(browser, async (them) => {
+    const importing = await registerUser(them, request, issuer, "e2e-file");
+    await page.goto("/admin/users");
+    await setRole(page, importing.username, role);
+    await signIn(them, importing);
+    await them.goto("/moderation");
+    const pending = them.waitForEvent("filechooser");
+    await them
+      .getByRole("button", { name: "Select ban file", exact: true })
+      .click();
+    await (
+      await pending
+    ).setFiles(
+      path.resolve("../internal/moderation/testdata/ban-file-v1.json"),
+    );
+    await setRole(page, importing.username, "user");
+    await them
+      .getByRole("button", { name: "Import selected bans", exact: true })
+      .click();
+    await expect(
+      them.getByText(
+        "Your Identity does not permit private moderation review.",
+      ),
+    ).toBeVisible();
+    await expect(them.getByText(/Ban file accepted:/)).toHaveCount(0);
+    await expect(
+      them.getByText("ban-file-v1.json", { exact: true }),
+    ).toHaveCount(0);
+  });
 });

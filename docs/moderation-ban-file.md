@@ -37,7 +37,7 @@ Export orders entries by digest ascending, without duplicates. An empty export c
 This example uses the harmless all-zero compatibility vector from ADR 0006. The fixed
 [round-trip fixture](../internal/moderation/testdata/ban-file-v1.json) includes both origins
 and an optional source label, using that vector and the all-ones vector. It is the
-compatibility input for later file import, which is not implemented by this export surface.
+compatibility input for explicit file import and export.
 Unsupported envelope versions, identifier formats and origins are outside this contract.
 Raw infohashes, magnets, torrent names, file paths, reviewer identities, timestamps and
 free-text evidence are not fields of this format.
@@ -63,6 +63,46 @@ Permission or the normal catalogue visibility predicate.
 
 If a download fails or is interrupted, discard its incomplete JSON file and retry. The
 server cannot change the HTTP status after a streamed response has begun.
+
+## Additive trusted import
+
+`POST /graphql/moderation/import` requires the separate `http:moderation:import` Permission.
+Send the selected JSON file as the entire request body with `Content-Type: application/json`.
+The file is limited to **8 MiB (8,388,608 bytes) and 10,000 entries**, counting repeated
+entries before deduplication. The optional source label is limited to **256 UTF-8 bytes**
+to bound provenance copied into every decision and history row. Split larger lists into complete supported files; each file
+is a separate atomic import. The response is HTTP 200 with `{"entries": N}`, where `N`
+counts distinct accepted identifiers, including existing bans and local allows left intact.
+It does not claim that every entry changed a decision.
+
+The entire bounded UTF-8 document is validated before any mutation. Required fields must
+be present and non-null. Unsupported versions, formats or origins, noncanonical digests,
+unknown/case-variant fields, duplicate JSON properties, trailing documents, conflicting
+origins for one digest and truncated files return HTTP 400 without applying a prefix.
+Repeated entries with the same digest and origin are no-ops. Oversize files, entry counts or source labels
+return HTTP 413; a non-JSON content type returns HTTP 415. Permission and browser-origin
+refusals return HTTP 403. Server failures return HTTP 500; inspect current decisions or
+retry the same file if the outcome was lost. A successful import is additive and idempotent.
+
+One transaction applies all accepted entries through the moderation service's ingestion
+and decision locks in stable identifier order. A later file omitting an identifier never
+withdraws its ban. A local allow is final until an explicit local review changes it.
+Existing bans retain their origin and source, including locally reviewed bans. New or
+promoted bans have `import` origin and retain the entry's original `moderator`/`automatic`
+origin and optional whole-file source. No import grants a provenance label greater trust
+than the local allow, and imported assertions remain excluded from export.
+
+Existing matching catalogue metadata is copied into private evidence by an exact indexed
+digest lookup in the import transaction. Available complete stored paths are retained;
+uncapped private paths already retained take precedence. Unseen digests remain valid bans
+without metadata and suppress future crawler/importer ingestion. Catalogue deletion cannot
+erase private evidence. Duplicate imports do not reconstruct explicitly purged evidence.
+
+Selecting and importing a file means the operator trusts its source. There is no signature,
+subscription, scheduled synchronization or additional approval workflow. Cookie-backed
+browser uploads must have an HTTPS Origin matching the request host; bearer clients require
+the selected Object action and their owner's current Role. Forward this exact path through
+the same HTTPS proxy as `/graphql`.
 
 ## Privacy limit
 

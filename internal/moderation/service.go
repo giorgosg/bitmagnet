@@ -342,18 +342,48 @@ func (s *Service) ApplyImport(ctx context.Context, id Identifier, original Origi
 		return ErrInvalidTransition
 	}
 
-	return s.change(
-		ctx,
-		id,
-		decisionChange{
-			status:         Banned,
-			origin:         Imported,
-			importedOrigin: original,
-			source:         source,
-			action:         "import",
-			overwrite:      true,
-		},
-	)
+	return s.database(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockIdentifier(tx, id); err != nil {
+			return err
+		}
+
+		var existing model.ModerationDecision
+
+		err := tx.Where("identifier = ?", id.String()).First(&existing).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+
+		if existing.Status == string(Allowed) || existing.Status == string(Banned) {
+			return nil
+		}
+
+		// The expression matches migration 00027. Exact digest lookup is indexed,
+		// including when no private evidence has ever held the raw infohash.
+		var torrent model.Torrent
+
+		err = tx.Clauses(clause.Locking{Strength: "SHARE"}).
+			Where(catalogueIdentifierSQL+" = ?", id.String()).First(&torrent).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+
+		var evidence *Evidence
+
+		if err == nil {
+			observed, err := withCatalogueEvidence(tx, id, Evidence{InfoHash: &torrent.InfoHash})
+			if err != nil {
+				return err
+			}
+
+			evidence = &observed
+		}
+
+		return NewService(tx).change(ctx, id, decisionChange{
+			status: Banned, origin: Imported, importedOrigin: original, source: source,
+			action: "import", overwrite: true, evidence: evidence,
+		})
+	})
 }
 
 func (s *Service) Ban(ctx context.Context, id Identifier, actor string) error {

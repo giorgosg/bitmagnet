@@ -6,6 +6,8 @@ Revisions are opaque strings, passed back exactly as received.
 
 import ApiError
 import Bitmagnet
+import File exposing (File)
+import File.Select
 import Format
 import Graphql.Http
 import Graphql.OptionalArgument exposing (OptionalArgument(..))
@@ -13,7 +15,9 @@ import Graphql.SelectionSet as SelectionSet exposing (with)
 import Html exposing (Html, a, button, dd, div, dl, dt, form, h1, h2, h3, input, label, li, p, pre, text, ul)
 import Html.Attributes exposing (attribute, class, disabled, download, href, id, maxlength, type_, value)
 import Html.Events exposing (onClick, onInput, onSubmit)
+import Http
 import Identity
+import Json.Decode as Decode
 import Magnes.Api.Enum.ModerationStatus as Status exposing (ModerationStatus)
 import Magnes.Api.InputObject as Input
 import Magnes.Api.Mutation
@@ -70,12 +74,13 @@ type alias State =
     , error : Maybe String
     , notice : Maybe String
     , uncertainFlag : Maybe String
+    , selectedFile : Maybe File
     }
 
 
 empty : Route.ModerationParams -> State
 empty params =
-    { query = params.query, hash = "", page = Nothing, record = Nothing, loading = True, working = False, blocked = False, confirmation = Nothing, error = Nothing, notice = Nothing, uncertainFlag = params.uncertainFlag }
+    { query = params.query, hash = "", page = Nothing, record = Nothing, loading = True, working = False, blocked = False, confirmation = Nothing, error = Nothing, notice = Nothing, uncertainFlag = params.uncertainFlag, selectedFile = Nothing }
 
 
 type Decision
@@ -100,6 +105,10 @@ type Msg
     | GotFlag String (Result (Graphql.Http.Error ( Record, Bool )) ( Record, Bool ))
     | GotDecision (Result (Graphql.Http.Error ( Record, Bool )) ( Record, Bool ))
     | MoreHistory
+    | SelectBanFile
+    | SelectedBanFile File
+    | ImportBanFile Route.ModerationParams
+    | GotImport Route.ModerationParams (Result Http.Error Int)
 
 
 fetch : String -> Route.ModerationParams -> Cmd Msg
@@ -322,6 +331,55 @@ update apiUrl identity msg state =
                     in
                     ( { state | working = False, blocked = True, notice = Nothing, error = Just (explanation ++ ApiError.toMessage failure) }, Cmd.none )
 
+        SelectBanFile ->
+            if canImport identity state then
+                ( state, File.Select.file [ "application/json" ] SelectedBanFile )
+
+            else
+                ( state, Cmd.none )
+
+        SelectedBanFile file ->
+            if not (canImport identity state) then
+                ( state, Cmd.none )
+
+            else if File.size file > 8 * 1024 * 1024 then
+                ( { state | selectedFile = Nothing, notice = Nothing, error = Just "The ban file exceeds the 8 MiB import limit." }, Cmd.none )
+
+            else
+                ( { state | selectedFile = Just file, notice = Nothing, error = Nothing }, Cmd.none )
+
+        ImportBanFile params ->
+            case state.selectedFile of
+                Just file ->
+                    if canImport identity state then
+                        ( { state | working = True, notice = Nothing, error = Nothing }
+                        , Http.request
+                            { method = "POST"
+                            , headers = [ Http.header "Content-Type" "application/json" ]
+                            , url = apiUrl ++ "/moderation/import"
+                            , body = Http.fileBody file
+                            , expect = Http.expectJson (GotImport params) (Decode.field "entries" Decode.int)
+                            , timeout = Just 120000
+                            , tracker = Nothing
+                            }
+                        )
+
+                    else
+                        ( state, Cmd.none )
+
+                Nothing ->
+                    ( state, Cmd.none )
+
+        GotImport params result ->
+            case result of
+                Ok count ->
+                    ( { state | working = False, loading = True, record = Nothing, page = Nothing, selectedFile = Nothing, error = Nothing, notice = Just ("Ban file accepted: " ++ String.fromInt count ++ " distinct identifiers. Existing bans and local allows are preserved.") }
+                    , fetch apiUrl params
+                    )
+
+                Err error ->
+                    ( { state | working = False, notice = Nothing, error = Just (importFailure error) }, Cmd.none )
+
         MoreHistory ->
             case state.record of
                 Just record ->
@@ -349,6 +407,33 @@ cmdNavigate params =
 canAct : Identity.Identity -> State -> Bool
 canAct identity state =
     Identity.can (Identity.graphql "moderation" "mutate") identity && not state.working && not state.loading && not state.blocked && state.uncertainFlag == Nothing
+
+
+canImport : Identity.Identity -> State -> Bool
+canImport identity state =
+    Identity.can { namespace = "http", object = "moderation", action = "import" } identity && not state.working && not state.loading
+
+
+importFailure : Http.Error -> String
+importFailure error =
+    case error of
+        Http.BadStatus 400 ->
+            "The ban file was rejected. No bans were applied. Use a complete supported version-1 file."
+
+        Http.BadStatus 413 ->
+            "The ban file was rejected. No bans were applied. Imports allow at most 8 MiB, 10,000 entries and 256 UTF-8 source-label bytes."
+
+        Http.BadStatus 415 ->
+            "The ban file was rejected. No bans were applied. A JSON file is required."
+
+        Http.BadStatus 403 ->
+            "Your Identity does not permit this ban-file import."
+
+        Http.BadUrl _ ->
+            "The import URL is invalid. No upload was sent."
+
+        _ ->
+            "The import outcome is unknown. Inspect the banned decisions or retry the same file; imports are additive and idempotent."
 
 
 validHash : String -> Bool
@@ -397,6 +482,17 @@ view apiUrl mount zone identity routeParams state =
                 , a [ href (apiUrl ++ "/moderation/export"), download "moderation-bans-v1.json" ] [ text "Export reviewed bans" ]
                 , text " · "
                 , a [ href (apiUrl ++ "/moderation/export?includeAutomatic=true"), download "moderation-bans-v1.json" ] [ text "Export reviewed and automatic bans" ]
+                ]
+
+          else
+            text ""
+        , if Identity.can { namespace = "http", object = "moderation", action = "import" } identity then
+            div []
+                [ h2 [] [ text "Import trusted bans" ]
+                , p [] [ text "Select a JSON file from a source you trust. Import adds bans atomically, preserves local allows and never withdraws bans omitted by a later file. Limits: 8 MiB, 10,000 entries and 256 UTF-8 source-label bytes." ]
+                , button [ type_ "button", onClick SelectBanFile, disabled (not (canImport identity state)) ] [ text "Select ban file" ]
+                , Maybe.map (\file -> p [] [ text (File.name file) ]) state.selectedFile |> Maybe.withDefault (text "")
+                , button [ type_ "button", onClick (ImportBanFile params), disabled (not (canImport identity state) || state.selectedFile == Nothing) ] [ text "Import selected bans" ]
                 ]
 
           else

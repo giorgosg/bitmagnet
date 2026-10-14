@@ -80,3 +80,21 @@ source: the existing `download` attribute lets the browser stream an attachment 
 whole file in the UI; native links need no new dependency. The actual browser test reads
 the downloaded reviewed and automatic JSON files and checks their exact public fields,
 while a reviewer without export sees no links and receives HTTP 403 from the server.
+
+**Select ban file** opens the native picker. **Import selected bans** explicitly uploads that
+file to the API's `/moderation/import` path with `http:moderation:import`; entering this area
+still needs private query Permission. The file's producer is trusted by this explicit action.
+Imports add bans atomically, retain original origin/source, preserve local allows and never
+withdraw entries absent from later files. Limits are 8 MiB, 10,000 entries and 256 UTF-8 source-label bytes. A server
+acceptance reports distinct identifiers, including unchanged bans/allows, then refreshes the
+private list. A refusal never shows success, and HTTP 403 refreshes Identity. Lost or unreadable
+answers report an unknown outcome; inspecting decisions or retrying the same file is safe.
+Navigation and Identity epochs discard stale answers and selected files.
+
+The Elm registry search checked official `elm/file` 1.0.5 (`File.Select` and native picker
+source) and `elm/http` 2.0.0 (`fileBody` and request source), both Elm 0.19 compatible and
+already locked indirect dependencies. Promoting these to direct dependencies provides
+native selection/upload without a custom JavaScript port or a new package. The development
+proxy forwards the exact import path with Host and Origin preserved. The real browser suite
+selects the frozen harmless fixture twice and a truncated file, and checks unknown outcomes,
+late answers and Permission refusals.

@@ -275,3 +275,16 @@ fixing. The recurring themes, arrived at independently by several people:
 patches are there with the reason they were turned down.
 
 To send work upstream instead, see [upstream-status.md](upstream-status.md).
+
+### Ban-file import regression checks
+
+The moderation sharing tests use harmless synthetic metadata and isolated `dbtest.New`
+instances. The two-instance flow exercises the real offline classifier and importer through
+quarantine, allow/classification, ban, export and upload, then verifies ordinary exclusion,
+local allow precedence, future ingestion suppression and private evidence after deletion.
+`TestBanImportReverseLookupUsesIndexAtFixtureScale` uses `dbtest.NewSeeded` and therefore
+needs a separate sealed fixture template at migration 00027. Build a new template clone;
+do not migrate the prior sealed template or the source fixture database in place. The
+00027 index build is a one-time full-index operation; file imports perform bounded indexed
+lookups. See [the operator import contract](moderation-ban-file.md) and
+[upgrade cost](architecture/data.md).

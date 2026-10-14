@@ -91,7 +91,7 @@ They are distinct from full administrative database backups.
 
 Goose SQL in [`migrations/`](../../migrations), embedded and run through
 `internal/database/migrations` — an fx decorator, so they apply before anything queries.
-Current high-water mark is `00026_discard_legacy_blocks.sql`; `ls migrations/` rather than trusting this
+Current high-water mark is `00027_moderation_catalogue_digest.sql`; `ls migrations/` rather than trusting this
 sentence.
 
 **Forks number theirs independently and the numbers collide.** Anything cherry-picked gets
@@ -130,3 +130,12 @@ bare `go test ./...` proves considerably less than it appears to. See
 ---
 
 _Known defects and improvement ideas referenced above are kept as untracked `docs/issues/*.local.md` notes, which a given checkout may or may not have._
+
+Migration `00027` creates the frozen v1 moderation digest expression index on `torrents`.
+It enables exact reverse lookup for private evidence during additive file import, without
+scanning the catalogue per imported identifier. Index creation hashes every existing
+infohash once, consumes additional index space and holds the normal CREATE INDEX write
+lock. Schedule the upgrade with catalogue writers stopped and budget time/disk space for
+that one-time build; subsequent imports use indexed point lookups. The expression uses an
+immutable bytea context literal, checked against ADR 0006's independent vectors. It changes
+no table/model fields and requires no DAO generation.

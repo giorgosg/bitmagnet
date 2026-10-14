@@ -111,8 +111,7 @@ Digest-only records remain actionable. See [the UI guide](../../webui/docs/moder
 `internal/database/catalogue` owns the mandatory read predicate. Torrent search, direct
 infohash lookup, file queries and torrent-content search exclude pending/banned digests.
 PostgreSQL computes the frozen v1 SHA-256 over the context plus raw infohash bytes and
-compares it with the exact ledger primary key; no Bloom filter or catalogue-wide digest
-index is involved. Digest-only bans work before retained evidence exists.
+compares it with the exact ledger primary key; no Bloom filter is involved. The separate digest index supports import evidence lookup. Digest-only bans work before retained evidence exists.
 
 Counts and facets use the same exclusion. Dynamic tag/source/year/collection values hide
 metadata backed only by hidden torrents, including a selected value whose count is zero.
@@ -165,4 +164,29 @@ The `moderation` HTTP option mounts `GET /graphql/moderation/export` and enforce
 separate `http:moderation:export` action before opening the lazy service. It fails closed
 without an authenticator and sends no-store JSON attachments. The exact read-only path is
 allowed by the browser-cookie resolver without broadening its `/graphql` cookie scope.
-File import remains a later integration.
+
+## Explicit additive ban-file import
+
+`Service.Import` reads at most 8 MiB and 10,000 entries, validating the complete frozen
+UTF-8 envelope before opening a transaction. Strict field parsing rejects ambiguity,
+unknown/private fields and unsupported assertions. Identical entries deduplicate; conflicting
+origins reject the whole file. The transaction applies identifiers in the same stable lock
+order as ingestion through `ApplyImport`, preserving local allows and existing ban provenance.
+State, evidence and history roll back together on any failure. Later omission never withdraws
+an imported assertion. Reimporting existing bans preserves revisions and purged evidence.
+
+Migration `00027` adds one immutable `torrents` expression index over the frozen contextual
+v1 digest. `ApplyImport` uses that exact expression for bounded reverse lookup, holds a shared
+catalogue-row lock while copying metadata and retains missing evidence through the existing
+helper. It preserves previously retained uncapped paths. The independent compatibility vectors
+and a populated-fixture plan test check this boundary; ordinary reads continue using the ledger
+predicate. A new digest-only ban suppresses future ingestion through the existing locks.
+
+`POST /graphql/moderation/import` enforces the separate `http:moderation:import` Object action
+and fails closed without authentication. Cookie-backed uploads require the existing same-origin
+HTTPS guard before reading the body; the cookie resolver admits only this additional exact
+path. JSON body, source-label and entry limits apply at the service and HTTP boundary. The response counts
+accepted distinct identifiers, including preserved bans/allows; it never serializes evidence.
+Magnes uses native file selection and HTTP upload, discards late answers by request epoch,
+refreshes Identity on refusal and reports lost outcomes without optimistic success. Operators
+may inspect decisions or safely retry the same additive file.
