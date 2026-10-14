@@ -498,4 +498,9 @@ resolved request Identity; the input contains no reviewer identity. See
 [moderator operations](../moderation.md). Explicit ban-file download instead requires
 `http:moderation:export`, registered by the HTTP action provider without a baseline grant.
 Its exact `GET /graphql/moderation/export` path accepts browser credentials inside the
-existing `/graphql` cookie scope; other HTTP paths remain outside that contract.
+existing `/graphql` cookie scope; only the exact import path described below additionally accepts browser authority.
+
+Ban-file import independently requires `http:moderation:import`. Its exact
+`POST /graphql/moderation/import` path admits browser cookies inside `/graphql` only behind
+the same HTTPS Origin/host guard used for GraphQL mutations. Permission and origin are
+checked before consuming an upload. No baseline Permission or new core Role is added.

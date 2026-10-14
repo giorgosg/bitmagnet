@@ -11,6 +11,7 @@ import "github.com/bitmagnet-io/bitmagnet/internal/auth/rbac"
 const Namespace = "http"
 
 var (
+	ObjectActionModerationImport = rbac.NewObjectAction(Namespace, "moderation", "import")
 	// ObjectActionModerationExport permits the explicit shareable ban-file download.
 	ObjectActionModerationExport = rbac.NewObjectAction(Namespace, "moderation", "export")
 	// ObjectActionImport guards POST /import, which writes torrents.
@@ -28,6 +29,7 @@ func ObjectActionProvider() rbac.ObjectActionProvider {
 	return func() []rbac.ObjectAction {
 		return []rbac.ObjectAction{
 			ObjectActionModerationExport,
+			ObjectActionModerationImport,
 			ObjectActionImport,
 			ObjectActionPprof,
 			ObjectActionMetrics,

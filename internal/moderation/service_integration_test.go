@@ -356,3 +356,46 @@ func TestEvidenceCannotDescribeAnotherIdentifier(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, record.Evidence)
 }
+
+func TestImportRetainsExistingCatalogueEvidenceAfterDeletion(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	service := moderation.NewService(db.Gorm)
+	hash := protocol.ID{0x29, 0x09}
+	require.NoError(
+		t,
+		db.Gorm.Create(
+			&model.Torrent{
+				InfoHash:    hash,
+				Name:        "Harmless existing handbook",
+				Size:        42,
+				FilesStatus: model.FilesStatusMulti,
+			},
+		).Error,
+	)
+	require.NoError(
+		t,
+		db.Gorm.Create(
+			&model.TorrentFile{InfoHash: hash, Index: 0, Path: "complete/private/harmless.txt", Size: 42},
+		).Error,
+	)
+	id := moderation.IdentifierForInfoHash(hash)
+	require.NoError(t, service.ApplyImport(t.Context(), id, moderation.Automatic, "Synthetic source"))
+	record, err := service.Get(t.Context(), id)
+	require.NoError(t, err)
+	require.NotNil(t, record.Evidence, "import must retain existing catalogue metadata independently")
+	require.Equal(t, "Harmless existing handbook", record.Evidence.Name)
+	require.Equal(t, []string{"complete/private/harmless.txt"}, record.Evidence.Files)
+	require.Equal(t, &hash, record.Evidence.InfoHash)
+	require.NoError(t, db.Gorm.Where("info_hash = ?", hash).Delete(&model.Torrent{}).Error)
+	retained, err := service.Get(t.Context(), id)
+	require.NoError(t, err)
+	require.Equal(t, record.Evidence, retained.Evidence)
+	require.NoError(t, service.PurgeEvidence(t.Context(), id))
+	require.NoError(t, service.ApplyImport(t.Context(), id, moderation.Moderator, "Second source"))
+	purged, err := service.Get(t.Context(), id)
+	require.NoError(t, err)
+	require.Nil(t, purged.Evidence, "duplicate imports must not reconstruct explicitly purged evidence")
+	require.Equal(t, moderation.Automatic, purged.ImportedOrigin)
+	require.Equal(t, "Synthetic source", purged.Source)
+}

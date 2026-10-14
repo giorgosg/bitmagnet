@@ -286,7 +286,7 @@ func Build(ctx context.Context, opts Options) (*Stack, error) {
 	}
 
 	ledgerLazy := lazy.New(func() (*moderation.Service, error) { return ledger, nil })
-	if err := moderationhttpserver.New(ledgerLazy, authenticator).Apply(engine); err != nil {
+	if err := moderationhttpserver.New(ledgerLazy, authenticator, cookie).Apply(engine); err != nil {
 		return nil, fmt.Errorf("fixtureserver: applying moderation option: %w", err)
 	}
 

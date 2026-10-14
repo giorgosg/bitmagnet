@@ -144,6 +144,7 @@ missing file metadata, a digest-only ban and more than one list page. The real c
 and processor run with external APIs and local matching disabled. The workflow allows,
 explicitly reprocesses, searches allowed and ordinary results, then reopens and bans; it
 also checks real reviewed/automatic ban-file downloads and their public field set,
+native file selection and additive upload of the harmless frozen fixture, malformed-file rejection and import failure/late-response handling,
 flag/purge, bounded history, ordinary reader/editor and read-only-reviewer
 Permissions, conflicts, failed/lost/late responses and unavailable metadata.
 
@@ -297,3 +298,9 @@ process queued jobs.
 across two queues, and a bounded set of torrent-source timestamps moved into the recent
 metrics window. `torrent.listSources` reads the cloned database. The status spec checks
 Anonymous access, administrator and ordinary User views, and visibility-aware polling.
+
+When overriding `TMPDIR` for disk-backed test artifacts, use a canonical absolute path
+without `..` segments. Chromium canceled downloads with a traversal-containing temporary
+path even when the export request returned HTTP 200; the unchanged download test passed
+with the canonical path. File uploads were unaffected, so checking only upload success
+would miss this harness problem.

@@ -1,8 +1,10 @@
 package dhtcrawler
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -64,7 +66,18 @@ func TestCrawlerCannotResurrectDigestOnlyBan(t *testing.T) {
 	db := dbtest.New(t)
 	hash := protocol.ID{83}
 	ledger := moderation.NewService(db.Gorm)
-	require.NoError(t, ledger.Ban(t.Context(), moderation.IdentifierForInfoHash(hash), "synthetic moderator"))
+	data, err := json.Marshal(
+		moderation.BanFile{
+			Version:          1,
+			IdentifierFormat: moderation.IdentifierFormatV1,
+			Entries: []moderation.BanEntry{
+				{Digest: moderation.IdentifierForInfoHash(hash).String(), Origin: moderation.Moderator},
+			},
+		},
+	)
+	require.NoError(t, err)
+	_, err = ledger.Import(t.Context(), bytes.NewReader(data))
+	require.NoError(t, err)
 
 	c := newPersistTestCrawler(db.Query, 0)
 	written, ok := c.writeTorrentBatch(

@@ -17,6 +17,7 @@ import Health
 import Html exposing (Attribute, Html, a, button, div, form, h1, header, input, main_, p, span, text)
 import Html.Attributes exposing (attribute, class, classList, href, id, placeholder, spellcheck, type_, value)
 import Html.Events exposing (on, onClick, onInput, onSubmit, stopPropagationOn)
+import Http
 import Identity
 import IdentityMenu
 import InfiniteList
@@ -2009,6 +2010,9 @@ updateModel msg model =
                                 ( { model | epoch = next, moderation = Moderation.empty params }
                                 , Moderation.fetch model.apiUrl params |> Cmd.map (ModerationMsg next)
                                 )
+
+                            Moderation.GotImport _ (Err (Http.BadStatus 403)) ->
+                                beginIdentityRefresh Resolving model
 
                             Moderation.GotPage (Err error) ->
                                 onRequestFailure error model (\_ current -> updateModeration epoch moderationMsg current)

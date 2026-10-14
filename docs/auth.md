@@ -444,7 +444,15 @@ results require the query action as well. See [moderator operations](moderation.
 The explicit ban-file download uses `http:moderation:export`, separately from query and
 mutate. It has no baseline grant. `GET /graphql/moderation/export` accepts a permissioned
 browser cookie or bearer credential; the cookie remains scoped to `/graphql` and its
-resolver accepts this exact additional read-only path. Other HTTP surfaces do not borrow
+resolver accepts this exact additional read-only path. HTTP surfaces outside the exact moderation export/import paths do not borrow
 browser authority. Forward this path through the same HTTPS proxy as `/graphql` and include
 `moderation` when configuring an explicit HTTP option list. See
 [moderator sharing](moderation.md) and the [file contract](moderation-ban-file.md).
+
+Ban-file upload requires the separate `http:moderation:import` Object action, without a
+baseline grant. `POST /graphql/moderation/import` accepts a JSON file up to 8 MiB and
+10,000 entries, with source labels up to 256 UTF-8 bytes. Query, mutate and export do not imply import. The browser moderation area
+also requires its existing query Permission. Cookie-backed uploads enforce the same HTTPS
+Origin/host check as GraphQL mutations before accepting a body; bearer clients use explicit
+credentials and selected Object actions. Forward the exact upload path through the same
+HTTPS proxy and permit its bounded body size. See [the import contract](moderation-ban-file.md).

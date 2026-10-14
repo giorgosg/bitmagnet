@@ -149,3 +149,10 @@ allow-all behavior with a deny callback.
 
 The default allowed headers are `Content-Type`, `Authorization`, `X-Api-Key` and
 `X-Import-Id`; debug logging is off. See [docs/auth.md](../auth.md) for deployment guidance.
+
+The moderation HTTP option also mounts `POST /graphql/moderation/import`, guarded by the
+separate `http:moderation:import` action. It accepts one bounded raw JSON file, validates it
+fully and applies its additive assertions atomically. Cookie authority requires the existing
+same-origin HTTPS mutation check. Magnes offers explicit file selection/upload and reports
+unknown outcomes without success; the API never returns private fields in the import result.
+See [the frozen file and upload contract](../moderation-ban-file.md).

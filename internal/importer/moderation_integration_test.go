@@ -1,6 +1,8 @@
 package importer
 
 import (
+	"bytes"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -15,15 +17,18 @@ func TestImportCannotResurrectDigestOnlyBan(t *testing.T) {
 	db := dbtest.New(t)
 	hash := protocol.ID{81}
 	ledger := moderation.NewService(db.Gorm)
-	require.NoError(
-		t,
-		ledger.ApplyImport(
-			t.Context(),
-			moderation.IdentifierForInfoHash(hash),
-			moderation.Moderator,
-			"synthetic",
-		),
+	data, err := json.Marshal(
+		moderation.BanFile{
+			Version:          1,
+			IdentifierFormat: moderation.IdentifierFormatV1,
+			Entries: []moderation.BanEntry{
+				{Digest: moderation.IdentifierForInfoHash(hash).String(), Origin: moderation.Moderator},
+			},
+		},
 	)
+	require.NoError(t, err)
+	_, err = ledger.Import(t.Context(), bytes.NewReader(data))
+	require.NoError(t, err)
 	imp := importer{dao: db.Query, bufferSize: 1, maxWaitTime: time.Hour}.New(t.Context(), Info{})
 	require.NoError(t, imp.Import(Item{Source: "synthetic", InfoHash: hash, Name: "Synthetic handbook"}))
 	imp.Drain()

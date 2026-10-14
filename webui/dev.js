@@ -113,7 +113,11 @@ function proxyApi(req, res, pathname) {
 function serve(req, res) {
   const requestUrl = new URL(req.url, "https://localhost");
   if (
-    ["/graphql", "/graphql/moderation/export"].includes(requestUrl.pathname)
+    [
+      "/graphql",
+      "/graphql/moderation/export",
+      "/graphql/moderation/import",
+    ].includes(requestUrl.pathname)
   ) {
     proxyApi(req, res, requestUrl.pathname);
     return;

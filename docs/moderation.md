@@ -13,6 +13,7 @@ mutation {
         { namespace: "graphql", object: "moderation", action: "query" }
         { namespace: "graphql", object: "moderation", action: "mutate" }
         { namespace: "http", object: "moderation", action: "export" }
+        { namespace: "http", object: "moderation", action: "import" }
       ]
     ) {
       name
@@ -24,7 +25,8 @@ mutation {
 This is a custom Role, not a new core Role. The query action permits private review
 search, evidence and history; the mutate action permits decisions. Ordinary catalogue
 Permissions and tag editing do not grant them. The separate `http:moderation:export`
-action permits sharing ban files; private query or mutate alone does not grant export. API keys remain bounded by both their
+action permits downloading ban files; `http:moderation:import` separately permits trusted
+file upload. Private query or mutate alone grants neither operation. API keys remain bounded by both their
 own selected Object actions and their owner's Role. Actor identifiers come from the
 server-resolved User or API key, never request input.
 
@@ -116,4 +118,14 @@ Role must also permit export. Browser downloads use the existing secure `/graphq
 scope through this exact additional read-only path. Reverse proxies must forward it to the
 API. Include `moderation` in an explicit `http_server.options` list to mount the route.
 Ordinary `task export-data` remains a visible-catalogue SQL export without ban files.
-No file import, background sharing, user reporting or anonymous submission is added here.
+
+**Select ban file** and **Import selected bans** require `http:moderation:import`, separately
+from query, mutate and export. Importing means trusting the selected file's producer. The
+whole bounded file is validated and applied atomically; repeated imports are no-ops, omitted
+entries never withdraw bans, and local allows survive. Limits are 8 MiB, 10,000 entries and 256 UTF-8 source-label bytes.
+Existing matches hide immediately and retain available metadata privately; unseen bans
+suppress future ingestion. Source and original entry origin remain import provenance,
+without relabelling existing local bans or exporting imports. See the [file contract](moderation-ban-file.md)
+for the raw JSON upload API, statuses and retry semantics. Browser uploads require a
+same-origin HTTPS Origin and the existing secure cookie. No background sharing, signatures,
+user reporting or additional approval workflow is added.
