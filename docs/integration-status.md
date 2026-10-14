@@ -114,6 +114,7 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#99](https://github.com/giorgosg/magnes/pull/99)    | Default harmful-keyword quarantine and automatic-ban option                      | local                                                                | Keyword deletion, hidden retries, category-only deletes and absent paths observed red; PostgreSQL/race pass                                         |
 | [#100](https://github.com/giorgosg/magnes/pull/100)  | Exact ingestion bans and discard of legacy blocking                              | local                                                                | Legacy discovery, racing bans, first-match/full/single-file evidence, ordinary deletes, upgrade and queue retry seen red                            |
 | [#101](https://github.com/giorgosg/magnes/pull/101)  | Permissioned private review reads and atomic moderator decisions                 | local                                                                | Query/allow, private-read leak, empty revision, stale evidence and clock ordering observed red; PostgreSQL API, rollback, conflict and queue checks |
+| Pending PR                                           | Private searchable moderation review UI and confirmed decisions                  | local                                                                | Real browser route/workflow/digest-only/access tests seen red against base UI; allow/reprocess/reopen/ban, paging, purge and failure cases pass     |
 
 ## In flight
 

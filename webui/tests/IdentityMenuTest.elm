@@ -103,7 +103,7 @@ suite =
                 \_ ->
                     labels everything
                         |> Expect.equal
-                            [ "Your User", "API keys", "Users", "Invitations", "Roles", "Queue administration" ]
+                            [ "Your User", "API keys", "Users", "Invitations", "Roles", "Moderation", "Queue administration" ]
             , test "the pages are the ones the guard admits, not a second opinion" <|
                 \_ ->
                     -- Every destination offered must survive the guard that protects it,

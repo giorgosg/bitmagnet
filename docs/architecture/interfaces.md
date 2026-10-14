@@ -129,6 +129,12 @@ HTTP option remains unregistered; the option key is `static`.
 The mount sends `Cache-Control: no-store`, so a browser observes deployments replacing
 stable filenames on disk. A reverse proxy can instead serve the UI and API together.
 
+The `/moderation` UI area uses only the private moderation namespace. Its route/menu
+require query and its decision controls require mutate. Search/history request bounded
+50-item pages; exact revisions and request epochs protect against stale decisions and
+late responses. Private review offers no catalogue download controls. See
+[UI behavior](../../webui/docs/moderation.md).
+
 ## CORS
 
 `http_server.cors.allowed_origins` defaults to an empty list, which withholds CORS

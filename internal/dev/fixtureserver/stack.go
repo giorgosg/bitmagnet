@@ -40,6 +40,7 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/metrics/queuemetrics"
 	"github.com/bitmagnet-io/bitmagnet/internal/metrics/torrentmetrics"
 	"github.com/bitmagnet-io/bitmagnet/internal/moderation"
+	"github.com/bitmagnet-io/bitmagnet/internal/processor"
 	"github.com/bitmagnet-io/bitmagnet/internal/queue/manager"
 	torznab_httpserver "github.com/bitmagnet-io/bitmagnet/internal/torznab/httpserver"
 	"github.com/bitmagnet-io/bitmagnet/internal/version"
@@ -86,6 +87,9 @@ type Options struct {
 	// would change what their counts mean. The caller that wants the data says
 	// so.
 	SeedDashboardData bool
+
+	// SeedModerationData adds synthetic private review data and an offline real processor.
+	SeedModerationData bool
 }
 
 // Stack is the assembled server and the services behind it.
@@ -225,17 +229,19 @@ func Build(ctx context.Context, opts Options) (*Stack, error) {
 		return nil, err
 	}
 
-	// The processor stays nil deliberately: it drags in
-	// a subsystem this stack has no business starting, and nothing it serves asks
-	// for them. Workers, health, the queue surface and torrent metrics used to be
-	// in that list and should not have been — they back the status, statistics
-	// and queue pages an external browser suite has to drive, and a nil interface
-	// answers them with an opaque "internal system error".
-	//
-	// `queue.jobs` and `torrent.listSources` need nothing beyond Search and the
-	// dao, and answered before any of this.
+	ledger := moderation.NewService(query.UnderlyingDB())
+
+	var fixtureProcessor processor.Processor
+	if opts.SeedModerationData {
+		fixtureProcessor, err = newModerationFixture(ctx, query, ledger)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	schema := newSchema(&resolvers.Resolver{
-		Moderation:         moderation.NewService(query.UnderlyingDB()),
+		Moderation:         ledger,
+		Processor:          fixtureProcessor,
 		Dao:                query,
 		Search:             searchService,
 		Workers:            workerRegistry,

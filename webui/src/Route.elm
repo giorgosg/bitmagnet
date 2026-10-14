@@ -1,4 +1,4 @@
-module Route exposing (Access(..), BasePath, JobsParams, LoginParams, QueueStatsParams, RegisterParams, Route(..), SearchParams, TorrentEvent(..), TorrentStatsParams, basePath, emptyJobs, emptyQueueStats, emptySearch, emptyTorrentStats, fromUrl, guard, loginReturningTo, refreshInterval, returnDestination, sameQuestion, toHref)
+module Route exposing (Access(..), BasePath, JobsParams, LoginParams, ModerationParams, QueueStatsParams, RegisterParams, Route(..), SearchParams, TorrentEvent(..), TorrentStatsParams, basePath, emptyJobs, emptyModeration, emptyQueueStats, emptySearch, emptyTorrentStats, fromUrl, guard, loginReturningTo, refreshInterval, returnDestination, sameQuestion, toHref)
 
 {-| Routes are real paths, not fragments — see the README.
 
@@ -10,6 +10,7 @@ variant breaks it at compile time rather than producing a dead link.
 import Facet exposing (Filters)
 import Identity
 import JobOrder exposing (JobOrder)
+import Magnes.Api.Enum.ModerationStatus as ModerationStatus exposing (ModerationStatus)
 import Magnes.Api.Enum.QueueJobStatus as QueueJobStatus exposing (QueueJobStatus)
 import QueueMetrics
 import Sort exposing (Sort)
@@ -31,11 +32,25 @@ type Route
     | AdminRoles
     | AdminInvitations
     | AdminQueue
+    | Moderation ModerationParams
     | Status
     | QueueJobs JobsParams
     | TorrentStats TorrentStatsParams
     | QueueStats QueueStatsParams
     | NotFound
+
+
+type alias ModerationParams =
+    { status : ModerationStatus
+    , query : String
+    , after : Maybe String
+    , identifier : Maybe String
+    }
+
+
+emptyModeration : ModerationParams
+emptyModeration =
+    { status = ModerationStatus.Pending, query = "", after = Nothing, identifier = Nothing }
 
 
 type alias LoginParams =
@@ -170,6 +185,8 @@ parser =
         , Parser.map AdminRoles (s "admin" </> s "roles")
         , Parser.map AdminInvitations (s "admin" </> s "invitations")
         , Parser.map AdminQueue (s "admin" </> s "queue")
+        , Parser.map (\status query after record -> Moderation { status = status |> Maybe.andThen ModerationStatus.fromString |> Maybe.withDefault ModerationStatus.Pending, query = Maybe.withDefault "" query, after = after, identifier = record })
+            (s "moderation" <?> Query.string "status" <?> Query.string "q" <?> Query.string "after" <?> Query.string "record")
         , Parser.map Status (s "status")
         , Parser.map jobsWith
             (s "queue"
@@ -387,6 +404,9 @@ refreshInterval route =
         AdminInvitations ->
             Nothing
 
+        Moderation _ ->
+            Nothing
+
         AdminQueue ->
             Nothing
 
@@ -446,6 +466,9 @@ question route =
             route
 
         AdminInvitations ->
+            route
+
+        Moderation _ ->
             route
 
         AdminQueue ->
@@ -516,6 +539,20 @@ toHref (BasePath prefix) route =
 
                 AdminInvitations ->
                     Builder.absolute [ "admin", "invitations" ] []
+
+                Moderation params ->
+                    Builder.absolute [ "moderation" ]
+                        (List.filterMap identity
+                            [ Just (Builder.string "status" (ModerationStatus.toString params.status))
+                            , if String.isEmpty params.query then
+                                Nothing
+
+                              else
+                                Just (Builder.string "q" params.query)
+                            , Maybe.map (Builder.string "after") params.after
+                            , Maybe.map (Builder.string "record") params.identifier
+                            ]
+                        )
 
                 AdminQueue ->
                     Builder.absolute [ "admin", "queue" ] []
@@ -677,6 +714,9 @@ anonymousAccess mount identity route =
 
         -- Refused rather than sent to sign in, as the queue's other pages are: see
         -- `requireQueueAdministration`.
+        Moderation _ ->
+            require "moderation" "Your Identity does not permit private moderation review." identity
+
         AdminQueue ->
             requireQueueAdministration identity
 
@@ -742,6 +782,9 @@ userAccess identity route =
 
         QueueStats _ ->
             requireQueue identity
+
+        Moderation _ ->
+            require "moderation" "Your Identity does not permit private moderation review." identity
 
         AdminQueue ->
             requireQueueAdministration identity

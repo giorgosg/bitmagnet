@@ -94,6 +94,15 @@ validated. Digest-only/purged records still allow without a hash; no digest scan
 evidence reconstruction is performed. The response states whether classification work is
 queued. Purge also changes the revision, preventing stale decisions after private deletion.
 
+## Private browser review
+
+Magnes exposes Pending, Allowed and Banned lists under `/moderation`. It queries this
+private surface with 50-item cursors, opens complete evidence/history separately and sends
+the exact opaque revision for confirmed decisions. Query Permission admits the route and
+mutate Permission admits actions. It clears private state when Identity changes and rejects
+late answers after navigation or refresh. Conflicts and unknown mutation outcomes require a
+fresh review. Digest-only records remain actionable. See [the UI guide](../../webui/docs/moderation.md).
+
 ## Catalogue visibility
 
 `internal/database/catalogue` owns the mandatory read predicate. Torrent search, direct

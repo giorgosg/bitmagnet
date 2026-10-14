@@ -138,6 +138,14 @@ that Anonymous may open the page and an Identity without `queue::query` is refus
 offered it. It relies on the seed leaving jobs in every status, in both queues, inside
 the last day.
 
+`moderation.spec.js` drives the private Pending/Allowed/Banned area using the opt-in
+`--seed-moderation-data` fixture. Its harmless synthetic records include complete paths,
+missing file metadata, a digest-only ban and more than one list page. The real classifier
+and processor run with external APIs and local matching disabled. The workflow allows,
+explicitly reprocesses, searches allowed and ordinary results, then reopens and bans; it
+also checks flag/purge, bounded history, ordinary reader/editor and read-only-reviewer
+Permissions, conflicts, failed/lost/late responses and unavailable metadata.
+
 `queue-admin.spec.js` (ticket 07 in `.scratch/dashboard`) purges failed jobs from one queue
 only after asking, checks with bitmagnet's own count that those and nothing else went, and
 opens the jobs table to see them gone; queues a reprocessing batch by content type, checking
@@ -157,6 +165,11 @@ statuses, and the seed puts two jobs in every status of both queues, so any purg
 pending `process_torrent_batch` job (bitmagnet's `EnqueueReprocessTorrentsBatch` inserts one
 row, or truncates `queue_jobs` first when asked to purge, and nothing in the fixture runs it).
 Neither can be aimed at jobs nobody else counts.
+
+Moderation allows add processor jobs too, so `moderation.spec.js` belongs in the same
+queue-changing project. Run it alone with
+`npm run test:e2e:credentialed -- e2e/credentialed/moderation.spec.js --project=credentialed-queue-changes --no-deps --workers=1`
+when no other tests are running.
 
 So `playwright.config.js` gives them a second project, `credentialed-queue-changes`, which
 `dependencies` start only once every test of the `credentialed` project has finished, and

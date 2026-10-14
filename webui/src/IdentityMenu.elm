@@ -39,6 +39,7 @@ candidates =
     , { route = Route.AdminUsers, label = "Users" }
     , { route = Route.AdminInvitations, label = "Invitations" }
     , { route = Route.AdminRoles, label = "Roles" }
+    , { route = Route.Moderation Route.emptyModeration, label = "Moderation" }
     , { route = Route.AdminQueue, label = "Queue administration" }
     ]
 

@@ -235,9 +235,16 @@ What the served instance answers for those pages: `health` reports one real chec
 the clone; `workers` lists the keys production registers, with the ones this stack actually
 runs marked started and the crawler, queue server and invitation worker listed and stopped;
 `queue.jobs`, `queue.metrics`, `torrent.metrics` and `torrent.listSources` all read the
-clone. The processor stays unwired, as does the queue _server_ — so
-a job enqueued through `queue.purgeJobs` or `enqueueReprocessTorrentsBatch` stays in the
+clone. `--seed-moderation-data` defaults to off. The credentialed UI harness turns it on
+to add harmless synthetic review names, complete/missing paths, a digest-only ban and
+more than one search page. It wires the real classifier/processor with external APIs and
+local content matching disabled; direct `torrent.reprocess` can then verify classification
+and local allow precedence without crawlers or external data. The queue _server_ remains
+unwired, so a job enqueued through `queue.purgeJobs` or `enqueueReprocessTorrentsBatch` stays in the
 table to be asserted on rather than being picked up and run.
+
+The moderation browser spec runs with the queue-changing project after readers finish,
+because allow adds normal classification jobs.
 
 The clone is dropped when the command exits, including on `SIGINT`/`SIGTERM`. That drop
 runs from an fx `OnStop` hook rather than a `defer`, because `fx.App.Run` returns on the
