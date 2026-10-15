@@ -457,6 +457,34 @@ func TestExistingCatalogueIdentityIsProtectedAndRematchCanReplaceIt(t *testing.T
 			require.Equal(t, "Known work (1984) S02E05", got.Title())
 		}
 	}
+	// Re-selecting the original ordinary work has equal evidence, but explicit
+	// ordinary rematch must still supersede the enhancement's later identity.
+	restored := baseline
+
+	require.NoError(
+		t,
+		db.Gorm.Transaction(
+			func(tx *gorm.DB) error { return RecordOrdinary(tx, torrent, &restored, "test", true) },
+		),
+	)
+	require.Equal(t, "10", restored.ContentID.String)
+	require.True(t, restored.Episodes.HasEpisode(2, 5), "valid release fields survive explicit ordinary rematch")
+	require.NoError(t, db.Gorm.Where("info_hash = ?", hash).Delete(&model.TorrentContent{}).Error)
+
+	replayed := baseline
+
+	require.NoError(
+		t,
+		db.Gorm.Transaction(
+			func(tx *gorm.DB) error { return RecordOrdinary(tx, torrent, &replayed, "test", false) },
+		),
+	)
+	require.Equal(
+		t,
+		"10",
+		replayed.ContentID.String,
+		"normal replay cannot resurrect the superseded enhancement identity",
+	)
 }
 
 func TestRematchCanDetachCatalogueIdentityWhenTypeChanges(t *testing.T) {
@@ -965,4 +993,135 @@ func TestReadOnlyEvidenceUsesOrdinarySnapshotAfterEnhancement(t *testing.T) {
 	actual, err := LoadEvidence(t.Context(), legacy, []protocol.ID{hash}, 0)
 	require.NoError(t, err)
 	require.Equal(t, expected, actual[0])
+}
+
+func TestOrdinaryReplayAuthorityTransitions(t *testing.T) {
+	t.Parallel()
+
+	for _, changed := range []bool{false, true} {
+		for _, rematch := range []bool{false, true} {
+			for _, work := range []bool{false, true} {
+				t.Run(
+					fmt.Sprintf("changed=%v/rematch=%v/priorWork=%v", changed, rematch, work),
+					func(t *testing.T) {
+						t.Parallel()
+						db, app, hash := applicationFixture(t)
+
+						var torrent model.Torrent
+						require.NoError(
+							t,
+							db.Gorm.Where("info_hash = ?", hash).First(&torrent).Error,
+						)
+						baseline := model.TorrentContent{
+							InfoHash:      hash,
+							ContentType:   model.NewNullContentType(model.ContentTypeMovie),
+							InferredTitle: "Initial",
+							InferredYear:  1984,
+						}
+
+						require.NoError(
+							t,
+							db.Gorm.Transaction(
+								func(tx *gorm.DB) error {
+									return RecordOrdinary(
+										tx,
+										torrent,
+										&baseline,
+										"test",
+										false,
+									)
+								},
+							),
+						)
+						run, err := app.Prepare(t.Context(), hash, false, false)
+						require.NoError(t, err)
+
+						metadata := &Metadata{
+							ReleaseGroup: "accepted-group",
+							Episodes:     map[int][]int{2: {5}},
+						}
+
+						var content *model.Content
+
+						if work {
+							metadata.Work = &Work{Type: WorkMovie, ID: 20}
+							metadata.Type = WorkMovie
+							content = &model.Content{
+								Type:        model.ContentTypeMovie,
+								Source:      model.SourceTmdb,
+								ID:          "20",
+								Title:       "Enhanced Orchard",
+								ReleaseYear: 2001,
+							}
+							content.UpdateTsv()
+						}
+
+						require.NoError(
+							t,
+							app.Complete(
+								t.Context(),
+								run,
+								Evaluation{Outcome: OutcomeAccepted, Result: metadata},
+								content,
+							),
+						)
+
+						if changed {
+							baseline.InferredTitle = "Changed"
+						}
+
+						expectedID := ""
+						if work && !rematch {
+							expectedID = "20"
+						}
+
+						for _, ordinaryRematch := range []bool{rematch, false} {
+							next := baseline
+
+							require.NoError(
+								t,
+								db.Gorm.Transaction(
+									func(tx *gorm.DB) error {
+										return RecordOrdinary(
+											tx,
+											torrent,
+											&next,
+											"test",
+											ordinaryRematch,
+										)
+									},
+								),
+							)
+							require.Equal(
+								t,
+								expectedID,
+								next.ContentID.String,
+								"authority must follow explicit ordinary rematch independently of fingerprint equality",
+							)
+
+							if changed {
+								require.False(t, next.ReleaseGroup.Valid)
+								require.Empty(t, next.Episodes)
+							} else {
+								require.Equal(
+									t,
+									"accepted-group",
+									next.ReleaseGroup.String,
+								)
+								require.True(t, next.Episodes.HasEpisode(2, 5))
+							}
+							// Rebuild from durable state after deleting the replaceable
+							// effective row.
+							require.NoError(
+								t,
+								db.Gorm.Where("info_hash = ?", hash).
+									Delete(&model.TorrentContent{}).
+									Error,
+							)
+						}
+					},
+				)
+			}
+		}
+	}
 }

@@ -160,8 +160,10 @@ identity. A catalogue identity attached by earlier enhancement is equally protec
 force and fields-only updates retain it. Accepted state records that identity independently
 of ordinary evidence and search rows, including explicit detachment on rematch. Replay
 protects current identity; a past rematch does not authorize replacing a newer identity.
-Explicit ordinary rematch can establish new identity while invalidating obsolete release
-output. Read-only and persistent evaluation both project the ordinary snapshot through
+Explicit ordinary rematch establishes its selected identity (including no match) before
+replay, even for equal input. It retires the previous identity proposal while retaining
+still-valid release fields. Changed inputs discard obsolete release fields and rebuild
+the effective search vector after retaining catalogue identity. Read-only and persistent evaluation both project the ordinary snapshot through
 `BuildEvidence`, with a legacy classification fallback only when no snapshot exists.
 Explicit rematch may override supplied values without rewriting hints. Release languages and
 episodes remain separate from shared work identity. Accepted generated tags replace

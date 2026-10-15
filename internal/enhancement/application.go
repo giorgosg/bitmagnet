@@ -487,7 +487,13 @@ func (s *Application) Complete(
 			}
 
 			tc.Torrent = t
-			if err := applyAccepted(tx, t, &tc, &state, run.rematch); err != nil {
+
+			mode := preserveCatalog
+			if run.rematch {
+				mode = replaceCatalog
+			}
+
+			if err := applyAccepted(tx, t, &tc, &state, mode); err != nil {
 				return err
 			}
 

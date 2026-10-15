@@ -602,3 +602,71 @@ func (r *catalogueResultRunner) Run(
 		Content: &r.content,
 	}, nil
 }
+
+func TestRetainedCatalogueIdentityRemainsSearchableAfterEvidenceChanges(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	hash := protocol.ID{75}
+	require.NoError(
+		t,
+		db.Gorm.Create(
+			&model.Torrent{InfoHash: hash, Name: "opaque", FilesStatus: model.FilesStatusSingle},
+		).Error,
+	)
+
+	sr := search.New(search.Params{Query: lazy.New(func() (*dao.Query, error) { return db.Query, nil })})
+	searcher, err := sr.Search.Get()
+	require.NoError(t, err)
+
+	runner := &ordinaryTitleRunner{title: "Initial", year: 1984}
+	p := processor{defaultWorkflow: "default", search: searcher, runner: runner, dao: db.Query}
+	require.NoError(t, p.Process(t.Context(), MessageParams{InfoHashes: []protocol.ID{hash}}))
+
+	app := enhancement.NewApplication(db.Gorm, nil, nil, enhancement.NewDefaultConfig())
+	run, err := app.Prepare(t.Context(), hash, false, false)
+	require.NoError(t, err)
+
+	work := model.Content{
+		Type:        model.ContentTypeMovie,
+		Source:      model.SourceTmdb,
+		ID:          "10",
+		Title:       "Orchard",
+		ReleaseYear: 2001,
+	}
+	work.UpdateTsv()
+	require.NoError(
+		t,
+		app.Complete(
+			t.Context(),
+			run,
+			enhancement.Evaluation{
+				Outcome: enhancement.OutcomeAccepted,
+				Result: &enhancement.Metadata{
+					Type: enhancement.WorkMovie,
+					Work: &enhancement.Work{Type: enhancement.WorkMovie, ID: 10},
+				},
+			},
+			&work,
+		),
+	)
+	require.NoError(t, db.Gorm.Model(&model.Torrent{}).Where("info_hash = ?", hash).Update("name", "changed").Error)
+
+	runner.title = "Unrelated"
+
+	require.NoError(t, p.Process(t.Context(), MessageParams{InfoHashes: []protocol.ID{hash}}))
+	rows, err := searcher.TorrentContent(
+		t.Context(),
+		search.TorrentContentDefaultOption(),
+		query.SearchString("Orchard"),
+	)
+	require.NoError(t, err)
+	require.Len(t, rows.Items, 1, "retained work must remain searchable after ordinary reconstruction")
+	require.Equal(t, "10", rows.Items[0].ContentID.String)
+	rows, err = searcher.TorrentContent(
+		t.Context(),
+		search.TorrentContentDefaultOption(),
+		query.SearchString("Unrelated"),
+	)
+	require.NoError(t, err)
+	require.Empty(t, rows.Items, "superseded inferred title must not remain in the effective vector")
+}

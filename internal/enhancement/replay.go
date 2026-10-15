@@ -155,12 +155,36 @@ func RecordOrdinary(tx *gorm.DB, t model.Torrent, tc *model.TorrentContent, reci
 		return nil
 	}
 
-	if accepted.AcceptedInput != input {
-		var output acceptedOutput
-		if err := json.Unmarshal([]byte(accepted.AcceptedOutput), &output); err != nil {
+	var output acceptedOutput
+	if err := json.Unmarshal([]byte(accepted.AcceptedOutput), &output); err != nil {
+		return err
+	}
+
+	priorOutput := accepted.AcceptedOutput
+
+	mode := preserveCatalog
+	if rematch {
+		// Rematch authority belongs to this ordinary result even when its evidence is
+		// unchanged. Retire the older identity proposal, retaining valid release fields.
+		mode = ordinaryCatalog
+		output.Metadata.Type = ""
+		output.Metadata.Work = nil
+		output.Metadata.MixedWorks = false
+		output.Catalog = catalogIdentityFor(*tc)
+
+		data, err := json.Marshal(output)
+		if err != nil {
 			return err
 		}
 
+		accepted.AcceptedOutput = string(data)
+	}
+
+	if accepted.AcceptedInput == input {
+		if err := applyAccepted(tx, current, tc, &accepted, mode); err != nil {
+			return err
+		}
+	} else {
 		if !rematch {
 			catalog := output.Catalog
 			if catalog != nil && catalog.ID == "" {
@@ -170,36 +194,49 @@ func RecordOrdinary(tx *gorm.DB, t model.Torrent, tc *model.TorrentContent, reci
 			if err := retainCatalog(tx, current, tc, catalog); err != nil {
 				return err
 			}
-		} else {
-			// Explicit ordinary rematch establishes the new durable identity, even when
-			// prior release-level enhancement no longer matches the ordinary evidence.
-			output.Catalog = &catalogIdentity{
-				Type:   tc.ContentType.ContentType.String(),
-				Source: tc.ContentSource.String,
-				ID:     tc.ContentID.String,
-			}
+		}
 
-			data, err := json.Marshal(output)
-			if err != nil {
-				return err
-			}
+		tc.Torrent = current
+		tc.UpdateTsv()
+		output.Catalog = catalogIdentityFor(*tc)
 
-			accepted.AcceptedOutput = string(data)
-			if err := tx.Save(&accepted).Error; err != nil {
+		data, err := json.Marshal(output)
+		if err != nil {
+			return err
+		}
+
+		accepted.AcceptedOutput = string(data)
+
+		if len(output.Tags) > 0 {
+			if err := tx.Where("info_hash = ? AND name IN ?", t.InfoHash, output.Tags).
+				Delete(&model.TorrentTag{}).
+				Error; err != nil {
 				return err
 			}
 		}
-
-		if len(output.Tags) == 0 {
-			return nil
-		}
-
-		return tx.Where("info_hash = ? AND name IN ?", t.InfoHash, output.Tags).
-			Delete(&model.TorrentTag{}).
-			Error
+	}
+	// Persist authority changes without marking a new enhancement evaluation.
+	if accepted.AcceptedOutput != priorOutput {
+		return tx.Model(&accepted).Update("accepted_output", accepted.AcceptedOutput).Error
 	}
 
-	return applyAccepted(tx, current, tc, &accepted, false)
+	return nil
+}
+
+type catalogApplication int
+
+const (
+	preserveCatalog catalogApplication = iota
+	replaceCatalog
+	ordinaryCatalog
+)
+
+func catalogIdentityFor(tc model.TorrentContent) *catalogIdentity {
+	return &catalogIdentity{
+		Type:   tc.ContentType.ContentType.String(),
+		Source: tc.ContentSource.String,
+		ID:     tc.ContentID.String,
+	}
 }
 
 func applyAccepted(
@@ -207,7 +244,7 @@ func applyAccepted(
 	t model.Torrent,
 	tc *model.TorrentContent,
 	state *model.ClassificationEvaluation,
-	rematch bool,
+	mode catalogApplication,
 ) error {
 	var output acceptedOutput
 	if err := json.Unmarshal([]byte(state.AcceptedOutput), &output); err != nil {
@@ -218,16 +255,17 @@ func applyAccepted(
 	h := t.Hint
 
 	protect := !output.Rematch
-	if !rematch {
+	if mode == preserveCatalog {
 		if err := retainCatalog(tx, t, tc, output.Catalog); err != nil {
 			return err
 		}
 	}
 	// Catalog identity and supplied type/title/year are authority, not evidence that
 	// the torrent should never be evaluated. Unsourced rule metadata is correctable.
-	identityProtected := (!rematch && tc.ContentID.Valid) || (protect && h.ContentID.Valid)
+	identityProtected := mode == ordinaryCatalog || (mode != replaceCatalog && tc.ContentID.Valid) ||
+		(protect && h.ContentID.Valid)
 
-	typeProtected := (protect && !h.IsNil()) || (!rematch && tc.ContentSource.Valid)
+	typeProtected := (protect && !h.IsNil()) || (mode != replaceCatalog && tc.ContentSource.Valid)
 	if !identityProtected {
 		if m.Type != "" && !typeProtected {
 			v, err := model.ParseContentType(m.Type)
@@ -368,11 +406,7 @@ func applyAccepted(
 
 	tc.Torrent = t
 	tc.UpdateTsv()
-	output.Catalog = &catalogIdentity{
-		Type:   tc.ContentType.ContentType.String(),
-		Source: tc.ContentSource.String,
-		ID:     tc.ContentID.String,
-	}
+	output.Catalog = catalogIdentityFor(*tc)
 
 	b, err := json.Marshal(output)
 	if err != nil {

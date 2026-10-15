@@ -160,7 +160,11 @@ valid, including ordinary inferred title/year. Changing those ordinary values in
 prior output and unchanged-input suppression; replayed enhancement values never become
 their own ordinary evidence. Catalogue identity remains protected when changed ordinary
 evidence invalidates release-level output; explicit ordinary rematch can establish new
-identity. Failed/malformed later attempts retain valid accepted output and remain retryable.
+identity, including an absent match, independently of whether ordinary evidence changes.
+Valid release fields still replay, but cannot restore the prior identity proposal. When
+changed evidence invalidates release fields, reconstruction rebuilds the search vector
+from the retained catalogue work. Failed/malformed later attempts retain valid accepted
+output and remain retryable.
 Completed unresolved and limited results suppress unchanged input/recipe; explicit force,
 rematch or a changed recipe/evidence can reconsider them. These records are backed up
 with the database; catalogue exports omit evaluation/recipe internals. A search-vector
