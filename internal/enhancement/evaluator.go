@@ -367,7 +367,7 @@ func (e *Evaluator) Evaluate(parent context.Context, evidence Evidence) (result 
 					}
 
 					result.Result = metadata
-					result.Outcome = "accepted"
+					result.Outcome = OutcomeAccepted
 
 					empty, encodeErr := json.Marshal(metadata)
 					if encodeErr != nil {
@@ -378,7 +378,7 @@ func (e *Evaluator) Evaluate(parent context.Context, evidence Evidence) (result 
 					}
 
 					if string(empty) == "{}" {
-						result.Outcome = "unresolved"
+						result.Outcome = OutcomeUnresolved
 					}
 
 					return result

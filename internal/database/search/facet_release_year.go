@@ -8,7 +8,6 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/database/query"
 	"github.com/bitmagnet-io/bitmagnet/internal/maps"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
-	"gorm.io/gen/field"
 )
 
 const ReleaseYearFacetKey = "release_year"
@@ -61,7 +60,7 @@ func (yearFacet) Criteria(filter query.FacetFilter) []query.Criteria {
 				years = append(years, uint16(vInt))
 			}
 
-			yearField := ctx.Query().Content.ReleaseYear
+			yearField := "COALESCE(content.release_year, torrent_contents.inferred_year)"
 			joins := maps.NewInsertMap(maps.MapEntry[string, struct{}]{Key: model.TableNameContent})
 
 			var or []query.Criteria
@@ -70,14 +69,14 @@ func (yearFacet) Criteria(filter query.FacetFilter) []query.Criteria {
 					Query: ctx.Query().
 						Content.
 						UnderlyingDB().
-						Where(yearCondition(yearField, years...).RawExpr()),
+						Where(yearField+" IN ?", years),
 					Joins: joins,
 				})
 			}
 
 			if hasNull {
 				or = append(or, query.RawCriteria{
-					Query: ctx.Query().Content.UnderlyingDB().Where(yearField.IsNull().RawExpr()),
+					Query: ctx.Query().Content.UnderlyingDB().Where(yearField + " IS NULL"),
 					Joins: joins,
 				})
 			}
@@ -87,20 +86,22 @@ func (yearFacet) Criteria(filter query.FacetFilter) []query.Criteria {
 	}
 }
 
-func yearCondition(target field.Uint16, years ...uint16) field.Expr {
-	return target.In(years...)
-}
-
 func (yearFacet) Values(ctx query.FacetContext) (map[string]string, error) {
-	q := ctx.Query().Content
-
 	var years []model.Year
 
-	err := q.WithContext(catalogue.Context(ctx.Context())).Where(
-		q.ReleaseYear.Gte(1000),
-		field.NewUnsafeFieldRaw(catalogue.VisibleContent("content")),
-		q.ReleaseYear.Lte(9999),
-	).Distinct(q.ReleaseYear).Pluck(q.ReleaseYear, &years)
+	// Keep the catalogue lookup separate from the sparse inferred-year index: a
+	// coalesced DISTINCT over the joined torrent index would scan every release.
+	err := ctx.Query().UnderlyingDB().WithContext(catalogue.Context(ctx.Context())).Raw(`
+ SELECT DISTINCT content.release_year AS year FROM content
+ WHERE content.release_year BETWEEN 1000 AND 9999 AND ` + catalogue.VisibleContent("content") + `
+ UNION
+ SELECT DISTINCT torrent_contents.inferred_year AS year FROM torrent_contents
+ WHERE torrent_contents.inferred_year BETWEEN 1000 AND 9999
+ AND ` + catalogue.VisibleInfoHash("torrent_contents.info_hash") + `
+ AND NOT EXISTS (SELECT 1 FROM content
+ WHERE content.type=torrent_contents.content_type
+ AND content.source=torrent_contents.content_source AND content.id=torrent_contents.content_id
+ AND content.release_year IS NOT NULL)`).Scan(&years).Error
 	if err != nil {
 		return nil, err
 	}

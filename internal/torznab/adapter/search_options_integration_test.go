@@ -108,7 +108,7 @@ func TestSearchIgnoresQueryWhenTMDBIDProvided(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, result.Channel.Items, 1)
-	require.Equal(t, "The matching torrent", result.Channel.Items[0].Title)
+	require.Equal(t, "The matching movie", result.Channel.Items[0].Title)
 }
 
 func TestSearchConcealsModerationRecords(t *testing.T) {
@@ -130,5 +130,5 @@ func TestSearchConcealsModerationRecords(t *testing.T) {
 		names = append(names, item.Title)
 	}
 
-	require.ElementsMatch(t, []string{"Visible", "Allowed"}, names)
+	require.ElementsMatch(t, []string{"Visible book (2000)", "Allowed book (2002)"}, names)
 }

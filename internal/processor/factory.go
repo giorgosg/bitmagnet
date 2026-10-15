@@ -14,6 +14,7 @@ type Params struct {
 	fx.In
 	Moderation       lazy.Lazy[*moderation.Service]
 	ClassifierConfig classifier.Config
+	ClassifierSource lazy.Lazy[classifier.Source]
 	Search           lazy.Lazy[search.Search]
 	Workflow         lazy.Lazy[classifier.Runner]
 	Dao              lazy.Lazy[*dao.Query]
@@ -48,7 +49,13 @@ func New(p Params) Result {
 				return nil, err
 			}
 
+			source, err := p.ClassifierSource.Get()
+			if err != nil {
+				return nil, err
+			}
+
 			return processor{
+				recipeSource:    source,
 				moderation:      moderator,
 				dao:             d,
 				search:          s,

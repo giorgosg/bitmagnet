@@ -115,10 +115,10 @@ func torrentContentResultItemToTorznabResultItem(item search.TorrentContentResul
 		})
 	}
 
-	if !item.Content.ReleaseYear.IsNil() {
+	if !item.ReleaseYear().IsNil() {
 		attrs = append(attrs, torznab.SearchResultItemTorznabAttr{
 			AttrName:  torznab.AttrYear,
-			AttrValue: strconv.Itoa(int(item.Content.ReleaseYear)),
+			AttrValue: strconv.Itoa(int(item.ReleaseYear())),
 		})
 	}
 
@@ -182,7 +182,7 @@ func torrentContentResultItemToTorznabResultItem(item search.TorrentContentResul
 	}
 
 	return torznab.SearchResultItem{
-		Title:    item.Torrent.Name,
+		Title:    item.Title(),
 		Size:     item.Torrent.Size,
 		Category: category,
 		GUID:     item.InfoHash.String(),

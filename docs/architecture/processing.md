@@ -118,16 +118,61 @@ the actual parsing: release groups, episode ranges, dates, resolutions, codecs.
 
 _Known defects and improvement ideas referenced above are kept as untracked `docs/issues/*.local.md` notes, which a given checkout may or may not have._
 
-## Read-only LLM enhancement experiments
+## LLM enhancement
 
 `internal/enhancement` is an independent bounded evaluator, with configuration,
-factory and `enhancementfx` registration. It takes evidence and an external model/TMDB
-client; it has no metadata application, queue, recipe registry or budget-ledger
-write dependency. The `enhancement evaluate` command loads visible catalogue evidence
+factory and `enhancementfx` registration. Its evaluator takes evidence and an external model/TMDB client without any database
+write dependency. The separate `enhancement.Application` service provides explicit
+single-torrent persistence through `Enhance`; it starts no scheduler or workers. The `enhancement evaluate` command loads visible catalogue evidence
 through a dedicated read-only PostgreSQL transaction, then calls that shared engine.
 It does not resolve the migration-decorated database or start workers. Process-local
 reservations bound concurrent experimental calls. Its command-specific lifecycle
 hook cancels reads and provider calls on application shutdown and waits for the active
 command to finish reporting; it does not change the shared CLI lifecycle. See [the operator guide](../enhancement.md)
-for selection, limits, accounting and JSON outcomes. Automatic enhancement and durable
-results are not implemented by this command.
+for selection, limits, accounting and JSON outcomes. This command still saves no evaluation or metadata. Automatic enhancement remains
+unavailable.
+
+Ordinary processor persistence now records actual completion in
+`classification_evaluations` under `(info_hash, ordinary)`, together with the ordinary
+classification snapshot and the immutable sanitized workflow recipe in `key_values`.
+Existing torrents receive no backfilled completion. The independent enhancement row
+retains the latest completed outcome and fingerprints, the current attempt generation
+and outcome, and accepted output separately. Failed/malformed attempts cannot erase
+accepted output; unresolved and limited completions suppress repeat calls for the same
+input/recipe. A newer admitted generation rejects an older completion.
+
+Reconstruction reads the ordinary snapshot before reusing sourced matches, then
+replays accepted enhancement only when its evidence fingerprint still matches. The
+fingerprint includes ordinary inferred title/year and excludes prior enhancement
+output, so results survive search-row replacement without triggering themselves.
+Shared work metadata comes from current catalogue rows, keeping reconstructed
+title/year search vectors current. Popularity and incidental timestamps do not enter
+fingerprints.
+The application transaction shares moderation advisory locks with ingestion and decision
+writes, locks the torrent, and rechecks current evidence and effective authority. Its
+context follows the original run deadline and cancellation even while waiting for locks,
+and completion checks the run again before committing. Model calls and TMDB detail retrieval happen before that short transaction. Hidden torrents,
+stale runs and canceled calls cannot apply late metadata.
+
+Supplied hint fields and existing catalogue identity are protected during normal
+enhancement. A hint supplying only type permits adding a compatible missing catalogue
+identity. Retention filters current/durable/ordinary candidates against supplied
+hint identity fields, so a newly imported ID or incompatible type supersedes stale
+enhancement authority. Accepted state binds catalogue authority to the supplied identity
+fields under which it was established: an unchanged hint already overridden by explicit
+rematch remains overridden, while changed fields must be honored. A newly classified
+provider work can be retained before its shared content is persisted in the same transaction.
+A catalogue identity attached by earlier enhancement is equally protected:
+force and fields-only updates retain it. Accepted state records that identity independently
+of ordinary evidence and search rows, including explicit detachment on rematch. Replay
+protects current identity; a past rematch does not authorize replacing a newer identity.
+Explicit ordinary rematch establishes its selected identity (including no match) before
+replay, even for equal input. It retires the previous identity proposal while retaining
+still-valid release fields. Changed inputs discard obsolete release fields and rebuild
+the effective search vector after retaining catalogue identity. Read-only and persistent evaluation both project the ordinary snapshot through
+`BuildEvidence`, with a legacy classification fallback only when no snapshot exists.
+Explicit rematch may override supplied values without rewriting hints. Release languages and
+episodes remain separate from shared work identity. Accepted generated tags replace
+only the configured reserved set atomically. Search/display year and title prefer
+catalogue values, falling back to retained inferred values without synthetic content
+rows. The torrent retains its original name.

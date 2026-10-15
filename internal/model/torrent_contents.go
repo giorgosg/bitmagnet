@@ -29,19 +29,25 @@ func (tc TorrentContent) InferID() string {
 }
 
 func (tc TorrentContent) Title() string {
-	if !tc.ContentID.Valid || tc.Content.Title == "" {
+	title := tc.Content.Title
+	if title == "" {
+		title = tc.InferredTitle
+	}
+
+	if title == "" {
 		return tc.Torrent.Name
 	}
 
 	var titleParts []string
 
-	titleParts = append(titleParts, tc.Content.Title)
-	if tc.Content.OriginalTitle.Valid && tc.Content.Title != tc.Content.OriginalTitle.String {
+	titleParts = append(titleParts, title)
+	if tc.Content.OriginalTitle.Valid && tc.Content.OriginalTitle.String != "" &&
+		tc.Content.Title != tc.Content.OriginalTitle.String {
 		titleParts = append(titleParts, fmt.Sprintf("/ %s", tc.Content.OriginalTitle.String))
 	}
 
-	if !tc.Content.ReleaseYear.IsNil() {
-		titleParts = append(titleParts, fmt.Sprintf("(%d)", tc.Content.ReleaseYear))
+	if year := tc.ReleaseYear(); !year.IsNil() {
+		titleParts = append(titleParts, fmt.Sprintf("(%d)", year))
 	}
 
 	if len(tc.Episodes) > 0 {
@@ -49,6 +55,14 @@ func (tc TorrentContent) Title() string {
 	}
 
 	return strings.Join(titleParts, " ")
+}
+
+func (tc TorrentContent) ReleaseYear() Year {
+	if !tc.Content.ReleaseYear.IsNil() {
+		return tc.Content.ReleaseYear
+	}
+
+	return tc.InferredYear
 }
 
 func (tc TorrentContent) ContentRef() Maybe[ContentRef] {
@@ -69,6 +83,14 @@ func (tc *TorrentContent) UpdateTsv() {
 		tsv = fts.Tsvector{}
 	} else {
 		tsv = tc.Content.Tsv.Copy()
+	}
+
+	if tc.Content.Title == "" && tc.InferredTitle != "" {
+		tsv.AddText(tc.InferredTitle, fts.TsvectorWeightA)
+	}
+
+	if tc.Content.ReleaseYear.IsNil() && !tc.InferredYear.IsNil() {
+		tsv.AddText(tc.InferredYear.String(), fts.TsvectorWeightB)
 	}
 
 	if tc.VideoResolution.Valid {

@@ -40,7 +40,12 @@ func newModerationFixture(
 	})
 
 	pr := processor.New(processor.Params{
-		Moderation: lm, ClassifierConfig: cfg, Search: sr.Search, Workflow: cr.Runner, Dao: ld,
+		Moderation:       lm,
+		ClassifierConfig: cfg,
+		Search:           sr.Search,
+		Workflow:         cr.Runner,
+		ClassifierSource: cr.Source,
+		Dao:              ld,
 	})
 
 	p, err := pr.Processor.Get()

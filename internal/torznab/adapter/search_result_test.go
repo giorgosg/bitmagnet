@@ -74,3 +74,20 @@ func torznabAttribute(item torznab.SearchResultItem, name string) string {
 
 	return ""
 }
+
+func TestTorznabUsesInferredYearAndDisplayTitleWithCataloguePrecedence(t *testing.T) {
+	t.Parallel()
+
+	tc := model.TorrentContent{
+		Torrent:       model.Torrent{Name: "original.release"},
+		InferredTitle: "Hidden Orchard",
+		InferredYear:  1998,
+	}
+	result := torrentContentResultItemToTorznabResultItem(search.TorrentContentResultItem{TorrentContent: tc})
+	require.Equal(t, "1998", torznabAttribute(result, torznab.AttrYear))
+	require.Equal(t, "Hidden Orchard (1998)", result.Title)
+	tc.Content = model.Content{Title: "Catalog Orchard", ReleaseYear: 2001}
+	result = torrentContentResultItemToTorznabResultItem(search.TorrentContentResultItem{TorrentContent: tc})
+	require.Equal(t, "2001", torznabAttribute(result, torznab.AttrYear))
+	require.Equal(t, "Catalog Orchard (2001)", result.Title)
+}
