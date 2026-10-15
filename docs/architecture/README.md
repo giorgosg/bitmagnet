@@ -63,30 +63,31 @@ run as a set of registered workers.
 
 ## Where the code lives
 
-| Path                    | Role                                                               |
-| ----------------------- | ------------------------------------------------------------------ |
-| `main.go`               | Four lines: build the fx app and run it                            |
-| `internal/app/`         | fx assembly (`appfx`), CLI commands (`cmd/`), urfave/cli glue      |
-| `internal/dhtcrawler/`  | The ingest pipeline — see [ingest.md](ingest.md)                   |
-| `internal/protocol/`    | DHT protocol, k-table, metainfo/BEP-9 client                       |
-| `internal/queue/`       | Postgres job queue: manager, server, handler                       |
-| `internal/processor/`   | Turns a torrent into a `torrent_contents` row                      |
-| `internal/classifier/`  | CEL + `.ryml` rule engine that decides what a torrent is           |
-| `internal/database/`    | GORM setup, generated dao/query, search criteria, full-text search |
-| `internal/model/`       | GORM models and the enum/null types the whole tree passes around   |
-| `internal/gql/`         | gqlgen GraphQL server (`gql.gen.go` is ~24k generated lines)       |
-| `internal/torznab/`     | Torznab/Newznab indexer API — the \*arr surface                    |
-| `internal/httpserver/`  | gin engine, middleware, option registration                        |
-| `internal/auth/`        | Identity, RBAC, API keys, JWT, users — see [auth.md](auth.md)      |
-| `internal/importer/`    | Bulk import path, used by external importers                       |
-| `internal/moderation/`  | Exact decisions, keyword quarantine and catalogue visibility       |
-| `internal/health/`      | Health checks reported over GraphQL                                |
-| `internal/worker/`      | The registry every long-running thing registers with               |
-| `internal/concurrency/` | Batching channels, buffered concurrent channels, keyed limiters    |
-| `internal/lazy/`        | `lazy.Lazy[T]`, how fx factories defer expensive construction      |
-| `pkg/json_schema/`      | JSON schema types, used by `internal/config/param`                 |
-| `migrations/`           | Goose SQL migrations, `00001`–`00027`                              |
-| `graphql/`              | Schema and operations — the _source_ for `internal/gql`            |
+| Path                    | Role                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------ |
+| `main.go`               | Four lines: build the fx app and run it                                        |
+| `internal/app/`         | fx assembly (`appfx`), CLI commands (`cmd/`), urfave/cli glue                  |
+| `internal/dhtcrawler/`  | The ingest pipeline — see [ingest.md](ingest.md)                               |
+| `internal/protocol/`    | DHT protocol, k-table, metainfo/BEP-9 client                                   |
+| `internal/queue/`       | Postgres job queue: manager, server, handler                                   |
+| `internal/processor/`   | Turns a torrent into a `torrent_contents` row                                  |
+| `internal/enhancement/` | Bounded read-only LLM metadata evaluation — see [processing.md](processing.md) |
+| `internal/classifier/`  | CEL + `.ryml` rule engine that decides what a torrent is                       |
+| `internal/database/`    | GORM setup, generated dao/query, search criteria, full-text search             |
+| `internal/model/`       | GORM models and the enum/null types the whole tree passes around               |
+| `internal/gql/`         | gqlgen GraphQL server (`gql.gen.go` is ~24k generated lines)                   |
+| `internal/torznab/`     | Torznab/Newznab indexer API — the \*arr surface                                |
+| `internal/httpserver/`  | gin engine, middleware, option registration                                    |
+| `internal/auth/`        | Identity, RBAC, API keys, JWT, users — see [auth.md](auth.md)                  |
+| `internal/importer/`    | Bulk import path, used by external importers                                   |
+| `internal/moderation/`  | Exact decisions, keyword quarantine and catalogue visibility                   |
+| `internal/health/`      | Health checks reported over GraphQL                                            |
+| `internal/worker/`      | The registry every long-running thing registers with                           |
+| `internal/concurrency/` | Batching channels, buffered concurrent channels, keyed limiters                |
+| `internal/lazy/`        | `lazy.Lazy[T]`, how fx factories defer expensive construction                  |
+| `pkg/json_schema/`      | JSON schema types, used by `internal/config/param`                             |
+| `migrations/`           | Goose SQL migrations, `00001`–`00027`                                          |
+| `graphql/`              | Schema and operations — the _source_ for `internal/gql`                        |
 
 The `static` HTTP component serves the bundled Elm UI by default in release builds,
 or an external UI from a configured directory. Backend-only Go builds omit the bundle.

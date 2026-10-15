@@ -117,3 +117,17 @@ the actual parsing: release groups, episode ranges, dates, resolutions, codecs.
 ---
 
 _Known defects and improvement ideas referenced above are kept as untracked `docs/issues/*.local.md` notes, which a given checkout may or may not have._
+
+## Read-only LLM enhancement experiments
+
+`internal/enhancement` is an independent bounded evaluator, with configuration,
+factory and `enhancementfx` registration. It takes evidence and an external model/TMDB
+client; it has no metadata application, queue, recipe registry or budget-ledger
+write dependency. The `enhancement evaluate` command loads visible catalogue evidence
+through a dedicated read-only PostgreSQL transaction, then calls that shared engine.
+It does not resolve the migration-decorated database or start workers. Process-local
+reservations bound concurrent experimental calls. Its command-specific lifecycle
+hook cancels reads and provider calls on application shutdown and waits for the active
+command to finish reporting; it does not change the shared CLI lifecycle. See [the operator guide](../enhancement.md)
+for selection, limits, accounting and JSON outcomes. Automatic enhancement and durable
+results are not implemented by this command.
