@@ -89,7 +89,23 @@ func (s *Application) Enhance(
 		return Evaluation{}, errors.New("enhancement engine is required")
 	}
 
+	if a := automaticAccounting(ctx); a != nil {
+		updated := s.db.WithContext(ctx).
+			Exec(`UPDATE enhancement_claims SET generation = ?, input_fingerprint = ?, recipe_fingerprint = ? WHERE
+token = ? AND expires_at > now()`, run.generation, run.InputFingerprint, run.recipeFingerprint, a.claim)
+		if updated.Error != nil {
+			return Evaluation{}, updated.Error
+		}
+
+		if updated.RowsAffected != 1 {
+			return Evaluation{}, ErrLease
+		}
+	}
+
 	result := s.engine.Evaluate(ctx, run.Evidence)
+	if result.Outcome == OutcomeDeferred {
+		return result, nil
+	}
 
 	var content *model.Content
 	if result.Outcome == OutcomeAccepted && result.Result != nil && result.Result.Work != nil {
@@ -310,6 +326,15 @@ func (s *Application) Prepare(
 			return ErrEvaluated
 		}
 
+		if automaticAccounting(ctx) != nil && !force && !rematch &&
+			state.AttemptInput == run.InputFingerprint &&
+			state.AttemptRecipe == recipe &&
+			(state.AttemptOutcome == OutcomeProviderFailure || state.AttemptOutcome == OutcomeMalformed) {
+			return ErrEvaluated
+		}
+
+		state.AttemptInput = run.InputFingerprint
+		state.AttemptRecipe = recipe
 		state.Generation++
 		state.AttemptOutcome = "running"
 		state.AttemptedAt = sql.NullTime{Time: time.Now().UTC(), Valid: true}
@@ -364,6 +389,20 @@ func (s *Application) Complete(
 			First(&state).
 			Error; err != nil {
 			return err
+		}
+
+		if a := automaticAccounting(ctx); a != nil {
+			var active int64
+			if err := tx.Table("enhancement_claims").
+				Where("token = ? AND expires_at > now()", a.claim).
+				Count(&active).
+				Error; err != nil {
+				return err
+			}
+
+			if active != 1 {
+				return ErrLease
+			}
 		}
 
 		if state.Generation != run.generation {

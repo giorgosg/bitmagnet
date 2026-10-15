@@ -71,7 +71,7 @@ run as a set of registered workers.
 | `internal/protocol/`    | DHT protocol, k-table, metainfo/BEP-9 client                                   |
 | `internal/queue/`       | Postgres job queue: manager, server, handler                                   |
 | `internal/processor/`   | Turns a torrent into a `torrent_contents` row                                  |
-| `internal/enhancement/` | Bounded read-only LLM metadata evaluation — see [processing.md](processing.md) |
+| `internal/enhancement/` | Bounded LLM metadata enhancement workflow — see [processing.md](processing.md) |
 | `internal/classifier/`  | CEL + `.ryml` rule engine that decides what a torrent is                       |
 | `internal/database/`    | GORM setup, generated dao/query, search criteria, full-text search             |
 | `internal/model/`       | GORM models and the enum/null types the whole tree passes around               |
@@ -86,7 +86,7 @@ run as a set of registered workers.
 | `internal/concurrency/` | Batching channels, buffered concurrent channels, keyed limiters                |
 | `internal/lazy/`        | `lazy.Lazy[T]`, how fx factories defer expensive construction                  |
 | `pkg/json_schema/`      | JSON schema types, used by `internal/config/param`                             |
-| `migrations/`           | Goose SQL migrations, `00001`–`00027`                                          |
+| `migrations/`           | Goose SQL migrations, `00001`–`00029`                                          |
 | `graphql/`              | Schema and operations — the _source_ for `internal/gql`                        |
 
 The `static` HTTP component serves the bundled Elm UI by default in release builds,

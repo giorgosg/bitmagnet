@@ -206,9 +206,45 @@ func (e *Evaluator) Evaluate(parent context.Context, evidence Evidence) (result 
 			return result
 		}
 
+		accounting := automaticAccounting(ctx)
+		reservation := ""
+
+		if accounting != nil {
+			var reserveErr error
+
+			reservation, reserveErr = accounting.reserve(ctx, reservedCost)
+			if reserveErr != nil {
+				e.reconcile(remaining, 0, reservedCost, 0)
+
+				result.Outcome = OutcomeDeferred
+				// Once a request was made, a budget interruption completes this
+				// attempt as limited; a restart must not reset its effective caps.
+				if result.Usage.Requests > 0 {
+					result.Outcome = OutcomeLimited
+				}
+
+				result.Error = reserveErr.Error()
+
+				return result
+			}
+		}
+
 		result.Usage.Requests++
 
 		reply, status, requestErr := e.request(ctx, body)
+
+		knownUsage := reply.Usage != nil && reply.Usage.PromptTokens != nil &&
+			reply.Usage.CompletionTokens != nil && *reply.Usage.PromptTokens >= 0 &&
+			*reply.Usage.CompletionTokens >= 0 && reply.Usage.Details.ReasoningTokens >= 0
+		if accounting != nil && (requestErr != nil || !knownUsage) {
+			if settleErr := accounting.settle(ctx, reservation, nil, status); settleErr != nil {
+				result.Outcome = OutcomeProviderFailure
+				result.Error = "shared accounting unavailable"
+
+				return result
+			}
+		}
+
 		if requestErr != nil {
 			// Unknown usage remains charged at the full reservation: a timed-out request may be billed.
 			e.accountUnknownUsage(&result.Usage, remaining, reservedCost)
@@ -248,9 +284,7 @@ func (e *Evaluator) Evaluate(parent context.Context, evidence Evidence) (result 
 			return result
 		}
 
-		if reply.Usage == nil || reply.Usage.PromptTokens == nil || reply.Usage.CompletionTokens == nil ||
-			*reply.Usage.PromptTokens < 0 || *reply.Usage.CompletionTokens < 0 ||
-			reply.Usage.Details.ReasoningTokens < 0 {
+		if !knownUsage {
 			e.accountUnknownUsage(&result.Usage, remaining, reservedCost)
 			result.Outcome = OutcomeProviderFailure
 			result.Error = "missing or invalid billed usage"
@@ -270,6 +304,15 @@ func (e *Evaluator) Evaluate(parent context.Context, evidence Evidence) (result 
 		)*e.config.InputCostPerMillion/1e6 + float64(
 			billed,
 		)*e.config.OutputCostPerMillion/1e6
+		if accounting != nil {
+			if settleErr := accounting.settle(ctx, reservation, &actualCost, status); settleErr != nil {
+				result.Outcome = OutcomeProviderFailure
+				result.Error = "shared accounting unavailable"
+
+				return result
+			}
+		}
+
 		e.reconcile(remaining, billed, reservedCost, actualCost)
 
 		result.Usage.InputTokens += *reply.Usage.PromptTokens

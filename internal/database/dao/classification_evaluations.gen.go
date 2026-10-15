@@ -28,6 +28,8 @@ func newClassificationEvaluation(db *gorm.DB, opts ...gen.DOOption) classificati
 
 	tableName := _classificationEvaluation.classificationEvaluationDo.TableName()
 	_classificationEvaluation.ALL = field.NewAsterisk(tableName)
+	_classificationEvaluation.AttemptInput = field.NewString(tableName, "attempt_input")
+	_classificationEvaluation.AttemptRecipe = field.NewString(tableName, "attempt_recipe")
 	_classificationEvaluation.InfoHash = field.NewField(tableName, "info_hash")
 	_classificationEvaluation.Stage = field.NewString(tableName, "stage")
 	_classificationEvaluation.InputFingerprint = field.NewString(tableName, "input_fingerprint")
@@ -50,6 +52,8 @@ type classificationEvaluation struct {
 	classificationEvaluationDo
 
 	ALL               field.Asterisk
+	AttemptInput      field.String
+	AttemptRecipe     field.String
 	InfoHash          field.Field
 	Stage             field.String
 	InputFingerprint  field.String
@@ -78,6 +82,8 @@ func (c classificationEvaluation) As(alias string) *classificationEvaluation {
 
 func (c *classificationEvaluation) updateTableName(table string) *classificationEvaluation {
 	c.ALL = field.NewAsterisk(table)
+	c.AttemptInput = field.NewString(table, "attempt_input")
+	c.AttemptRecipe = field.NewString(table, "attempt_recipe")
 	c.InfoHash = field.NewField(table, "info_hash")
 	c.Stage = field.NewString(table, "stage")
 	c.InputFingerprint = field.NewString(table, "input_fingerprint")
@@ -106,7 +112,9 @@ func (c *classificationEvaluation) GetFieldByName(fieldName string) (field.Order
 }
 
 func (c *classificationEvaluation) fillFieldMap() {
-	c.fieldMap = make(map[string]field.Expr, 12)
+	c.fieldMap = make(map[string]field.Expr, 14)
+	c.fieldMap["attempt_input"] = c.AttemptInput
+	c.fieldMap["attempt_recipe"] = c.AttemptRecipe
 	c.fieldMap["info_hash"] = c.InfoHash
 	c.fieldMap["stage"] = c.Stage
 	c.fieldMap["input_fingerprint"] = c.InputFingerprint

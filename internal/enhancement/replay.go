@@ -66,7 +66,7 @@ func OrdinarySnapshot(tx *gorm.DB, t *model.Torrent) error {
 
 // RecordOrdinary records a real completed classification and reconstructs its
 // effective row with still-valid accepted enhancement in the caller's transaction.
-// Call after LockTorrent and before writing the search row. No scheduling occurs.
+// Call after LockTorrent and before writing the search row. Readiness commits with classification.
 func RecordOrdinary(tx *gorm.DB, t model.Torrent, tc *model.TorrentContent, recipe string, rematch bool) error {
 	current, err := loadTorrent(tx, t.InfoHash)
 	if err != nil {
@@ -132,6 +132,13 @@ func RecordOrdinary(tx *gorm.DB, t model.Torrent, tc *model.TorrentContent, reci
 	}
 
 	if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&state).Error; err != nil {
+		return err
+	}
+
+	if err := tx.Exec(
+		"UPDATE torrents SET enhancement_ready = true WHERE info_hash = ?",
+		t.InfoHash,
+	).Error; err != nil {
 		return err
 	}
 

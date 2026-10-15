@@ -119,6 +119,14 @@ func BuildGenerator(db *gorm.DB) *gen.Generator {
 	)
 	torrents := g.GenerateModel(
 		"torrents",
+		// Scheduling hints belong to SQL admission/trigger code. Generic torrent
+		// upserts must never reset readiness or the live source ranking.
+		gen.FieldIgnore(
+			"enhancement_ready",
+			"enhancement_recent",
+			"enhancement_seeders",
+			"enhancement_checked_at",
+		),
 		gen.FieldRelate(
 			field.HasOne,
 			"Hint",
