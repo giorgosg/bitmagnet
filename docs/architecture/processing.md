@@ -156,7 +156,13 @@ stale runs and canceled calls cannot apply late metadata.
 
 Supplied hint fields and existing catalogue identity are protected during normal
 enhancement. A hint supplying only type permits adding a compatible missing catalogue
-identity. A catalogue identity attached by earlier enhancement is equally protected:
+identity. Retention filters current/durable/ordinary candidates against supplied
+hint identity fields, so a newly imported ID or incompatible type supersedes stale
+enhancement authority. Accepted state binds catalogue authority to the supplied identity
+fields under which it was established: an unchanged hint already overridden by explicit
+rematch remains overridden, while changed fields must be honored. A newly classified
+provider work can be retained before its shared content is persisted in the same transaction.
+A catalogue identity attached by earlier enhancement is equally protected:
 force and fields-only updates retain it. Accepted state records that identity independently
 of ordinary evidence and search rows, including explicit detachment on rematch. Replay
 protects current identity; a past rematch does not authorize replacing a newer identity.

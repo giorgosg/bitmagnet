@@ -670,3 +670,125 @@ func TestRetainedCatalogueIdentityRemainsSearchableAfterEvidenceChanges(t *testi
 	require.NoError(t, err)
 	require.Empty(t, rows.Items, "superseded inferred title must not remain in the effective vector")
 }
+
+func TestNewImporterHintsSupersedeIncompatibleEnhancementAuthority(t *testing.T) {
+	t.Parallel()
+
+	for _, scenario := range []string{"supplied_identity", "conflicting_type", "compatible_type_only"} {
+		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
+			db := dbtest.New(t)
+			hash := protocol.ID{76}
+			require.NoError(
+				t,
+				db.Gorm.Create(
+					&model.Torrent{
+						InfoHash:    hash,
+						Name:        "opaque",
+						FilesStatus: model.FilesStatusSingle,
+					},
+				).Error,
+			)
+
+			sr := search.New(
+				search.Params{Query: lazy.New(func() (*dao.Query, error) { return db.Query, nil })},
+			)
+			searcher, err := sr.Search.Get()
+			require.NoError(t, err)
+
+			p := processor{
+				defaultWorkflow: "default",
+				search:          searcher,
+				runner:          &ordinaryTitleRunner{title: "Ordinary", year: 1984},
+				dao:             db.Query,
+			}
+			require.NoError(t, p.Process(t.Context(), MessageParams{InfoHashes: []protocol.ID{hash}}))
+
+			app := enhancement.NewApplication(db.Gorm, nil, nil, enhancement.NewDefaultConfig())
+			run, err := app.Prepare(t.Context(), hash, false, false)
+			require.NoError(t, err)
+
+			a := model.Content{
+				Type:        model.ContentTypeMovie,
+				Source:      model.SourceTmdb,
+				ID:          "10",
+				Title:       "Enhanced Orchard",
+				ReleaseYear: 2001,
+			}
+			a.UpdateTsv()
+
+			accepted := enhancement.Evaluation{
+				Outcome: enhancement.OutcomeAccepted,
+				Result: &enhancement.Metadata{
+					Type: enhancement.WorkMovie,
+					Work: &enhancement.Work{Type: enhancement.WorkMovie, ID: 10},
+				},
+			}
+			require.NoError(t, app.Complete(t.Context(), run, accepted, &a))
+
+			hint := model.TorrentHint{InfoHash: hash, ContentType: model.ContentTypeMovie}
+			expectedID := "10"
+			expectedType := model.ContentTypeMovie
+			p.runner = &hintPreservingRunner{}
+
+			switch scenario {
+			case "supplied_identity":
+				c := model.Content{
+					Type:        model.ContentTypeMovie,
+					Source:      model.SourceTmdb,
+					ID:          "30",
+					Title:       "Imported Cedar",
+					ReleaseYear: 2003,
+				}
+				c.UpdateTsv()
+
+				hint.ContentSource = model.NewNullString(model.SourceTmdb)
+				hint.ContentID = model.NewNullString("30")
+				expectedID = "30"
+				p.runner = &catalogueResultRunner{content: c}
+			case "conflicting_type":
+				hint.ContentType = model.ContentTypeTvShow
+				expectedType = model.ContentTypeTvShow
+				expectedID = ""
+			}
+
+			require.NoError(t, db.Gorm.Create(&hint).Error)
+
+			for range 2 {
+				require.NoError(
+					t,
+					p.Process(t.Context(), MessageParams{InfoHashes: []protocol.ID{hash}}),
+				)
+
+				var got model.TorrentContent
+				require.NoError(t, db.Gorm.Where("info_hash = ?", hash).First(&got).Error)
+				require.Equal(t, expectedType, got.ContentType.ContentType)
+				require.Equal(
+					t,
+					expectedID,
+					got.ContentID.String,
+					"new supplied authority must precede retained enhancement",
+				)
+				require.NoError(
+					t,
+					db.Gorm.Where("info_hash = ?", hash).Delete(&model.TorrentContent{}).Error,
+				)
+			}
+			// A new forced enhancement also observes the same supplied-field authority.
+			run, err = app.Prepare(t.Context(), hash, true, false)
+			require.NoError(t, err)
+			require.NoError(t, app.Complete(t.Context(), run, accepted, &a))
+
+			var got model.TorrentContent
+			require.NoError(t, db.Gorm.Where("info_hash = ?", hash).First(&got).Error)
+			require.Equal(t, expectedType, got.ContentType.ContentType)
+			require.Equal(t, expectedID, got.ContentID.String)
+
+			var unchangedHint model.TorrentHint
+			require.NoError(t, db.Gorm.Where("info_hash = ?", hash).First(&unchangedHint).Error)
+			require.Equal(t, hint.ContentType, unchangedHint.ContentType)
+			require.Equal(t, hint.ContentSource, unchangedHint.ContentSource)
+			require.Equal(t, hint.ContentID, unchangedHint.ContentID)
+		})
+	}
+}

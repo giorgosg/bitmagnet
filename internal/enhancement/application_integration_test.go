@@ -1125,3 +1125,97 @@ func TestOrdinaryReplayAuthorityTransitions(t *testing.T) {
 		}
 	}
 }
+
+func TestNewHintAuthorityAfterAnExplicitEnhancementRematch(t *testing.T) {
+	t.Parallel()
+	db, app, hash := applicationFixture(t)
+	hint := model.TorrentHint{InfoHash: hash, ContentType: model.ContentTypeMovie}
+	require.NoError(t, db.Gorm.Create(&hint).Error)
+
+	var torrent model.Torrent
+	require.NoError(t, db.Gorm.Preload("Hint").Where("info_hash = ?", hash).First(&torrent).Error)
+	baseline := model.TorrentContent{InfoHash: hash, ContentType: model.NewNullContentType(model.ContentTypeMovie)}
+
+	require.NoError(
+		t,
+		db.Gorm.Transaction(
+			func(tx *gorm.DB) error { return RecordOrdinary(tx, torrent, &baseline, "test", false) },
+		),
+	)
+	run, err := app.Prepare(t.Context(), hash, true, true)
+	require.NoError(t, err)
+
+	work := model.Content{
+		Type:   model.ContentTypeTvShow,
+		Source: model.SourceTmdb,
+		ID:     "20",
+		Title:  "Explicitly rematched series",
+	}
+	work.UpdateTsv()
+	require.NoError(
+		t,
+		app.Complete(
+			t.Context(),
+			run,
+			Evaluation{
+				Outcome: OutcomeAccepted,
+				Result:  &Metadata{Type: WorkSeries, Work: &Work{Type: WorkSeries, ID: 20}},
+			},
+			&work,
+		),
+	)
+
+	replayed := baseline
+
+	require.NoError(
+		t,
+		db.Gorm.Transaction(
+			func(tx *gorm.DB) error { return RecordOrdinary(tx, torrent, &replayed, "test", false) },
+		),
+	)
+	require.Equal(t, "20", replayed.ContentID.String, "unchanged supplied hint must not undo an authorized rematch")
+	// A later fields-only result must preserve that established authority too.
+	run, err = app.Prepare(t.Context(), hash, true, false)
+	require.NoError(t, err)
+	require.NoError(
+		t,
+		app.Complete(
+			t.Context(),
+			run,
+			Evaluation{Outcome: OutcomeAccepted, Result: &Metadata{ReleaseGroup: "new-group"}},
+			nil,
+		),
+	)
+	require.NoError(t, db.Gorm.Where("info_hash = ?", hash).Delete(&model.TorrentContent{}).Error)
+
+	replayed = baseline
+
+	require.NoError(
+		t,
+		db.Gorm.Transaction(
+			func(tx *gorm.DB) error { return RecordOrdinary(tx, torrent, &replayed, "test", false) },
+		),
+	)
+	require.Equal(t, "20", replayed.ContentID.String)
+	require.Equal(t, "new-group", replayed.ReleaseGroup.String)
+	require.NoError(t, db.Gorm.Omit(clause.Associations).Create(&replayed).Error)
+	// Newly supplied identity fields supersede the earlier override permission.
+	hint.ContentType = model.ContentTypeGame
+	require.NoError(t, db.Gorm.Create(&hint).Error)
+	require.NoError(t, db.Gorm.Preload("Hint").Where("info_hash = ?", hash).First(&torrent).Error)
+
+	baseline = model.TorrentContent{InfoHash: hash, ContentType: model.NewNullContentType(model.ContentTypeGame)}
+	for range 2 {
+		replayed = baseline
+
+		require.NoError(
+			t,
+			db.Gorm.Transaction(
+				func(tx *gorm.DB) error { return RecordOrdinary(tx, torrent, &replayed, "test", false) },
+			),
+		)
+		require.Equal(t, model.ContentTypeGame, replayed.ContentType.ContentType)
+		require.False(t, replayed.ContentID.Valid)
+		require.NoError(t, db.Gorm.Where("info_hash = ?", hash).Delete(&model.TorrentContent{}).Error)
+	}
+}

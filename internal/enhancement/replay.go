@@ -171,6 +171,7 @@ func RecordOrdinary(tx *gorm.DB, t model.Torrent, tc *model.TorrentContent, reci
 		output.Metadata.Work = nil
 		output.Metadata.MixedWorks = false
 		output.Catalog = catalogIdentityFor(*tc)
+		output.CatalogHint = catalogHintFor(current.Hint)
 
 		data, err := json.Marshal(output)
 		if err != nil {
@@ -191,7 +192,7 @@ func RecordOrdinary(tx *gorm.DB, t model.Torrent, tc *model.TorrentContent, reci
 				catalog = nil
 			}
 
-			if err := retainCatalog(tx, current, tc, catalog); err != nil {
+			if err := retainCatalog(tx, current, tc, catalog, output.CatalogHint); err != nil {
 				return err
 			}
 		}
@@ -199,6 +200,7 @@ func RecordOrdinary(tx *gorm.DB, t model.Torrent, tc *model.TorrentContent, reci
 		tc.Torrent = current
 		tc.UpdateTsv()
 		output.Catalog = catalogIdentityFor(*tc)
+		output.CatalogHint = catalogHintFor(current.Hint)
 
 		data, err := json.Marshal(output)
 		if err != nil {
@@ -256,7 +258,7 @@ func applyAccepted(
 
 	protect := !output.Rematch
 	if mode == preserveCatalog {
-		if err := retainCatalog(tx, t, tc, output.Catalog); err != nil {
+		if err := retainCatalog(tx, t, tc, output.Catalog, output.CatalogHint); err != nil {
 			return err
 		}
 	}
@@ -407,6 +409,7 @@ func applyAccepted(
 	tc.Torrent = t
 	tc.UpdateTsv()
 	output.Catalog = catalogIdentityFor(*tc)
+	output.CatalogHint = catalogHintFor(t.Hint)
 
 	b, err := json.Marshal(output)
 	if err != nil {
@@ -427,9 +430,9 @@ func decodeOrdinary(data string) (model.TorrentContent, error) {
 	return tc, err
 }
 
-// Catalogue authority is independent of ordinary evidence and replaceable search rows.
-// Prefer the current effective identity, then the durable identity retained on acceptance.
-func retainCatalog(tx *gorm.DB, t model.Torrent, tc *model.TorrentContent, fallback *catalogIdentity) error {
+// Supplied identity fields veto incompatible retained matches. An unchanged hint
+// already superseded by explicit rematch stays superseded until those fields change.
+func retainCatalog(tx *gorm.DB, t model.Torrent, tc *model.TorrentContent, fallback, priorHint *catalogIdentity) error {
 	var current model.TorrentContent
 
 	err := tx.Where("info_hash = ?", t.InfoHash).Order("id").First(&current).Error
@@ -437,18 +440,21 @@ func retainCatalog(tx *gorm.DB, t model.Torrent, tc *model.TorrentContent, fallb
 		return err
 	}
 
-	identity := fallback
-	if identity == nil {
-		if ref := tc.ContentRef(); ref.Valid {
-			identity = &catalogIdentity{Type: ref.Val.Type.String(), Source: ref.Val.Source, ID: ref.Val.ID}
-		}
+	hint := catalogHintFor(t.Hint)
+	overridden := priorHint != nil && *priorHint == *hint && fallback != nil &&
+		!catalogCompatibleWithHint(fallback, t.Hint)
+
+	candidates := []*catalogIdentity{fallback, catalogIdentityFor(*tc), hint}
+	if err == nil && current.ContentID.Valid {
+		candidates = append([]*catalogIdentity{catalogIdentityFor(current)}, candidates...)
 	}
 
-	if err == nil && current.ContentID.Valid {
-		identity = &catalogIdentity{
-			Type:   current.ContentType.ContentType.String(),
-			Source: current.ContentSource.String,
-			ID:     current.ContentID.String,
+	var identity *catalogIdentity
+
+	for _, candidate := range candidates {
+		if candidate != nil && (overridden || catalogCompatibleWithHint(candidate, t.Hint)) {
+			identity = candidate
+			break
 		}
 	}
 
@@ -458,11 +464,17 @@ func retainCatalog(tx *gorm.DB, t model.Torrent, tc *model.TorrentContent, fallb
 
 	var content model.Content
 	if identity.ID != "" {
-		if err := tx.Preload("Attributes").
+		err := tx.Preload("Attributes").
 			Preload("Collections").
 			Where("type = ? AND source = ? AND id = ?", identity.Type, identity.Source, identity.ID).
 			First(&content).
-			Error; err != nil {
+			Error
+		if errors.Is(err, gorm.ErrRecordNotFound) && tc.Content.ID == identity.ID &&
+			tc.Content.Source == identity.Source &&
+			tc.Content.Type.String() == identity.Type {
+			// A freshly classified provider work is persisted later in this transaction.
+			content = tc.Content
+		} else if err != nil {
 			return err
 		}
 	}
@@ -482,4 +494,23 @@ func retainCatalog(tx *gorm.DB, t model.Torrent, tc *model.TorrentContent, fallb
 	tc.Content = content
 
 	return nil
+}
+
+func catalogHintFor(h model.TorrentHint) *catalogIdentity {
+	hint := &catalogIdentity{Type: h.ContentType.String()}
+	if h.ContentSource.Valid {
+		hint.Source = h.ContentSource.String
+	}
+
+	if h.ContentID.Valid {
+		hint.ID = h.ContentID.String
+	}
+
+	return hint
+}
+
+func catalogCompatibleWithHint(identity *catalogIdentity, h model.TorrentHint) bool {
+	return (h.IsNil() || identity.Type == h.ContentType.String()) &&
+		(!h.ContentSource.Valid || identity.Source == h.ContentSource.String) &&
+		(!h.ContentID.Valid || identity.ID == h.ContentID.String)
 }

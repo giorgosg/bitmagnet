@@ -49,7 +49,9 @@ with cascading deletion, independently of replaceable search rows. Ordinary comp
 stores its pre-enhancement snapshot; enhancement completion, attempt generation/outcome
 and retained accepted output are separate state. Accepted output separately retains effective
 catalogue authority, including identities attached by enhancement and explicit detachments;
-this authority never enters the ordinary snapshot or evidence. Immutable sanitized recipes live under
+this authority never enters the ordinary snapshot or evidence. It also retains the supplied
+hint identity fields present when that authority was established, distinguishing a new
+importer decision from an unchanged hint previously overridden by explicit rematch. Immutable sanitized recipes live under
 `classifier-recipe/<sha256>` in `key_values`. Neither internal table is included in
 ordinary catalogue exports. See [ADR 0009](../adr/0009-keep-classification-evaluations-independent-of-search-rows.md).
 

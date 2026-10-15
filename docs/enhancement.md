@@ -149,7 +149,11 @@ catalogue identity are protected; a type-only hint permits adding a compatible a
 catalogue identity. This includes a work attached by an earlier enhancement: force
 alone cannot replace or drop it, and a later fields-only result retains it. The retained
 identity lives with accepted state so reconstruction also works after search-row deletion.
+Newly supplied hint type/source/ID takes precedence over incompatible retained
+identity. A compatible type-only hint still permits retaining or filling a missing ID.
 An explicit rematch request may replace supplied values or remove a work match.
+Accepted authority remembers the hint identity fields it superseded, so an unchanged
+hint does not undo that rematch; changing those fields establishes new supplied authority.
 Stored hint title/year now participate in ordinary classification. Accepted inferred
 title/year remains searchable and displayable without a catalogue match. Catalogue
 values take precedence in display, Release Year facets and Torznab. Original torrent

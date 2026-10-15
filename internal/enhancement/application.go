@@ -58,11 +58,12 @@ type catalogIdentity struct {
 }
 
 type acceptedOutput struct {
-	Catalog  *catalogIdentity `json:"catalog,omitempty"`
-	Recipe   string           `json:"recipe"`
-	Metadata Metadata         `json:"metadata"`
-	Rematch  bool             `json:"rematch"`
-	Tags     []string         `json:"reservedTags"`
+	Catalog     *catalogIdentity `json:"catalog,omitempty"`
+	CatalogHint *catalogIdentity `json:"catalogHint,omitempty"`
+	Recipe      string           `json:"recipe"`
+	Metadata    Metadata         `json:"metadata"`
+	Rematch     bool             `json:"rematch"`
+	Tags        []string         `json:"reservedTags"`
 }
 
 func NewApplication(db *gorm.DB, engine Engine, catalogue tmdb.Client, config Config) *Application {
@@ -453,8 +454,9 @@ func (s *Application) Complete(
 
 			reserved := append([]string(nil), s.config.Tags...)
 
+			var prior acceptedOutput
+
 			if state.AcceptedOutput != "" {
-				var prior acceptedOutput
 				if err := json.Unmarshal([]byte(state.AcceptedOutput), &prior); err != nil {
 					return err
 				}
@@ -466,10 +468,12 @@ func (s *Application) Complete(
 			reserved = slices.Compact(reserved)
 
 			b, err := json.Marshal(acceptedOutput{
-				Recipe:   run.recipeFingerprint,
-				Metadata: *result.Result,
-				Rematch:  run.rematch,
-				Tags:     reserved,
+				Catalog:     prior.Catalog,
+				CatalogHint: prior.CatalogHint,
+				Recipe:      run.recipeFingerprint,
+				Metadata:    *result.Result,
+				Rematch:     run.rematch,
+				Tags:        reserved,
 			})
 			if err != nil {
 				return err

@@ -35,7 +35,7 @@ func Recipe(c Config, workflow string) (recipeFingerprint, canonical string, err
 		OutputParameter     string   `json:"outputParameter"`
 		RequestOutputTokens int      `json:"requestOutputTokens"`
 	}{
-		Revision:            "enhancement-v5-search-schema1-authority4-ordinary-evidence2",
+		Revision:            "enhancement-v6-search-schema1-authority5-ordinary-evidence2",
 		Workflow:            workflow,
 		Endpoint:            endpoint.String(),
 		Model:               c.Model,
