@@ -67,8 +67,8 @@ type completion struct {
 		FinishReason string  `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
+		PromptTokens     *int `json:"prompt_tokens"`
+		CompletionTokens *int `json:"completion_tokens"`
 		Details          struct {
 			ReasoningTokens int `json:"reasoning_tokens"`
 		} `json:"completion_tokens_details"`
@@ -211,16 +211,7 @@ func (e *Evaluator) Evaluate(parent context.Context, evidence Evidence) (result 
 		reply, status, requestErr := e.request(ctx, body)
 		if requestErr != nil {
 			// Unknown usage remains charged at the full reservation: a timed-out request may be billed.
-			result.Usage.OutputTokens += remaining
-
-			result.Usage.Estimated = true
-			if e.config.InputCostPerMillion > 0 && e.config.OutputCostPerMillion > 0 {
-				if result.Usage.Cost == nil {
-					result.Usage.Cost = new(float64)
-				}
-
-				*result.Usage.Cost += reservedCost
-			}
+			e.accountUnknownUsage(&result.Usage, remaining, reservedCost)
 
 			if ctx.Err() != nil {
 				result.Error = canceledMessage
@@ -257,30 +248,31 @@ func (e *Evaluator) Evaluate(parent context.Context, evidence Evidence) (result 
 			return result
 		}
 
-		if reply.Usage == nil || reply.Usage.PromptTokens < 0 || reply.Usage.CompletionTokens < 0 ||
+		if reply.Usage == nil || reply.Usage.PromptTokens == nil || reply.Usage.CompletionTokens == nil ||
+			*reply.Usage.PromptTokens < 0 || *reply.Usage.CompletionTokens < 0 ||
 			reply.Usage.Details.ReasoningTokens < 0 {
-			result.Usage.OutputTokens += remaining
-			result.Usage.Estimated = true
+			e.accountUnknownUsage(&result.Usage, remaining, reservedCost)
 			result.Outcome = OutcomeProviderFailure
 			result.Error = "missing or invalid billed usage"
 
 			return result
 		}
 
-		billed := reply.Usage.CompletionTokens
+		billed := *reply.Usage.CompletionTokens
+
 		// OpenAI completion_tokens already includes reasoning; do not double count it.
 		if reply.Usage.Details.ReasoningTokens > billed {
 			billed = reply.Usage.Details.ReasoningTokens
 		}
 
 		actualCost := float64(
-			reply.Usage.PromptTokens,
+			*reply.Usage.PromptTokens,
 		)*e.config.InputCostPerMillion/1e6 + float64(
 			billed,
 		)*e.config.OutputCostPerMillion/1e6
 		e.reconcile(remaining, billed, reservedCost, actualCost)
 
-		result.Usage.InputTokens += reply.Usage.PromptTokens
+		result.Usage.InputTokens += *reply.Usage.PromptTokens
 		result.Usage.OutputTokens += billed
 
 		result.Usage.ReasoningTokens += reply.Usage.Details.ReasoningTokens
@@ -297,7 +289,7 @@ func (e *Evaluator) Evaluate(parent context.Context, evidence Evidence) (result 
 			return result
 		}
 
-		if billed > remaining || reply.Usage.PromptTokens > 8000 || e.overBudget() {
+		if billed > remaining || *reply.Usage.PromptTokens > 8000 || e.overBudget() {
 			result.Error = "provider exceeded reserved budget"
 			return result
 		}
@@ -318,67 +310,79 @@ func (e *Evaluator) Evaluate(parent context.Context, evidence Evidence) (result 
 					return result
 				}
 
-				messages = append(messages, msg)
+				result.Usage.ToolCalls += len(msg.ToolCalls)
 				for _, call := range msg.ToolCalls {
-					result.Usage.ToolCalls++
+					if _, err := parseSearch(call); err != nil {
+						bad = true
+						break
+					}
+				}
 
-					found, searchErr := e.search(ctx, call)
-					if searchErr != nil {
-						if ctx.Err() != nil {
-							result.Error = canceledMessage
+				if !bad {
+					messages = append(messages, msg)
+					for _, call := range msg.ToolCalls {
+						found, searchErr := e.search(ctx, call)
+						if searchErr != nil {
+							if ctx.Err() != nil {
+								result.Error = canceledMessage
+								return result
+							}
+
+							result.Outcome = OutcomeProviderFailure
+							result.Error = "catalogue search failed"
+
 							return result
 						}
 
-						result.Outcome = OutcomeProviderFailure
-						result.Error = "catalogue search failed or invalid tool call"
+						for _, candidate := range found {
+							candidates[candidate.Work] = struct{}{}
+						}
 
+						encoded, encodeErr := json.Marshal(found)
+						if encodeErr != nil {
+							result.Outcome = OutcomeMalformed
+							result.Error = "invalid search response"
+
+							return result
+						}
+
+						messages = append(
+							messages,
+							message{
+								Role:       "tool",
+								ToolCallID: call.ID,
+								Content:    string(encoded),
+							},
+						)
+					}
+
+					continue
+				}
+			} else {
+				metadata, validationErr := validateMetadata(msg.Content, e.config, candidates)
+				if validationErr == nil && choice.FinishReason == "stop" {
+					if ctx.Err() != nil {
+						result.Error = canceledMessage
 						return result
 					}
 
-					for _, candidate := range found {
-						candidates[candidate.Work] = struct{}{}
-					}
+					result.Result = metadata
+					result.Outcome = "accepted"
 
-					encoded, encodeErr := json.Marshal(found)
+					empty, encodeErr := json.Marshal(metadata)
 					if encodeErr != nil {
+						result.Result = nil
 						result.Outcome = OutcomeMalformed
-						result.Error = "invalid search response"
 
 						return result
 					}
 
-					messages = append(
-						messages,
-						message{Role: "tool", ToolCallID: call.ID, Content: string(encoded)},
-					)
-				}
-
-				continue
-			}
-
-			metadata, validationErr := validateMetadata(msg.Content, e.config, candidates)
-			if validationErr == nil && choice.FinishReason == "stop" {
-				if ctx.Err() != nil {
-					result.Error = canceledMessage
-					return result
-				}
-
-				result.Result = metadata
-				result.Outcome = "accepted"
-
-				empty, encodeErr := json.Marshal(metadata)
-				if encodeErr != nil {
-					result.Result = nil
-					result.Outcome = OutcomeMalformed
+					if string(empty) == "{}" {
+						result.Outcome = "unresolved"
+					}
 
 					return result
 				}
-
-				if string(empty) == "{}" {
-					result.Outcome = "unresolved"
-				}
-
-				return result
 			}
 		}
 
@@ -399,6 +403,22 @@ func (e *Evaluator) Evaluate(parent context.Context, evidence Evidence) (result 
 				Content: "Return valid metadata JSON with allowed fields and retrieved IDs; omit unknowns.",
 			},
 		)
+	}
+}
+
+// Keep the report aligned with the full reservation retained in the run ledger.
+// Missing counters are unknown, never a zero-token completion or a refund.
+func (e *Evaluator) accountUnknownUsage(usage *Usage, output int, cost float64) {
+	usage.InputTokens += 8000
+	usage.OutputTokens += output
+
+	usage.Estimated = true
+	if e.config.InputCostPerMillion > 0 && e.config.OutputCostPerMillion > 0 {
+		if usage.Cost == nil {
+			usage.Cost = new(float64)
+		}
+
+		*usage.Cost += cost
 	}
 }
 
@@ -484,24 +504,35 @@ func (e *Evaluator) request(ctx context.Context, body []byte) (completion, int, 
 	return c, resp.StatusCode, nil
 }
 
-func (e *Evaluator) search(ctx context.Context, call toolCall) ([]Candidate, error) {
-	var args struct {
-		Title string `json:"title"`
-		Type  string `json:"type"`
-		Year  int    `json:"year"`
-	}
+type searchArguments struct {
+	Title string `json:"title"`
+	Type  string `json:"type"`
+	Year  int    `json:"year"`
+}
+
+func parseSearch(call toolCall) (searchArguments, error) {
+	var args searchArguments
 	if call.ID == "" || call.Type != "function" || call.Function.Name != "search_works" {
-		return nil, errors.New("unknown tool")
+		return args, errors.New("unknown tool")
 	}
 
 	if err := decodeStrict([]byte(call.Function.Arguments), &args); err != nil {
-		return nil, err
+		return args, err
 	}
 
 	if strings.TrimSpace(args.Title) == "" || len(args.Title) > 300 ||
 		(args.Type != WorkMovie && args.Type != WorkSeries) ||
 		(args.Year != 0 && (args.Year < 1800 || args.Year > 2200)) {
-		return nil, errors.New("invalid search arguments")
+		return args, errors.New("invalid search arguments")
+	}
+
+	return args, nil
+}
+
+func (e *Evaluator) search(ctx context.Context, call toolCall) ([]Candidate, error) {
+	args, err := parseSearch(call)
+	if err != nil {
+		return nil, err
 	}
 
 	client, err := e.catalogue.Get()

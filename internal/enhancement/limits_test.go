@@ -3,6 +3,8 @@ package enhancement_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -327,4 +329,222 @@ func TestProviderThinkingOverrideDoesNotReplaceBudgetCap(t *testing.T) {
 		answer(w, `{}`, 10, 0)
 	}, func(c *enhancement.Config) { c.Thinking = "disabled" })
 	require.Equal(t, "unresolved", e.Evaluate(t.Context(), enhancement.Evidence{}).Outcome)
+}
+
+func TestMissingUsageCountersKeepSharedReservations(t *testing.T) {
+	t.Parallel()
+
+	for name, usage := range map[string]string{
+		"empty":          `{}`,
+		"missing output": `{"prompt_tokens":100}`,
+		"missing input":  `{"completion_tokens":10}`,
+		"null output":    `{"prompt_tokens":100,"completion_tokens":null}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			e, calls := evaluator(t, func(w http.ResponseWriter, _ *http.Request) {
+				usageAnswer(w, usage)
+			}, func(c *enhancement.Config) {
+				c.InputCostPerMillion = 1
+				c.OutputCostPerMillion = 1
+				c.MaxRunCost = 0.015
+			})
+			first := e.Evaluate(t.Context(), enhancement.Evidence{})
+			require.Equal(t, "provider_failure", first.Outcome)
+			require.True(t, first.Usage.Estimated)
+			require.Equal(t, 2000, first.Usage.OutputTokens)
+			require.NotNil(t, first.Usage.Cost)
+			require.InDelta(t, 0.01, *first.Usage.Cost, 0.000001)
+			second := e.Evaluate(t.Context(), enhancement.Evidence{})
+			require.Equal(t, "limited", second.Outcome)
+			require.EqualValues(t, 1, calls.Load())
+		})
+	}
+}
+
+func TestPartialUsageAfterEarlierTurnReportsEntireAccountedCost(t *testing.T) {
+	t.Parallel()
+
+	for name, usage := range map[string]string{
+		"missing":  `null`,
+		"partial":  `{"prompt_tokens":500}`,
+		"negative": `{"prompt_tokens":500,"completion_tokens":-1}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var calls atomic.Int32
+
+			e, _ := evaluator(t, func(w http.ResponseWriter, _ *http.Request) {
+				if calls.Add(1) == 1 {
+					answer(w, `{"confidence":1}`, 100, 20)
+					return
+				}
+
+				usageAnswer(w, usage)
+			}, func(c *enhancement.Config) {
+				c.InputCostPerMillion = 1
+				c.OutputCostPerMillion = 1
+				c.MaxRunCost = 0.01025
+			})
+			result := e.Evaluate(t.Context(), enhancement.Evidence{})
+			require.Equal(t, "provider_failure", result.Outcome)
+			require.True(t, result.Usage.Estimated)
+			require.Equal(t, 2100, result.Usage.OutputTokens)
+			require.NotNil(t, result.Usage.Cost)
+			require.InDelta(t, 0.0102, *result.Usage.Cost, 0.000001)
+			require.Equal(t, "limited", e.Evaluate(t.Context(), enhancement.Evidence{}).Outcome)
+			require.EqualValues(t, 2, calls.Load())
+		})
+	}
+}
+
+func toolAnswer(w http.ResponseWriter, name, args string) {
+	_, _ = fmt.Fprintf(
+		w,
+		`{"choices":[{"message":{"role":"assistant",
+"tool_calls":[{"id":"s1","type":"function",
+"function":{"name":%q,"arguments":%q}}]},
+"finish_reason":"tool_calls"}],
+"usage":{"prompt_tokens":100,"completion_tokens":20}}`,
+		name,
+		args,
+	)
+}
+
+func TestMalformedToolsRetryWithoutCatalogueCalls(t *testing.T) {
+	t.Parallel()
+
+	for name, call := range map[string]struct{ name, args string }{
+		"unknown function": {"get_work", `{"id":42}`},
+		"bad JSON":         {"search_works", `broken`},
+		"unsupported type": {"search_works", `{"title":"A show","type":"episode"}`},
+		"unknown argument": {"search_works", `{"title":"A show","type":"tv_show","episode":1}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			e, calls := evaluator(
+				t,
+				func(w http.ResponseWriter, _ *http.Request) { toolAnswer(w, call.name, call.args) },
+				nil,
+			)
+			result := e.Evaluate(t.Context(), enhancement.Evidence{})
+			require.Equal(t, "malformed", result.Outcome)
+			require.EqualValues(t, 2, calls.Load())
+			require.Equal(t, 2, result.Usage.ToolCalls)
+		})
+	}
+}
+
+func TestMalformedToolCanRecoverWithinRequestLimit(t *testing.T) {
+	t.Parallel()
+
+	for _, limit := range []int{1, 4} {
+		t.Run(fmt.Sprint(limit), func(t *testing.T) {
+			t.Parallel()
+
+			var attempts atomic.Int32
+
+			e, calls := evaluator(t, func(w http.ResponseWriter, _ *http.Request) {
+				if attempts.Add(1) == 1 {
+					toolAnswer(w, "search_works", `broken`)
+					return
+				}
+
+				answer(w, `{}`, 10, 0)
+			}, func(c *enhancement.Config) { c.MaxRequests = limit })
+
+			result := e.Evaluate(t.Context(), enhancement.Evidence{})
+			if limit == 1 {
+				require.Equal(t, "limited", result.Outcome)
+				require.EqualValues(t, 1, calls.Load())
+			} else {
+				require.Equal(t, "unresolved", result.Outcome)
+				require.EqualValues(t, 2, calls.Load())
+			}
+		})
+	}
+}
+
+func TestUnknownUsageConsumesSharedOutputAllowance(t *testing.T) {
+	t.Parallel()
+	e, calls := evaluator(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(
+			[]byte(
+				`{"choices":[{"message":{"role":"assistant","content":"{}"},"finish_reason":"stop"}],"usage":{}}`,
+			),
+		)
+	}, func(c *enhancement.Config) { c.MaxRunOutputTokens = 2000 })
+	first := e.Evaluate(t.Context(), enhancement.Evidence{})
+	require.Equal(t, "provider_failure", first.Outcome)
+	require.Equal(t, 8000, first.Usage.InputTokens)
+	require.Equal(t, 2000, first.Usage.OutputTokens)
+	require.Equal(t, "limited", e.Evaluate(t.Context(), enhancement.Evidence{}).Outcome)
+	require.EqualValues(t, 1, calls.Load())
+}
+
+func TestPresentZeroUsageIsValid(t *testing.T) {
+	t.Parallel()
+	e, _ := evaluator(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(
+			[]byte(
+				`{
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": "{}"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 0,
+    "completion_tokens": 0
+  }
+}`,
+			),
+		)
+	}, nil)
+	result := e.Evaluate(t.Context(), enhancement.Evidence{})
+	require.Equal(t, "unresolved", result.Outcome)
+	require.False(t, result.Usage.Estimated)
+}
+
+func TestValidToolCatalogueFailureRemainsProviderFailure(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		toolAnswer(w, "search_works", `{"title":"A show","type":"tv_show"}`)
+	}))
+	defer server.Close()
+
+	cfg := enhancement.NewDefaultConfig()
+	cfg.BaseURL = server.URL
+	cfg.Model = "fake"
+	cfg.APIKey = "fake"
+	e, err := enhancement.NewEvaluator(
+		cfg,
+		lazy.New(func() (tmdb.Client, error) { return nil, errors.New("catalogue unavailable") }),
+		http.DefaultClient,
+	)
+	require.NoError(t, err)
+	result := e.Evaluate(t.Context(), enhancement.Evidence{})
+	require.Equal(t, "provider_failure", result.Outcome)
+	require.Equal(t, 1, result.Usage.Requests)
+	require.Equal(t, 1, result.Usage.ToolCalls)
+}
+
+func usageAnswer(w http.ResponseWriter, usage string) {
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"choices": []any{
+			map[string]any{
+				"message":       map[string]string{"role": "assistant", "content": "{}"},
+				"finish_reason": "stop",
+			},
+		},
+		"usage": json.RawMessage(usage),
+	}); err != nil {
+		panic(err)
+	}
 }

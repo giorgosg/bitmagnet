@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/database/postgres"
 	"github.com/bitmagnet-io/bitmagnet/internal/enhancement"
@@ -22,6 +23,7 @@ import (
 
 type Params struct {
 	fx.In
+	Lifecycle fx.Lifecycle
 	Config    enhancement.Config
 	Postgres  postgres.Config
 	Catalogue lazy.Lazy[tmdb.Client]
@@ -38,6 +40,8 @@ type Report struct {
 }
 
 func New(p Params) Result {
+	action := lifecycleAction(p)
+
 	return Result{
 		Command: &cli.Command{
 			Name:  "enhancement",
@@ -114,14 +118,74 @@ func New(p Params) Result {
 							Value: p.Config.OutputCostPerMillion,
 						},
 					},
-					Action: func(c *cli.Context) error { return run(c, p) },
+					Action: action,
 				},
 			},
 		},
 	}
 }
 
-func run(c *cli.Context, p Params) error {
+// The shared CLI currently runs commands with a Background context. Bind only this
+// command to fx shutdown so SIGINT/termination cancels its reads and provider calls,
+// and wait for its bounded result reporting before application shutdown completes.
+func lifecycleAction(p Params) cli.ActionFunc {
+	lifetime, cancelLifetime := context.WithCancel(context.Background())
+
+	var (
+		mu     sync.Mutex
+		active chan struct{}
+	)
+
+	p.Lifecycle.Append(fx.Hook{OnStop: func(ctx context.Context) error {
+		cancelLifetime()
+		mu.Lock()
+		done := active
+		mu.Unlock()
+
+		if done == nil {
+			return nil
+		}
+
+		select {
+		case <-done:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}})
+
+	return func(c *cli.Context) error {
+		mu.Lock()
+		if lifetime.Err() != nil {
+			mu.Unlock()
+			return nil
+		}
+
+		done := make(chan struct{})
+		active = done
+		mu.Unlock()
+
+		defer close(done)
+
+		ctx, cancel := context.WithCancel(c.Context)
+
+		stop := context.AfterFunc(lifetime, cancel)
+		defer stop()
+		defer cancel()
+
+		//nolint:contextcheck // Caller context comes from c.Context and gains fx cancellation.
+		err := run(ctx, c, p)
+		// Shutdown can interrupt evidence loading before a report exists. The global
+		// CLI treats returned errors as panics; an intentional shutdown is not a failure.
+		if lifetime.Err() != nil {
+			return nil
+		}
+
+		return err
+	}
+}
+
+func run(parent context.Context, c *cli.Context, p Params) error {
 	cfg := p.Config
 	if c.IsSet("base-url") {
 		cfg.BaseURL = c.String("base-url")
@@ -192,7 +256,7 @@ func run(c *cli.Context, p Params) error {
 		return errors.New("select either 1-100 hashes or --sample 1-100")
 	}
 
-	ctx, cancel := context.WithTimeout(c.Context, cfg.RunTimeout)
+	ctx, cancel := context.WithTimeout(parent, cfg.RunTimeout)
 	defer cancel()
 
 	connCfg, err := pgx.ParseConfig(p.Postgres.CreateDSN())
@@ -208,7 +272,12 @@ func run(c *cli.Context, p Params) error {
 		return errors.New("cannot open read-only catalogue connection")
 	}
 
-	defer func() { _ = conn.Close(context.Background()) }()
+	defer func() {
+		closeCtx, closeCancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		defer closeCancel()
+
+		_ = conn.Close(closeCtx)
+	}()
 
 	tx, err := conn.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {

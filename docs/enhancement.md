@@ -47,6 +47,9 @@ An explicit experiment always runs again: no saved fingerprint or previous answe
 suppresses it. `--model`, `--base-url`, `--temperature`, and `--prompt-file` override
 configuration for comparison. Prompt files add operator instructions; they cannot
 relax local output validation. Save reports yourself when comparing experiments.
+Application shutdown, including SIGINT handled by fx, cancels this command's
+in-flight HTTP work and waits for its bounded result reporting; canceled work
+cannot become an accepted late result.
 
 All settings also live under the `enhancement` configuration section, using the
 usual snake-case configuration names. Defaults are:
@@ -79,11 +82,15 @@ Spending, request and output reservations are shared by concurrent evaluations i
 this command only. They do **not** enter a database-backed shared budget ledger.
 Running several commands multiplies these allowances. Each request reserves its
 maximum output and a conservative input allowance before contacting the provider.
-Successful responses reconcile reservations against reported usage. Unknown usage
+Successful responses require explicit nonnegative `prompt_tokens` and
+`completion_tokens` counters before reconciling reservations. Missing/null counters
+are provider failures, rather than zero-token completions. Unknown usage
 retains the full reservation and sets `usage.estimated`; its cost is an upper-bound
-estimate. `completion_tokens` includes reasoning, so reasoning is reported separately
+estimate of both input and output tokens and their cost, including reservations
+from a later failed turn after earlier billed calls. `completion_tokens` includes reasoning, so reasoning is reported separately
 and is not added twice. Transient transport/429/5xx failures use backoff and at most
-three attempts total; malformed output gets at most one retry within that ceiling.
+three attempts total; malformed output (including invalid tool names/arguments) gets at most one retry
+within that ceiling. Tool batches are validated before any catalogue call.
 Every retry consumes request, token, spending and time limits.
 
 Evidence contains the name, size/count, ordinary classification, supplied hints and

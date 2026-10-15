@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,6 +24,16 @@ import (
 	"github.com/urfave/cli/v2"
 	"go.uber.org/fx"
 )
+
+// urfave's global help flag is mutated by RunContext. These integration tests run
+// separate real CLI applications sequentially; evaluator concurrency is tested separately.
+var cliAppMu sync.Mutex
+
+func lockCLI(t *testing.T) {
+	t.Helper()
+	cliAppMu.Lock()
+	t.Cleanup(cliAppMu.Unlock)
+}
 
 type audit struct {
 	mu         sync.Mutex
@@ -59,6 +70,7 @@ func TestCommandWiringNeverAttemptsWrites(t *testing.T) {
 	for _, failure := range []bool{false, true} {
 		t.Run(map[bool]string{false: "success", true: "provider failure"}[failure], func(t *testing.T) {
 			t.Parallel()
+			lockCLI(t)
 
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				if failure {
@@ -215,4 +227,113 @@ func TestExplicitAndSampleSelectionExcludeQuarantineAndBans(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, sample, 1)
 	require.Equal(t, explicit, sample)
+}
+
+func TestApplicationShutdownCancelsReadOnlyEvaluationHTTP(t *testing.T) {
+	t.Parallel()
+	lockCLI(t)
+	db := dbtest.New(t)
+	hash := protocol.MustParseID(strings.Repeat("04", 20))
+	require.NoError(
+		t,
+		db.Gorm.Create(
+			&model.Torrent{
+				InfoHash:    hash,
+				Name:        "Synthetic shutdown",
+				Size:        10,
+				FilesStatus: model.FilesStatusNoInfo,
+			},
+		).Error,
+	)
+
+	entered := make(chan struct{})
+	canceled := make(chan struct{})
+	release := make(chan struct{})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+
+		close(entered)
+
+		select {
+		case <-r.Context().Done():
+			close(canceled)
+		case <-release:
+		}
+
+		_, _ = w.Write(
+			[]byte(
+				`{
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": "{\"title\":\"Late result\"}"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 100,
+    "completion_tokens": 10
+  }
+}`,
+			),
+		)
+	}))
+	defer server.Close()
+	defer close(release)
+
+	cfg := enhancement.NewDefaultConfig()
+	cfg.BaseURL = server.URL
+	cfg.APIKey = "fake"
+	cfg.Model = "fake"
+	cfg.MaxRunCost = 1
+	cfg.InputCostPerMillion = 1
+	cfg.OutputCostPerMillion = 1
+	pc := postgres.NewDefaultConfig()
+	pc.DSN = db.DSN + "?default_transaction_read_only=on"
+
+	var output bytes.Buffer
+
+	app := fx.New(
+		appfx.New(),
+		fx.NopLogger,
+		fx.Replace(cfg, pc),
+		fx.Replace(
+			fx.Annotate(
+				[]string{"bitmagnet", "enhancement", "evaluate", "--hash", hash.String()},
+				fx.ResultTags(`name:"cli_args"`),
+			),
+		),
+		fx.Decorate(func(commandApp *cli.App) *cli.App { commandApp.Writer = &output; return commandApp }),
+		fx.Invoke(func(_ *cli.App, _ hooks.AttachedHooks) {}),
+	)
+	require.NoError(t, app.Err())
+	require.NoError(t, app.Start(t.Context()))
+
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("provider request did not start")
+	}
+
+	stopCtx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+
+	require.NoError(t, app.Stop(stopCtx))
+
+	select {
+	case <-canceled:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("application shutdown left provider request running")
+	}
+
+	var report struct {
+		Evaluations []enhancement.Evaluation `json:"evaluations"`
+	}
+	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
+	require.Len(t, report.Evaluations, 1)
+	require.Equal(t, "limited", report.Evaluations[0].Outcome)
+	require.Nil(t, report.Evaluations[0].Result)
 }
