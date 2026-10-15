@@ -7,6 +7,7 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/app/cmd/authcmd"
 	"github.com/bitmagnet-io/bitmagnet/internal/app/cmd/classifiercmd"
 	"github.com/bitmagnet-io/bitmagnet/internal/app/cmd/configcmd"
+	"github.com/bitmagnet-io/bitmagnet/internal/app/cmd/enhancementcmd"
 	"github.com/bitmagnet-io/bitmagnet/internal/app/cmd/processcmd"
 	"github.com/bitmagnet-io/bitmagnet/internal/app/cmd/reprocesscmd"
 	"github.com/bitmagnet-io/bitmagnet/internal/app/cmd/workercmd"
@@ -16,6 +17,7 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/database/databasefx"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/migrations"
 	"github.com/bitmagnet-io/bitmagnet/internal/dhtcrawler/dhtcrawlerfx"
+	"github.com/bitmagnet-io/bitmagnet/internal/enhancement/enhancementfx"
 	"github.com/bitmagnet-io/bitmagnet/internal/gql/gqlfx"
 	"github.com/bitmagnet-io/bitmagnet/internal/health/healthfx"
 	"github.com/bitmagnet-io/bitmagnet/internal/httpserver/httpserverfx"
@@ -42,6 +44,7 @@ func New() fx.Option {
 		authfx.New(),
 		classifierfx.New(),
 		configfx.New(),
+		enhancementfx.New(),
 		dhtcrawlerfx.New(),
 		dhtfx.New(),
 		databasefx.New(),
@@ -69,6 +72,7 @@ func New() fx.Option {
 			authcmd.New,
 			classifiercmd.New,
 			configcmd.New,
+			enhancementcmd.New,
 			reprocesscmd.New,
 			processcmd.New,
 			workercmd.New,
