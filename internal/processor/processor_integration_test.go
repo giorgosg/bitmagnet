@@ -429,3 +429,103 @@ func TestOrdinaryProcessorAppliesStoredHintTitleAndYear(t *testing.T) {
 	require.Len(t, rows.Items, 1)
 	require.Equal(t, "Fresh Orchard (2001)", rows.Items[0].Title())
 }
+
+type ordinaryTitleRunner struct {
+	title string
+	year  model.Year
+}
+
+func (r *ordinaryTitleRunner) Run(
+	_ context.Context,
+	_ string,
+	_ classifier.Flags,
+	_ model.Torrent,
+) (classification.Result, error) {
+	return classification.Result{ContentAttributes: classification.ContentAttributes{
+		ContentType: model.NewNullContentType(
+			model.ContentTypeMovie,
+		), BaseTitle: model.NewNullString(r.title), Date: model.NewDateFromParts(r.year, 1, 1),
+	}}, nil
+}
+
+func TestOrdinaryFallbackChangesInvalidateEnhancementWithoutSelfTriggering(t *testing.T) {
+	t.Parallel()
+
+	for _, outcome := range []string{enhancement.OutcomeAccepted, enhancement.OutcomeUnresolved} {
+		t.Run(outcome, func(t *testing.T) {
+			t.Parallel()
+			db := dbtest.New(t)
+			hash := protocol.ID{74}
+			require.NoError(
+				t,
+				db.Gorm.Create(
+					&model.Torrent{
+						InfoHash:    hash,
+						Name:        "opaque.release",
+						FilesStatus: model.FilesStatusSingle,
+					},
+				).Error,
+			)
+
+			sr := search.New(
+				search.Params{Query: lazy.New(func() (*dao.Query, error) { return db.Query, nil })},
+			)
+			searcher, err := sr.Search.Get()
+			require.NoError(t, err)
+
+			runner := &ordinaryTitleRunner{title: "Ordinary Orchard", year: 1984}
+			p := processor{
+				defaultWorkflow: "default",
+				search:          searcher,
+				runner:          runner,
+				dao:             db.Query,
+			}
+			require.NoError(
+				t,
+				p.Process(t.Context(), MessageParams{InfoHashes: []protocol.ID{hash}}),
+			)
+
+			app := enhancement.NewApplication(db.Gorm, nil, nil, enhancement.NewDefaultConfig())
+			run, err := app.Prepare(t.Context(), hash, false, false)
+			require.NoError(t, err)
+			require.Contains(t, string(run.Evidence.Classification), `"title":"Ordinary Orchard"`)
+			require.Contains(t, string(run.Evidence.Classification), `"year":1984`)
+
+			result := enhancement.Evaluation{Outcome: outcome}
+			if outcome == enhancement.OutcomeAccepted {
+				result.Result = &enhancement.Metadata{Title: "Enhanced Orchard", Year: 1998}
+			}
+
+			require.NoError(t, app.Complete(t.Context(), run, result, nil))
+			require.NoError(
+				t,
+				p.Process(t.Context(), MessageParams{InfoHashes: []protocol.ID{hash}}),
+			)
+			unchanged, err := app.Prepare(t.Context(), hash, true, false)
+			require.NoError(t, err)
+			require.Equal(t, run.InputFingerprint, unchanged.InputFingerprint)
+
+			var current model.TorrentContent
+			require.NoError(t, db.Gorm.Where("info_hash = ?", hash).First(&current).Error)
+
+			if outcome == enhancement.OutcomeAccepted {
+				require.Equal(t, "Enhanced Orchard (1998)", current.Title())
+			}
+
+			runner.title = "Changed Orchard"
+			runner.year = 2002
+
+			require.NoError(
+				t,
+				p.Process(t.Context(), MessageParams{InfoHashes: []protocol.ID{hash}}),
+			)
+
+			current = model.TorrentContent{}
+			require.NoError(t, db.Gorm.Where("info_hash = ?", hash).First(&current).Error)
+			require.Equal(t, "Changed Orchard (2002)", current.Title())
+			changed, err := app.Prepare(t.Context(), hash, false, false)
+			require.NoError(t, err)
+			require.NotEqual(t, run.InputFingerprint, changed.InputFingerprint)
+		})
+	}
+}

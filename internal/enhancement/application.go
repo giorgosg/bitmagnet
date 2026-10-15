@@ -329,19 +329,19 @@ func (s *Application) Complete(
 		return ErrStale
 	}
 
-	if err := run.ctx.Err(); err != nil {
+	if err := completionContextError(ctx, run); err != nil {
 		return err
 	}
 
-	if time.Now().After(run.expires) {
-		return context.DeadlineExceeded
-	}
+	ctx, cancel := context.WithDeadline(ctx, run.expires)
+	defer cancel()
 
-	if err := ctx.Err(); err != nil {
-		return err
-	}
+	// The stored admission context supplies cancellation independently of the caller.
+	//nolint:contextcheck
+	stop := context.AfterFunc(run.ctx, cancel)
+	defer stop()
 
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := LockTorrent(tx, run.hash); err != nil {
 			return err
 		}
@@ -406,7 +406,11 @@ func (s *Application) Complete(
 			state.Outcome = result.Outcome
 			state.CompletedAt = now
 		case OutcomeMalformed, OutcomeProviderFailure:
-			return tx.Save(&state).Error
+			if err := tx.Save(&state).Error; err != nil {
+				return err
+			}
+
+			return completionContextError(ctx, run)
 		default:
 			return errors.New("invalid evaluation outcome")
 		}
@@ -502,8 +506,19 @@ func (s *Application) Complete(
 			return err
 		}
 
-		return tx.Save(&state).Error
+		if err := tx.Save(&state).Error; err != nil {
+			return err
+		}
+
+		return completionContextError(ctx, run)
 	})
+	if err != nil {
+		if contextErr := completionContextError(ctx, run); contextErr != nil {
+			return contextErr
+		}
+	}
+
+	return err
 }
 
 func effectiveFingerprint(tx *gorm.DB, t model.Torrent) (string, error) {
@@ -522,4 +537,16 @@ func effectiveFingerprint(tx *gorm.DB, t model.Torrent) (string, error) {
 	b, err := json.Marshal(e)
 
 	return fingerprint(b), err
+}
+
+func completionContextError(ctx context.Context, run Run) error {
+	if err := run.ctx.Err(); err != nil {
+		return err
+	}
+
+	if time.Now().After(run.expires) {
+		return context.DeadlineExceeded
+	}
+
+	return ctx.Err()
 }

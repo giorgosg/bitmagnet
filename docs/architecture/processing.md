@@ -142,18 +142,21 @@ accepted output; unresolved and limited completions suppress repeat calls for th
 input/recipe. A newer admitted generation rejects an older completion.
 
 Reconstruction reads the ordinary snapshot before reusing sourced matches, then
-replays accepted enhancement only when its evidence fingerprint still matches. Shared
-work metadata is hydrated from current catalogue rows rather than an old snapshot
-copy, so ordinary reconstruction also refreshes title/year search vectors. This
-keeps enhancement output out of its own evidence and preserves results across changes
-to search-row identity. Popularity and incidental timestamps do not enter fingerprints.
+replays accepted enhancement only when its evidence fingerprint still matches. The
+fingerprint includes ordinary inferred title/year and excludes prior enhancement
+output, so results survive search-row replacement without triggering themselves.
+Shared work metadata comes from current catalogue rows, keeping reconstructed
+title/year search vectors current. Popularity and incidental timestamps do not enter
+fingerprints.
 The application transaction shares moderation advisory locks with ingestion and decision
-writes, locks the torrent, and rechecks current evidence and effective authority. Model
-calls and TMDB detail retrieval happen before that short transaction. Hidden torrents,
+writes, locks the torrent, and rechecks current evidence and effective authority. Its
+context follows the original run deadline and cancellation even while waiting for locks,
+and completion checks the run again before committing. Model calls and TMDB detail retrieval happen before that short transaction. Hidden torrents,
 stale runs and canceled calls cannot apply late metadata.
 
-Importer hints and existing catalogue identity are protected during normal enhancement;
-explicit rematch may override them without rewriting hints. Release languages and
+Supplied hint fields and existing catalogue identity are protected during normal
+enhancement. A hint supplying only type permits adding a compatible missing catalogue
+identity. Explicit rematch may override them without rewriting hints. Release languages and
 episodes remain separate from shared work identity. Accepted generated tags replace
 only the configured reserved set atomically. Search/display year and title prefer
 catalogue values, falling back to retained inferred values without synthetic content

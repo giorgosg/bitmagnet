@@ -11,6 +11,7 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func TestDurableAcceptedMetadataSurvivesFailedAttempt(t *testing.T) {
@@ -508,4 +509,199 @@ func TestRematchCanDetachCatalogueIdentityWhenTypeChanges(t *testing.T) {
 	require.NoError(t, db.Gorm.Where("info_hash = ?", hash).First(&got).Error)
 	require.False(t, got.ContentID.Valid)
 	require.Equal(t, "Portable Game", got.Title())
+}
+
+func TestTypeOnlyHintAllowsCompatibleMissingIdentity(t *testing.T) {
+	t.Parallel()
+
+	for _, scenario := range []string{"compatible", "conflicting_type", "supplied_identity", "explicit_rematch"} {
+		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
+			db, app, hash := applicationFixture(t)
+			hint := model.TorrentHint{InfoHash: hash, ContentType: model.ContentTypeMovie}
+
+			baseline := model.TorrentContent{
+				InfoHash:    hash,
+				ContentType: model.NewNullContentType(model.ContentTypeMovie),
+			}
+			if scenario == "supplied_identity" {
+				original := model.Content{
+					Type:   model.ContentTypeMovie,
+					Source: model.SourceTmdb,
+					ID:     "10",
+					Title:  "Supplied work",
+				}
+				require.NoError(t, db.Gorm.Create(&original).Error)
+
+				hint.ContentSource = model.NewNullString(model.SourceTmdb)
+				hint.ContentID = model.NewNullString("10")
+				baseline.ContentSource = hint.ContentSource
+				baseline.ContentID = hint.ContentID
+				baseline.Content = original
+			}
+
+			require.NoError(t, db.Gorm.Create(&hint).Error)
+			require.NoError(
+				t,
+				db.Gorm.Where("info_hash = ?", hash).Delete(&model.TorrentContent{}).Error,
+			)
+			require.NoError(t, db.Gorm.Omit(clause.Associations).Create(&baseline).Error)
+
+			var torrent model.Torrent
+			require.NoError(
+				t,
+				db.Gorm.Preload("Hint").Where("info_hash = ?", hash).First(&torrent).Error,
+			)
+			require.NoError(
+				t,
+				db.Gorm.Transaction(
+					func(tx *gorm.DB) error { return RecordOrdinary(tx, torrent, &baseline, "test") },
+				),
+			)
+
+			selectedType := model.ContentTypeMovie
+			if scenario == "conflicting_type" || scenario == "explicit_rematch" {
+				selectedType = model.ContentTypeTvShow
+			}
+
+			selected := model.Content{
+				Type:   selectedType,
+				Source: model.SourceTmdb,
+				ID:     "20",
+				Title:  "Retrieved work",
+			}
+			run, err := app.Prepare(t.Context(), hash, true, scenario == "explicit_rematch")
+			require.NoError(t, err)
+			require.NoError(
+				t,
+				app.Complete(
+					t.Context(),
+					run,
+					Evaluation{
+						Outcome: OutcomeAccepted,
+						Result: &Metadata{
+							Type: selectedType.String(),
+							Work: &Work{Type: selectedType.String(), ID: 20},
+						},
+					},
+					&selected,
+				),
+			)
+
+			var got model.TorrentContent
+			require.NoError(t, db.Gorm.Where("info_hash = ?", hash).First(&got).Error)
+
+			switch scenario {
+			case "compatible", "explicit_rematch":
+				require.Equal(t, "20", got.ContentID.String)
+				require.Equal(t, selectedType, got.ContentType.ContentType)
+			case "conflicting_type":
+				require.False(t, got.ContentID.Valid)
+				require.Equal(t, model.ContentTypeMovie, got.ContentType.ContentType)
+			case "supplied_identity":
+				require.Equal(t, "10", got.ContentID.String)
+			}
+
+			var unchanged model.TorrentHint
+			require.NoError(t, db.Gorm.Where("info_hash = ?", hash).First(&unchanged).Error)
+			require.Equal(t, hint.ContentType, unchanged.ContentType)
+			require.Equal(t, hint.ContentID, unchanged.ContentID)
+		})
+	}
+}
+
+func TestCompletionLockWaitHonorsRunDeadlineAndCancellation(t *testing.T) {
+	t.Parallel()
+
+	for _, scenario := range []string{"deadline", "cancellation"} {
+		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
+			db, app, hash := applicationFixture(t)
+			initial, err := app.Prepare(t.Context(), hash, false, false)
+			require.NoError(t, err)
+			require.NoError(
+				t,
+				app.Complete(
+					t.Context(),
+					initial,
+					Evaluation{
+						Outcome: OutcomeAccepted,
+						Result:  &Metadata{Title: "Retained title"},
+					},
+					nil,
+				),
+			)
+
+			var accepted model.ClassificationEvaluation
+			require.NoError(
+				t,
+				db.Gorm.Where("info_hash = ? AND stage = 'enhancement'", hash).
+					First(&accepted).
+					Error,
+			)
+
+			app.config.Timeout = 5 * time.Second
+
+			runCtx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+
+			run, err := app.Prepare(runCtx, hash, true, false)
+			require.NoError(t, err)
+			blocker := db.Gorm.WithContext(t.Context()).Begin()
+			require.NoError(t, blocker.Error)
+			t.Cleanup(func() { _ = blocker.Rollback().Error })
+			require.NoError(t, LockTorrent(blocker, hash))
+
+			done := make(chan error, 1)
+			go func() {
+				done <- app.Complete(
+					context.WithoutCancel(t.Context()), run,
+					Evaluation{Outcome: OutcomeAccepted, Result: &Metadata{Title: "Late title"}}, nil,
+				)
+			}()
+
+			require.Eventually(t, func() bool {
+				var waiting int64
+
+				err := db.Gorm.Raw(`SELECT count(*) FROM pg_stat_activity WHERE datname = ?
+  AND wait_event_type = 'Lock' AND wait_event = 'advisory'`, db.Name).Scan(&waiting).Error
+
+				return err == nil && waiting > 0
+			},
+				2*time.Second, 10*time.Millisecond,
+				"completion must have entered its transaction and be waiting on the lock",
+			)
+
+			expected := context.DeadlineExceeded
+
+			if scenario == "cancellation" {
+				cancel()
+
+				expected = context.Canceled
+			} else {
+				<-time.After(app.config.Timeout + 50*time.Millisecond)
+			}
+
+			require.NoError(t, blocker.Rollback().Error)
+
+			select {
+			case err := <-done:
+				require.ErrorIs(t, err, expected)
+			case <-time.After(2 * time.Second):
+				t.Fatal("completion did not stop after its run expired or was cancelled")
+			}
+
+			var tc model.TorrentContent
+			require.NoError(t, db.Gorm.Where("info_hash = ?", hash).First(&tc).Error)
+			require.Equal(t, "Retained title", tc.Title())
+
+			var after model.ClassificationEvaluation
+			require.NoError(
+				t,
+				db.Gorm.Where("info_hash = ? AND stage = 'enhancement'", hash).First(&after).Error,
+			)
+			require.Equal(t, accepted.AcceptedOutput, after.AcceptedOutput)
+			require.Equal(t, accepted.CompletedAt, after.CompletedAt)
+		})
+	}
 }

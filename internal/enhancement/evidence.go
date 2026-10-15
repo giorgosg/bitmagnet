@@ -89,11 +89,16 @@ func BuildEvidence(t model.Torrent) (Evidence, error) {
 
 	ordinary := make([]classification, 0, len(t.Contents))
 	for _, c := range t.Contents {
+		title := c.Content.Title
+		if title == "" {
+			title = c.InferredTitle
+		}
+
 		ordinary = append(
 			ordinary,
 			classification{
-				c.Content.Title,
-				c.Content.ReleaseYear,
+				title,
+				c.ReleaseYear(),
 				c.ContentType,
 				c.ContentSource,
 				c.ContentID,

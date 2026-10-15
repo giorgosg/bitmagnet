@@ -189,9 +189,11 @@ func applyAccepted(
 	protect := !output.Rematch
 	// Catalog identity and supplied type/title/year are authority, not evidence that
 	// the torrent should never be evaluated. Unsourced rule metadata is correctable.
-	identityProtected := protect && (tc.ContentSource.Valid || !h.IsNil())
+	identityProtected := protect && (tc.ContentID.Valid || h.ContentID.Valid)
+
+	typeProtected := protect && (!h.IsNil() || tc.ContentSource.Valid)
 	if !identityProtected {
-		if m.Type != "" {
+		if m.Type != "" && !typeProtected {
 			v, err := model.ParseContentType(m.Type)
 			if err != nil {
 				return err
@@ -206,13 +208,17 @@ func applyAccepted(
 			tc.ContentType = model.NewNullContentType(v)
 		}
 
-		if m.MixedWorks {
+		if m.MixedWorks && (!protect || !h.ContentSource.Valid) {
 			tc.ContentSource = model.NullString{}
 			tc.ContentID = model.NullString{}
 			tc.Content = model.Content{}
 		}
 
-		if m.Work != nil {
+		workCompatible := m.Work != nil &&
+			(!typeProtected || m.Work.Type == tc.ContentType.ContentType.String()) &&
+			(!protect || !h.ContentSource.Valid || h.ContentSource.String == model.SourceTmdb) &&
+			(!protect || !tc.ContentSource.Valid || tc.ContentSource.String == model.SourceTmdb)
+		if workCompatible {
 			typ, err := model.ParseContentType(m.Work.Type)
 			if err != nil {
 				return err

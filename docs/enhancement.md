@@ -132,19 +132,24 @@ and TMDB's [search workflow](https://developer.themoviedb.org/docs/search-and-qu
 `enhancement.Application.Enhance` is the explicit single-torrent service entry point.
 It requires a real completed ordinary classification for current evidence, runs the
 bounded evaluator, fetches selected TMDB work details outside the application transaction,
-and rechecks freshness, authority and moderation before writing. It does not run on its
+and rechecks freshness, authority and moderation before writing. The application
+transaction follows the original run deadline and cancellation through lock waits,
+regardless of the completion caller context, and checks again before committing. It does not run on its
 own. Dedicated applying CLI commands, scheduling and shared automatic budgets are not
 yet available; `enhancement evaluate` remains read-only even with this storage present.
 
 Ordinary enhancement may correct unsourced rule results. Importer hints and existing
-catalogue identity are protected; an explicit internal rematch request may replace them.
+catalogue identity are protected; a type-only hint permits adding a compatible absent
+catalogue identity. An explicit internal rematch request may replace supplied values.
 Stored hint title/year now participate in ordinary classification. Accepted inferred
 title/year remains searchable and displayable without a catalogue match. Catalogue
 values take precedence in display, Release Year facets and Torznab. Original torrent
 names remain available and are retained in magnet names.
 
 Accepted results replay during ordinary reconstruction only while their evidence is
-valid. Failed/malformed later attempts retain valid accepted output and remain retryable.
+valid, including ordinary inferred title/year. Changing those ordinary values invalidates
+prior output and unchanged-input suppression; replayed enhancement values never become
+their own ordinary evidence. Failed/malformed later attempts retain valid accepted output and remain retryable.
 Completed unresolved and limited results suppress unchanged input/recipe; explicit force,
 rematch or a changed recipe/evidence can reconsider them. These records are backed up
 with the database; catalogue exports omit evaluation/recipe internals. A search-vector
