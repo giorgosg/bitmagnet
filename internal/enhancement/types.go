@@ -27,6 +27,10 @@ type Evidence struct {
 }
 
 const (
+	OutcomeAccepted        = "accepted"
+	OutcomeUnresolved      = "unresolved"
+	tagEditionDeluxe       = "llm-edition-deluxe"
+	tagPlatformLinux       = "llm-platform-linux"
 	OutcomeLimited         = "limited"
 	OutcomeMalformed       = "malformed"
 	OutcomeProviderFailure = "provider_failure"

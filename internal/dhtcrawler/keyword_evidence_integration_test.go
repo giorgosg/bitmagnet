@@ -57,8 +57,12 @@ func TestInitialKeywordDetectionPreservesObservedPaths(t *testing.T) {
 	require.True(t, ok)
 
 	pr := processor.New(processor.Params{
-		Moderation: ml, ClassifierConfig: cfg, Search: sr.Search, Workflow: cr.Runner,
-		Dao: lazy.New(func() (*dao.Query, error) { return db.Query, nil }),
+		Moderation:       ml,
+		ClassifierConfig: cfg,
+		Search:           sr.Search,
+		Workflow:         cr.Runner,
+		ClassifierSource: cr.Source,
+		Dao:              lazy.New(func() (*dao.Query, error) { return db.Query, nil }),
 	})
 	p, err := pr.Processor.Get()
 	require.NoError(t, err)

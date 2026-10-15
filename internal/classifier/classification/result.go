@@ -91,6 +91,14 @@ func (a *ContentAttributes) Merge(other ContentAttributes) {
 }
 
 func (a *ContentAttributes) ApplyHint(h model.TorrentHint) {
+	if h.Title.Valid {
+		a.BaseTitle = h.Title
+	}
+
+	if !h.ReleaseYear.IsNil() {
+		a.Date = model.NewDateFromParts(h.ReleaseYear, 1, 1)
+	}
+
 	if len(h.Episodes) > 0 {
 		a.Episodes = h.Episodes
 	}

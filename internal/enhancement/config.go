@@ -46,11 +46,11 @@ func NewDefaultConfig() Config {
 		RunTimeout:           10 * time.Minute,
 		Tags: []string{
 			"llm-platform-windows",
-			"llm-platform-linux",
+			tagPlatformLinux,
 			"llm-platform-macos",
 			"llm-platform-android",
 			"llm-platform-ios",
-			"llm-edition-deluxe",
+			tagEditionDeluxe,
 			"llm-edition-collectors",
 		},
 	}

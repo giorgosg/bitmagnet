@@ -1,4 +1,4 @@
-# Read-only metadata evaluation
+# Metadata enhancement
 
 `bitmagnet enhancement evaluate` reads selected visible torrents, evaluates their
 metadata through an explicitly configured OpenAI-compatible Chat Completions endpoint,
@@ -126,3 +126,35 @@ live model-quality claim follows from deterministic tests passing.
 The transport follows the official [Chat Completions API](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)
 , the [DeepSeek compatible parameter reference](https://api-docs.deepseek.com/api/create-chat-completion/),
 and TMDB's [search workflow](https://developer.themoviedb.org/docs/search-and-query-for-details).
+
+## Durable application for internal callers
+
+`enhancement.Application.Enhance` is the explicit single-torrent service entry point.
+It requires a real completed ordinary classification for current evidence, runs the
+bounded evaluator, fetches selected TMDB work details outside the application transaction,
+and rechecks freshness, authority and moderation before writing. It does not run on its
+own. Dedicated applying CLI commands, scheduling and shared automatic budgets are not
+yet available; `enhancement evaluate` remains read-only even with this storage present.
+
+Ordinary enhancement may correct unsourced rule results. Importer hints and existing
+catalogue identity are protected; an explicit internal rematch request may replace them.
+Stored hint title/year now participate in ordinary classification. Accepted inferred
+title/year remains searchable and displayable without a catalogue match. Catalogue
+values take precedence in display, Release Year facets and Torznab. Original torrent
+names remain available and are retained in magnet names.
+
+Accepted results replay during ordinary reconstruction only while their evidence is
+valid. Failed/malformed later attempts retain valid accepted output and remain retryable.
+Completed unresolved and limited results suppress unchanged input/recipe; explicit force,
+rematch or a changed recipe/evidence can reconsider them. These records are backed up
+with the database; catalogue exports omit evaluation/recipe internals. A search-vector
+rebuild does not count as evaluation. Existing torrents acquire ordinary completion
+records when genuinely classified, never from a fabricated migration backfill.
+
+Recipes store sanitized canonical JSON excluding API credentials, prices and operational
+concurrency/run bounds. They include the requested endpoint/model/generation settings,
+prompt, controlled tags, implementation revision and ordinary workflow recipe. Hosted
+model aliases may change behind the same requested recipe. The reserved generated tag
+set is replaced atomically while user/importer tags outside it survive. No year tags
+are generated. All processing remains explicitly invoked; nothing is enabled or deployed
+by migrating the database.

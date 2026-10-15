@@ -4,6 +4,7 @@ import (
 	"path"
 	"runtime"
 
+	"github.com/bitmagnet-io/bitmagnet/internal/model"
 	"github.com/iancoleman/strcase"
 	"gorm.io/gen"
 	"gorm.io/gen/field"
@@ -319,6 +320,8 @@ func BuildGenerator(db *gorm.DB) *gen.Generator {
 		gen.FieldType("content_type", "ContentType"),
 	)
 	torrentContentBaseOptions := []gen.ModelOpt{
+		gen.FieldType("inferred_year", "Year"),
+		gen.FieldGenType("inferred_year", "Uint16"),
 		infoHashType,
 		infoHashReadOnly,
 		gen.FieldGenType("content_type", "String"),
@@ -624,6 +627,7 @@ func BuildGenerator(db *gorm.DB) *gen.Generator {
 	)
 
 	g.ApplyBasic(
+		&model.ClassificationEvaluation{},
 		moderationDecisions, moderationEvidence, moderationHistory,
 		torrentSources,
 		torrentFiles,

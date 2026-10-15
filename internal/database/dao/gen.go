@@ -19,6 +19,7 @@ var (
 	Q                        = new(Query)
 	APIKey                   *aPIKey
 	APIKeyPermission         *aPIKeyPermission
+	ClassificationEvaluation *classificationEvaluation
 	Content                  *content
 	ContentAttribute         *contentAttribute
 	ContentCollection        *contentCollection
@@ -47,6 +48,7 @@ func SetDefault(db *gorm.DB, opts ...gen.DOOption) {
 	*Q = *Use(db, opts...)
 	APIKey = &Q.APIKey
 	APIKeyPermission = &Q.APIKeyPermission
+	ClassificationEvaluation = &Q.ClassificationEvaluation
 	Content = &Q.Content
 	ContentAttribute = &Q.ContentAttribute
 	ContentCollection = &Q.ContentCollection
@@ -76,6 +78,7 @@ func Use(db *gorm.DB, opts ...gen.DOOption) *Query {
 		db:                       db,
 		APIKey:                   newAPIKey(db, opts...),
 		APIKeyPermission:         newAPIKeyPermission(db, opts...),
+		ClassificationEvaluation: newClassificationEvaluation(db, opts...),
 		Content:                  newContent(db, opts...),
 		ContentAttribute:         newContentAttribute(db, opts...),
 		ContentCollection:        newContentCollection(db, opts...),
@@ -106,6 +109,7 @@ type Query struct {
 
 	APIKey                   aPIKey
 	APIKeyPermission         aPIKeyPermission
+	ClassificationEvaluation classificationEvaluation
 	Content                  content
 	ContentAttribute         contentAttribute
 	ContentCollection        contentCollection
@@ -139,6 +143,7 @@ func (q *Query) clone(db *gorm.DB) *Query {
 		db:                       db,
 		APIKey:                   q.APIKey.clone(db),
 		APIKeyPermission:         q.APIKeyPermission.clone(db),
+		ClassificationEvaluation: q.ClassificationEvaluation.clone(db),
 		Content:                  q.Content.clone(db),
 		ContentAttribute:         q.ContentAttribute.clone(db),
 		ContentCollection:        q.ContentCollection.clone(db),
@@ -177,6 +182,7 @@ func (q *Query) ReplaceDB(db *gorm.DB) *Query {
 		db:                       db,
 		APIKey:                   q.APIKey.replaceDB(db),
 		APIKeyPermission:         q.APIKeyPermission.replaceDB(db),
+		ClassificationEvaluation: q.ClassificationEvaluation.replaceDB(db),
 		Content:                  q.Content.replaceDB(db),
 		ContentAttribute:         q.ContentAttribute.replaceDB(db),
 		ContentCollection:        q.ContentCollection.replaceDB(db),
@@ -205,6 +211,7 @@ func (q *Query) ReplaceDB(db *gorm.DB) *Query {
 type queryCtx struct {
 	APIKey                   IAPIKeyDo
 	APIKeyPermission         IAPIKeyPermissionDo
+	ClassificationEvaluation IClassificationEvaluationDo
 	Content                  IContentDo
 	ContentAttribute         IContentAttributeDo
 	ContentCollection        IContentCollectionDo
@@ -233,6 +240,7 @@ func (q *Query) WithContext(ctx context.Context) *queryCtx {
 	return &queryCtx{
 		APIKey:                   q.APIKey.WithContext(ctx),
 		APIKeyPermission:         q.APIKeyPermission.WithContext(ctx),
+		ClassificationEvaluation: q.ClassificationEvaluation.WithContext(ctx),
 		Content:                  q.Content.WithContext(ctx),
 		ContentAttribute:         q.ContentAttribute.WithContext(ctx),
 		ContentCollection:        q.ContentCollection.WithContext(ctx),

@@ -2,6 +2,7 @@ package processor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/query"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/search"
+	"github.com/bitmagnet-io/bitmagnet/internal/enhancement"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
 	"github.com/bitmagnet-io/bitmagnet/internal/moderation"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol"
@@ -23,6 +25,7 @@ type Processor interface {
 }
 
 type processor struct {
+	recipeSource    classifier.Source
 	defaultWorkflow string
 	search          search.Search
 	runner          classifier.Runner
@@ -105,7 +108,6 @@ func (c processor) Process(ctx context.Context, params MessageParams) error {
 		mtx                sync.Mutex
 		wg                 sync.WaitGroup
 		errs               []error
-		idsToDelete        []string
 		infoHashesToDelete []protocol.ID
 	)
 
@@ -126,12 +128,23 @@ func (c processor) Process(ctx context.Context, params MessageParams) error {
 		go func(torrent model.Torrent) {
 			defer wg.Done()
 
-			thisDeleteIDs := make(map[string]struct{}, len(torrent.Contents))
+			original := torrent
+			if err := enhancement.OrdinarySnapshot(
+				c.dao.UnderlyingDB().WithContext(ctx),
+				&torrent,
+			); err != nil {
+				mtx.Lock()
+
+				errs = append(errs, err)
+				failedHashes = append(failedHashes, torrent.InfoHash)
+				mtx.Unlock()
+
+				return
+			}
+
 			foundMatch := false
 
 			for _, tc := range torrent.Contents {
-				thisDeleteIDs[tc.ID] = struct{}{}
-
 				if !foundMatch &&
 					!torrent.Hint.ContentSource.Valid &&
 					params.ClassifyMode != ClassifyModeRematch &&
@@ -177,14 +190,7 @@ func (c processor) Process(ctx context.Context, params MessageParams) error {
 					errs = append(errs, classifyErr)
 				}
 			} else {
-				torrentContent := newTorrentContent(torrent, cl)
-
-				tcID := torrentContent.InferID()
-				for id := range thisDeleteIDs {
-					if id != tcID {
-						idsToDelete = append(idsToDelete, id)
-					}
-				}
+				torrentContent := newTorrentContent(original, cl)
 
 				tcs = append(tcs, torrentContent)
 
@@ -223,9 +229,20 @@ func (c processor) Process(ctx context.Context, params MessageParams) error {
 		return nil
 	}
 
+	recipe, err := json.Marshal(struct {
+		Revision string            `json:"revision"`
+		Source   classifier.Source `json:"source"`
+		Workflow string            `json:"workflow"`
+		Flags    classifier.Flags  `json:"flags"`
+		Mode     ClassifyMode      `json:"mode"`
+	}{"ordinary-v2-hint-title-year", c.recipeSource, workflowName, params.ClassifierFlags, params.ClassifyMode})
+	if err != nil {
+		return err
+	}
+
 	return c.persist(ctx, persistPayload{
+		recipe:           string(recipe),
 		torrentContents:  tcs,
-		deleteIDs:        idsToDelete,
 		deleteInfoHashes: infoHashesToDelete,
 		addTags:          tagsToAdd,
 	})
@@ -243,6 +260,8 @@ func newTorrentContent(t model.Torrent, c classification.Result) model.TorrentCo
 		Torrent:         t,
 		InfoHash:        t.InfoHash,
 		ContentType:     c.ContentType,
+		InferredTitle:   c.BaseTitle.String,
+		InferredYear:    c.Date.Year,
 		Languages:       c.Languages,
 		Episodes:        c.Episodes,
 		VideoResolution: c.VideoResolution,

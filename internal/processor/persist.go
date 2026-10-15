@@ -3,54 +3,80 @@ package processor
 import (
 	"context"
 	"database/sql/driver"
+	"sort"
 
 	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
+	"github.com/bitmagnet-io/bitmagnet/internal/enhancement"
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
+	"github.com/bitmagnet-io/bitmagnet/internal/moderation"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol"
 	"github.com/bitmagnet-io/bitmagnet/internal/slice"
 	"gorm.io/gorm/clause"
 )
 
 type persistPayload struct {
+	recipe           string
 	torrentContents  []model.TorrentContent
-	deleteIDs        []string
 	deleteInfoHashes []protocol.ID
 	addTags          map[protocol.ID]map[string]struct{}
 }
 
 func (c processor) persist(ctx context.Context, payload persistPayload) error {
-	contentsMap := make(map[model.ContentRef]struct{}, len(payload.torrentContents))
-	contentsPtr := make([]*model.Content, 0, len(payload.torrentContents))
-	torrentContentsPtr := make([]*model.TorrentContent, 0, len(payload.torrentContents))
-	torrentTagsPtr := make([]*model.TorrentTag, 0, len(payload.addTags))
+	return c.dao.Transaction(func(tx *dao.Query) error {
+		sort.Slice(payload.torrentContents, func(i, j int) bool {
+			left := moderation.IdentifierForInfoHash(payload.torrentContents[i].InfoHash)
+			right := moderation.IdentifierForInfoHash(payload.torrentContents[j].InfoHash)
 
-	for _, tc := range payload.torrentContents {
-		tcCopy := tc
-		tcCopy.Torrent = model.Torrent{}
+			return left.String() < right.String()
+		})
 
-		if tcCopy.ContentID.Valid && tcCopy.Content.CreatedAt.IsZero() {
-			contentRef := tcCopy.Content.Ref()
-			if _, ok := contentsMap[contentRef]; !ok {
-				contentsMap[contentRef] = struct{}{}
-				contentCopy := tcCopy.Content
-				contentsPtr = append(contentsPtr, &contentCopy)
+		for i := range payload.torrentContents {
+			tc := &payload.torrentContents[i]
+			if err := enhancement.LockTorrent(tx.UnderlyingDB().WithContext(ctx), tc.InfoHash); err != nil {
+				return err
+			}
+
+			if err := enhancement.RecordOrdinary(
+				tx.UnderlyingDB().WithContext(ctx),
+				tc.Torrent,
+				tc,
+				payload.recipe,
+			); err != nil {
+				return err
 			}
 		}
 
-		tcCopy.Content = model.Content{}
-		torrentContentsPtr = append(torrentContentsPtr, &tcCopy)
-	}
+		contentsMap := make(map[model.ContentRef]struct{}, len(payload.torrentContents))
+		contentsPtr := make([]*model.Content, 0, len(payload.torrentContents))
+		torrentContentsPtr := make([]*model.TorrentContent, 0, len(payload.torrentContents))
+		torrentTagsPtr := make([]*model.TorrentTag, 0, len(payload.addTags))
 
-	for infoHash, tags := range payload.addTags {
-		for tag := range tags {
-			torrentTagsPtr = append(torrentTagsPtr, &model.TorrentTag{
-				InfoHash: infoHash,
-				Name:     tag,
-			})
+		for _, tc := range payload.torrentContents {
+			tcCopy := tc
+			tcCopy.Torrent = model.Torrent{}
+
+			if tcCopy.ContentID.Valid && tcCopy.Content.CreatedAt.IsZero() {
+				contentRef := tcCopy.Content.Ref()
+				if _, ok := contentsMap[contentRef]; !ok {
+					contentsMap[contentRef] = struct{}{}
+					contentCopy := tcCopy.Content
+					contentsPtr = append(contentsPtr, &contentCopy)
+				}
+			}
+
+			tcCopy.Content = model.Content{}
+			torrentContentsPtr = append(torrentContentsPtr, &tcCopy)
 		}
-	}
 
-	return c.dao.Transaction(func(tx *dao.Query) error {
+		for infoHash, tags := range payload.addTags {
+			for tag := range tags {
+				torrentTagsPtr = append(torrentTagsPtr, &model.TorrentTag{
+					InfoHash: infoHash,
+					Name:     tag,
+				})
+			}
+		}
+
 		if len(contentsPtr) > 0 {
 			if createContentErr := tx.Content.WithContext(ctx).Clauses(
 				clause.OnConflict{
@@ -60,11 +86,11 @@ func (c processor) persist(ctx context.Context, payload persistPayload) error {
 			}
 		}
 
-		if len(payload.deleteIDs) > 0 {
-			if _, deleteErr := tx.TorrentContent.WithContext(ctx).Where(
-				c.dao.TorrentContent.ID.In(payload.deleteIDs...),
-			).Delete(); deleteErr != nil {
-				return deleteErr
+		for _, tc := range payload.torrentContents {
+			if _, err := tx.TorrentContent.WithContext(ctx).
+				Where(tx.TorrentContent.InfoHash.Eq(tc.InfoHash), tx.TorrentContent.ID.Neq(tc.InferID())).
+				Delete(); err != nil {
+				return err
 			}
 		}
 
@@ -89,9 +115,12 @@ func (c processor) persist(ctx context.Context, payload persistPayload) error {
 		}
 
 		if len(payload.deleteInfoHashes) > 0 {
-			valuers := slice.Map(payload.deleteInfoHashes, func(infoHash protocol.ID) driver.Valuer {
-				return infoHash
-			})
+			valuers := slice.Map(
+				payload.deleteInfoHashes,
+				func(infoHash protocol.ID) driver.Valuer {
+					return infoHash
+				},
+			)
 
 			if _, deleteErr := tx.Torrent.WithContext(ctx).Where(
 				c.dao.Torrent.InfoHash.In(valuers...),
