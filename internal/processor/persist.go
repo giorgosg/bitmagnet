@@ -15,6 +15,7 @@ import (
 )
 
 type persistPayload struct {
+	rematch          bool
 	recipe           string
 	torrentContents  []model.TorrentContent
 	deleteInfoHashes []protocol.ID
@@ -41,6 +42,7 @@ func (c processor) persist(ctx context.Context, payload persistPayload) error {
 				tc.Torrent,
 				tc,
 				payload.recipe,
+				payload.rematch,
 			); err != nil {
 				return err
 			}

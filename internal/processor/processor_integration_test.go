@@ -290,6 +290,41 @@ func TestSeriesIdentitySurvivesReconstructionRematchAndReindex(t *testing.T) {
 	require.Equal(t, first.ID, replayed.ID)
 	require.Equal(t, first.Episodes, replayed.Episodes)
 
+	// A later ordinary enhancement cannot replace authority introduced by the first one.
+	for _, metadata := range []*enhancement.Metadata{
+		{Type: "tv_show", Work: &enhancement.Work{Type: "tv_show", ID: 43}},
+		{Title: "Release-only update", Episodes: map[int][]int{2: {5}}},
+	} {
+		run, prepareErr := app.Prepare(t.Context(), hash, true, false)
+		require.NoError(t, prepareErr)
+
+		var details *model.Content
+		if metadata.Work != nil {
+			details = &model.Content{
+				Type:        model.ContentTypeTvShow,
+				Source:      model.SourceTmdb,
+				ID:          "43",
+				Title:       "Replacement series",
+				ReleaseYear: 2002,
+			}
+		}
+
+		require.NoError(
+			t,
+			app.Complete(
+				t.Context(),
+				run,
+				enhancement.Evaluation{Outcome: enhancement.OutcomeAccepted, Result: metadata},
+				details,
+			),
+		)
+		require.NoError(t, p.Process(t.Context(), MessageParams{InfoHashes: []protocol.ID{hash}}))
+
+		var retained model.TorrentContent
+		require.NoError(t, db.Gorm.Where("info_hash = ?", hash).First(&retained).Error)
+		require.Equal(t, "42", retained.ContentID.String)
+	}
+
 	engine.id = 43
 	_, err = app.Enhance(t.Context(), hash, true, true)
 	require.NoError(t, err)
@@ -321,6 +356,28 @@ func TestSeriesIdentitySurvivesReconstructionRematchAndReindex(t *testing.T) {
 		db.Gorm.Where("info_hash = ? AND stage = 'enhancement'", hash).First(&after).Error,
 	)
 	require.Equal(t, before, after)
+
+	// Ordinary explicit rematch also has authority to select a different work.
+	replacement := model.Content{
+		Type:        model.ContentTypeTvShow,
+		Source:      model.SourceTmdb,
+		ID:          "44",
+		Title:       "Ordinary rematch",
+		ReleaseYear: 2003,
+	}
+	require.NoError(t, db.Gorm.Create(&replacement).Error)
+	p.runner = &catalogueResultRunner{content: replacement}
+	require.NoError(
+		t,
+		p.Process(
+			t.Context(),
+			MessageParams{InfoHashes: []protocol.ID{hash}, ClassifyMode: ClassifyModeRematch},
+		),
+	)
+
+	var replaced model.TorrentContent
+	require.NoError(t, db.Gorm.Where("info_hash = ?", hash).First(&replaced).Error)
+	require.Equal(t, "44", replaced.ContentID.String)
 }
 
 func TestOrdinaryProcessorAppliesStoredHintTitleAndYear(t *testing.T) {
@@ -412,7 +469,7 @@ func TestOrdinaryProcessorAppliesStoredHintTitleAndYear(t *testing.T) {
 	require.NoError(
 		t,
 		db.Gorm.Transaction(
-			func(tx *gorm.DB) error { return enhancement.RecordOrdinary(tx, torrent, &baseline, "test") },
+			func(tx *gorm.DB) error { return enhancement.RecordOrdinary(tx, torrent, &baseline, "test", false) },
 		),
 	)
 	require.NoError(t, db.Gorm.Model(&content).Update("title", "Fresh Orchard").Error)
@@ -528,4 +585,20 @@ func TestOrdinaryFallbackChangesInvalidateEnhancementWithoutSelfTriggering(t *te
 			require.NotEqual(t, run.InputFingerprint, changed.InputFingerprint)
 		})
 	}
+}
+
+type catalogueResultRunner struct{ content model.Content }
+
+func (r *catalogueResultRunner) Run(
+	_ context.Context,
+	_ string,
+	_ classifier.Flags,
+	_ model.Torrent,
+) (classification.Result, error) {
+	return classification.Result{
+		ContentAttributes: classification.ContentAttributes{
+			ContentType: model.NewNullContentType(r.content.Type),
+		},
+		Content: &r.content,
+	}, nil
 }

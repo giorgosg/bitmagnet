@@ -67,7 +67,7 @@ func OrdinarySnapshot(tx *gorm.DB, t *model.Torrent) error {
 // RecordOrdinary records a real completed classification and reconstructs its
 // effective row with still-valid accepted enhancement in the caller's transaction.
 // Call after LockTorrent and before writing the search row. No scheduling occurs.
-func RecordOrdinary(tx *gorm.DB, t model.Torrent, tc *model.TorrentContent, recipe string) error {
+func RecordOrdinary(tx *gorm.DB, t model.Torrent, tc *model.TorrentContent, recipe string, rematch bool) error {
 	current, err := loadTorrent(tx, t.InfoHash)
 	if err != nil {
 		return err
@@ -161,6 +161,35 @@ func RecordOrdinary(tx *gorm.DB, t model.Torrent, tc *model.TorrentContent, reci
 			return err
 		}
 
+		if !rematch {
+			catalog := output.Catalog
+			if catalog != nil && catalog.ID == "" {
+				catalog = nil
+			}
+
+			if err := retainCatalog(tx, current, tc, catalog); err != nil {
+				return err
+			}
+		} else {
+			// Explicit ordinary rematch establishes the new durable identity, even when
+			// prior release-level enhancement no longer matches the ordinary evidence.
+			output.Catalog = &catalogIdentity{
+				Type:   tc.ContentType.ContentType.String(),
+				Source: tc.ContentSource.String,
+				ID:     tc.ContentID.String,
+			}
+
+			data, err := json.Marshal(output)
+			if err != nil {
+				return err
+			}
+
+			accepted.AcceptedOutput = string(data)
+			if err := tx.Save(&accepted).Error; err != nil {
+				return err
+			}
+		}
+
 		if len(output.Tags) == 0 {
 			return nil
 		}
@@ -170,14 +199,15 @@ func RecordOrdinary(tx *gorm.DB, t model.Torrent, tc *model.TorrentContent, reci
 			Error
 	}
 
-	return applyAccepted(tx, current, tc, accepted)
+	return applyAccepted(tx, current, tc, &accepted, false)
 }
 
 func applyAccepted(
 	tx *gorm.DB,
 	t model.Torrent,
 	tc *model.TorrentContent,
-	state model.ClassificationEvaluation,
+	state *model.ClassificationEvaluation,
+	rematch bool,
 ) error {
 	var output acceptedOutput
 	if err := json.Unmarshal([]byte(state.AcceptedOutput), &output); err != nil {
@@ -186,12 +216,18 @@ func applyAccepted(
 
 	m := output.Metadata
 	h := t.Hint
+
 	protect := !output.Rematch
+	if !rematch {
+		if err := retainCatalog(tx, t, tc, output.Catalog); err != nil {
+			return err
+		}
+	}
 	// Catalog identity and supplied type/title/year are authority, not evidence that
 	// the torrent should never be evaluated. Unsourced rule metadata is correctable.
-	identityProtected := protect && (tc.ContentID.Valid || h.ContentID.Valid)
+	identityProtected := (!rematch && tc.ContentID.Valid) || (protect && h.ContentID.Valid)
 
-	typeProtected := protect && (!h.IsNil() || tc.ContentSource.Valid)
+	typeProtected := (protect && !h.IsNil()) || (!rematch && tc.ContentSource.Valid)
 	if !identityProtected {
 		if m.Type != "" && !typeProtected {
 			v, err := model.ParseContentType(m.Type)
@@ -332,6 +368,18 @@ func applyAccepted(
 
 	tc.Torrent = t
 	tc.UpdateTsv()
+	output.Catalog = &catalogIdentity{
+		Type:   tc.ContentType.ContentType.String(),
+		Source: tc.ContentSource.String,
+		ID:     tc.ContentID.String,
+	}
+
+	b, err := json.Marshal(output)
+	if err != nil {
+		return err
+	}
+
+	state.AcceptedOutput = string(b)
 
 	return nil
 }
@@ -343,4 +391,61 @@ func decodeOrdinary(data string) (model.TorrentContent, error) {
 	err := json.Unmarshal([]byte(data), &tc)
 
 	return tc, err
+}
+
+// Catalogue authority is independent of ordinary evidence and replaceable search rows.
+// Prefer the current effective identity, then the durable identity retained on acceptance.
+func retainCatalog(tx *gorm.DB, t model.Torrent, tc *model.TorrentContent, fallback *catalogIdentity) error {
+	var current model.TorrentContent
+
+	err := tx.Where("info_hash = ?", t.InfoHash).Order("id").First(&current).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	identity := fallback
+	if identity == nil {
+		if ref := tc.ContentRef(); ref.Valid {
+			identity = &catalogIdentity{Type: ref.Val.Type.String(), Source: ref.Val.Source, ID: ref.Val.ID}
+		}
+	}
+
+	if err == nil && current.ContentID.Valid {
+		identity = &catalogIdentity{
+			Type:   current.ContentType.ContentType.String(),
+			Source: current.ContentSource.String,
+			ID:     current.ContentID.String,
+		}
+	}
+
+	if identity == nil {
+		return nil
+	}
+
+	var content model.Content
+	if identity.ID != "" {
+		if err := tx.Preload("Attributes").
+			Preload("Collections").
+			Where("type = ? AND source = ? AND id = ?", identity.Type, identity.Source, identity.ID).
+			First(&content).
+			Error; err != nil {
+			return err
+		}
+	}
+
+	tc.ContentType = model.NewNullContentType(identity.Type)
+	tc.ContentSource = model.NullString{}
+
+	tc.ContentID = model.NullString{}
+	if identity.Source != "" {
+		tc.ContentSource = model.NewNullString(identity.Source)
+	}
+
+	if identity.ID != "" {
+		tc.ContentID = model.NewNullString(identity.ID)
+	}
+
+	tc.Content = content
+
+	return nil
 }

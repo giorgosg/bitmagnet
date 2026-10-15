@@ -241,6 +241,7 @@ func (c processor) Process(ctx context.Context, params MessageParams) error {
 	}
 
 	return c.persist(ctx, persistPayload{
+		rematch:          params.ClassifyMode == ClassifyModeRematch,
 		recipe:           string(recipe),
 		torrentContents:  tcs,
 		deleteInfoHashes: infoHashesToDelete,

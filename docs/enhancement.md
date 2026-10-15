@@ -93,6 +93,12 @@ three attempts total; malformed output (including invalid tool names/arguments) 
 within that ceiling. Tool batches are validated before any catalogue call.
 Every retry consumes request, token, spending and time limits.
 
+Both read-only experiments and persistent evaluation use the durable ordinary snapshot
+when present, including inferred title/year, without reading prior enhancement as ordinary
+classification. Legacy rows without a snapshot use existing classification. Both paths
+select the same representative files; read-only loading remains bounded and performs no
+state writes.
+
 Evidence contains the name, size/count, ordinary classification, supplied hints and
 at most twenty representative stored paths/sizes, favoring large relevant files and
 directory diversity. Missing/truncated lists are explicitly marked. Names and paths
@@ -140,7 +146,10 @@ yet available; `enhancement evaluate` remains read-only even with this storage p
 
 Ordinary enhancement may correct unsourced rule results. Importer hints and existing
 catalogue identity are protected; a type-only hint permits adding a compatible absent
-catalogue identity. An explicit internal rematch request may replace supplied values.
+catalogue identity. This includes a work attached by an earlier enhancement: force
+alone cannot replace or drop it, and a later fields-only result retains it. The retained
+identity lives with accepted state so reconstruction also works after search-row deletion.
+An explicit rematch request may replace supplied values or remove a work match.
 Stored hint title/year now participate in ordinary classification. Accepted inferred
 title/year remains searchable and displayable without a catalogue match. Catalogue
 values take precedence in display, Release Year facets and Torznab. Original torrent
@@ -149,7 +158,9 @@ names remain available and are retained in magnet names.
 Accepted results replay during ordinary reconstruction only while their evidence is
 valid, including ordinary inferred title/year. Changing those ordinary values invalidates
 prior output and unchanged-input suppression; replayed enhancement values never become
-their own ordinary evidence. Failed/malformed later attempts retain valid accepted output and remain retryable.
+their own ordinary evidence. Catalogue identity remains protected when changed ordinary
+evidence invalidates release-level output; explicit ordinary rematch can establish new
+identity. Failed/malformed later attempts retain valid accepted output and remain retryable.
 Completed unresolved and limited results suppress unchanged input/recipe; explicit force,
 rematch or a changed recipe/evidence can reconsider them. These records are backed up
 with the database; catalogue exports omit evaluation/recipe internals. A search-vector

@@ -156,7 +156,14 @@ stale runs and canceled calls cannot apply late metadata.
 
 Supplied hint fields and existing catalogue identity are protected during normal
 enhancement. A hint supplying only type permits adding a compatible missing catalogue
-identity. Explicit rematch may override them without rewriting hints. Release languages and
+identity. A catalogue identity attached by earlier enhancement is equally protected:
+force and fields-only updates retain it. Accepted state records that identity independently
+of ordinary evidence and search rows, including explicit detachment on rematch. Replay
+protects current identity; a past rematch does not authorize replacing a newer identity.
+Explicit ordinary rematch can establish new identity while invalidating obsolete release
+output. Read-only and persistent evaluation both project the ordinary snapshot through
+`BuildEvidence`, with a legacy classification fallback only when no snapshot exists.
+Explicit rematch may override supplied values without rewriting hints. Release languages and
 episodes remain separate from shared work identity. Accepted generated tags replace
 only the configured reserved set atomically. Search/display year and title prefer
 catalogue values, falling back to retained inferred values without synthetic content

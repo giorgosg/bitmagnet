@@ -51,11 +51,18 @@ type Run struct {
 	expires              time.Time
 }
 
+type catalogIdentity struct {
+	Type   string `json:"type"`
+	Source string `json:"source"`
+	ID     string `json:"id"`
+}
+
 type acceptedOutput struct {
-	Recipe   string   `json:"recipe"`
-	Metadata Metadata `json:"metadata"`
-	Rematch  bool     `json:"rematch"`
-	Tags     []string `json:"reservedTags"`
+	Catalog  *catalogIdentity `json:"catalog,omitempty"`
+	Recipe   string           `json:"recipe"`
+	Metadata Metadata         `json:"metadata"`
+	Rematch  bool             `json:"rematch"`
+	Tags     []string         `json:"reservedTags"`
 }
 
 func NewApplication(db *gorm.DB, engine Engine, catalogue tmdb.Client, config Config) *Application {
@@ -480,7 +487,7 @@ func (s *Application) Complete(
 			}
 
 			tc.Torrent = t
-			if err := applyAccepted(tx, t, &tc, state); err != nil {
+			if err := applyAccepted(tx, t, &tc, &state, run.rematch); err != nil {
 				return err
 			}
 

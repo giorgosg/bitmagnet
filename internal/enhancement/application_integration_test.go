@@ -2,6 +2,7 @@ package enhancement
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/model"
 	"github.com/bitmagnet-io/bitmagnet/internal/moderation"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -38,7 +40,7 @@ func TestDurableAcceptedMetadataSurvivesFailedAttempt(t *testing.T) {
 	require.NoError(
 		t,
 		db.Gorm.Transaction(
-			func(tx *gorm.DB) error { return RecordOrdinary(tx, torrent, &tc0, "test") },
+			func(tx *gorm.DB) error { return RecordOrdinary(tx, torrent, &tc0, "test", false) },
 		),
 	)
 	service := NewApplication(db.Gorm, nil, nil, NewDefaultConfig())
@@ -92,7 +94,7 @@ func applicationFixture(t *testing.T) (*dbtest.DB, *Application, protocol.ID) {
 	require.NoError(
 		t,
 		db.Gorm.Transaction(
-			func(tx *gorm.DB) error { return RecordOrdinary(tx, torrent, &tc, "test") },
+			func(tx *gorm.DB) error { return RecordOrdinary(tx, torrent, &tc, "test", false) },
 		),
 	)
 
@@ -299,7 +301,7 @@ func TestImporterHintsProtectFieldsUnlessExplicitRematch(t *testing.T) {
 	require.NoError(
 		t,
 		db.Gorm.Transaction(
-			func(tx *gorm.DB) error { return RecordOrdinary(tx, torrent, &baseline, "test") },
+			func(tx *gorm.DB) error { return RecordOrdinary(tx, torrent, &baseline, "test", false) },
 		),
 	)
 
@@ -409,7 +411,7 @@ func TestExistingCatalogueIdentityIsProtectedAndRematchCanReplaceIt(t *testing.T
 	require.NoError(
 		t,
 		db.Gorm.Transaction(
-			func(tx *gorm.DB) error { return RecordOrdinary(tx, torrent, &baseline, "test") },
+			func(tx *gorm.DB) error { return RecordOrdinary(tx, torrent, &baseline, "test", false) },
 		),
 	)
 
@@ -487,7 +489,7 @@ func TestRematchCanDetachCatalogueIdentityWhenTypeChanges(t *testing.T) {
 	require.NoError(
 		t,
 		db.Gorm.Transaction(
-			func(tx *gorm.DB) error { return RecordOrdinary(tx, torrent, &baseline, "test") },
+			func(tx *gorm.DB) error { return RecordOrdinary(tx, torrent, &baseline, "test", false) },
 		),
 	)
 	run, err := app.Prepare(t.Context(), hash, true, true)
@@ -509,6 +511,19 @@ func TestRematchCanDetachCatalogueIdentityWhenTypeChanges(t *testing.T) {
 	require.NoError(t, db.Gorm.Where("info_hash = ?", hash).First(&got).Error)
 	require.False(t, got.ContentID.Valid)
 	require.Equal(t, "Portable Game", got.Title())
+	require.NoError(t, db.Gorm.Where("info_hash = ?", hash).Delete(&model.TorrentContent{}).Error)
+
+	replayed := baseline
+
+	require.NoError(
+		t,
+		db.Gorm.Transaction(
+			func(tx *gorm.DB) error { return RecordOrdinary(tx, torrent, &replayed, "test", false) },
+		),
+	)
+	require.False(t, replayed.ContentID.Valid)
+	require.Equal(t, model.ContentTypeGame, replayed.ContentType.ContentType)
+	require.Equal(t, "Portable Game", replayed.Title())
 }
 
 func TestTypeOnlyHintAllowsCompatibleMissingIdentity(t *testing.T) {
@@ -555,7 +570,7 @@ func TestTypeOnlyHintAllowsCompatibleMissingIdentity(t *testing.T) {
 			require.NoError(
 				t,
 				db.Gorm.Transaction(
-					func(tx *gorm.DB) error { return RecordOrdinary(tx, torrent, &baseline, "test") },
+					func(tx *gorm.DB) error { return RecordOrdinary(tx, torrent, &baseline, "test", false) },
 				),
 			)
 
@@ -704,4 +719,250 @@ func TestCompletionLockWaitHonorsRunDeadlineAndCancellation(t *testing.T) {
 			require.Equal(t, accepted.CompletedAt, after.CompletedAt)
 		})
 	}
+}
+
+func TestEnhancementCatalogueAuthoritySurvivesReevaluationAndReplay(t *testing.T) {
+	t.Parallel()
+
+	for _, fieldsOnly := range []bool{false, true} {
+		t.Run(fmt.Sprint("fieldsOnly=", fieldsOnly), func(t *testing.T) {
+			t.Parallel()
+			db, app, hash := applicationFixture(t)
+			a := model.Content{
+				Type:        model.ContentTypeMovie,
+				Source:      model.SourceTmdb,
+				ID:          "10",
+				Title:       "First work",
+				ReleaseYear: 1984,
+			}
+			b := model.Content{
+				Type:        model.ContentTypeMovie,
+				Source:      model.SourceTmdb,
+				ID:          "20",
+				Title:       "Other work",
+				ReleaseYear: 2001,
+			}
+			first, err := app.Prepare(t.Context(), hash, false, false)
+			require.NoError(t, err)
+			require.NoError(
+				t,
+				app.Complete(
+					t.Context(),
+					first,
+					Evaluation{
+						Outcome: OutcomeAccepted,
+						Result: &Metadata{
+							Type: WorkMovie,
+							Work: &Work{Type: WorkMovie, ID: 10},
+						},
+					},
+					&a,
+				),
+			)
+			next, err := app.Prepare(t.Context(), hash, true, false)
+			require.NoError(t, err)
+			require.Equal(t, first.Evidence, next.Evidence)
+
+			metadata := &Metadata{Type: WorkMovie, Work: &Work{Type: WorkMovie, ID: 20}}
+			details := &b
+
+			if fieldsOnly {
+				metadata = &Metadata{Title: "Release detail", Year: 1998}
+				details = nil
+			}
+
+			require.NoError(
+				t,
+				app.Complete(
+					t.Context(),
+					next,
+					Evaluation{Outcome: OutcomeAccepted, Result: metadata},
+					details,
+				),
+			)
+
+			var got model.TorrentContent
+			require.NoError(t, db.Gorm.Where("info_hash = ?", hash).First(&got).Error)
+			require.Equal(t, "10", got.ContentID.String, "force must preserve existing catalogue authority")
+			// Search rows can be deleted independently of durable evaluation state.
+			require.NoError(t, db.Gorm.Where("info_hash = ?", hash).Delete(&model.TorrentContent{}).Error)
+
+			var torrent model.Torrent
+			require.NoError(t, db.Gorm.Where("info_hash = ?", hash).First(&torrent).Error)
+			baseline := model.TorrentContent{InfoHash: hash}
+
+			require.NoError(
+				t,
+				db.Gorm.Transaction(
+					func(tx *gorm.DB) error { return RecordOrdinary(tx, torrent, &baseline, "test", false) },
+				),
+			)
+			require.Equal(
+				t,
+				"10",
+				baseline.ContentID.String,
+				"replay must retain authority without a search row",
+			)
+			require.NoError(t, db.Gorm.Omit(clause.Associations).Create(&baseline).Error)
+			rematch, err := app.Prepare(t.Context(), hash, true, true)
+			require.NoError(t, err)
+			require.NoError(
+				t,
+				app.Complete(
+					t.Context(),
+					rematch,
+					Evaluation{
+						Outcome: OutcomeAccepted,
+						Result: &Metadata{
+							Type: WorkMovie,
+							Work: &Work{Type: WorkMovie, ID: 20},
+						},
+					},
+					&b,
+				),
+			)
+
+			baseline = model.TorrentContent{InfoHash: hash}
+
+			require.NoError(
+				t,
+				db.Gorm.Transaction(
+					func(tx *gorm.DB) error { return RecordOrdinary(tx, torrent, &baseline, "test", false) },
+				),
+			)
+			require.Equal(t, "20", baseline.ContentID.String)
+		})
+	}
+}
+
+func TestReadOnlyEvidenceUsesOrdinarySnapshotAfterEnhancement(t *testing.T) {
+	t.Parallel()
+	db, app, hash := applicationFixture(t)
+
+	var torrent model.Torrent
+	require.NoError(t, db.Gorm.Where("info_hash = ?", hash).First(&torrent).Error)
+	require.NoError(
+		t,
+		db.Gorm.Create(
+			&model.TorrentHint{
+				InfoHash:     hash,
+				ContentType:  model.ContentTypeTvShow,
+				ReleaseGroup: model.NewNullString("supplied-group"),
+			},
+		).Error,
+	)
+	require.NoError(t, db.Gorm.Preload("Hint").Where("info_hash = ?", hash).First(&torrent).Error)
+	// A large directory plus a small one exercises bounded representative selection.
+	for i := range 25 {
+		require.NoError(
+			t,
+			db.Gorm.Create(
+				&model.TorrentFile{
+					InfoHash: hash,
+					Index:    uint(i),
+					Path:     fmt.Sprintf("large/%02d.mkv", i),
+					Size:     uint(1000 - i),
+				},
+			).Error,
+		)
+	}
+
+	for i := range 2 {
+		require.NoError(
+			t,
+			db.Gorm.Create(
+				&model.TorrentFile{
+					InfoHash: hash,
+					Index:    uint(25 + i),
+					Path:     fmt.Sprintf("small/%02d.mkv", i),
+					Size:     uint(10 - i),
+				},
+			).Error,
+		)
+	}
+
+	require.NoError(t, db.Gorm.Preload("Hint").Preload("Files").Where("info_hash = ?", hash).First(&torrent).Error)
+
+	require.Len(t, torrent.Files, 27)
+
+	baseline := model.TorrentContent{
+		InfoHash:      hash,
+		ContentType:   model.NewNullContentType(model.ContentTypeTvShow),
+		InferredTitle: "Ordinary Orchard",
+		InferredYear:  1984,
+	}
+
+	require.NoError(
+		t,
+		db.Gorm.Transaction(
+			func(tx *gorm.DB) error { return RecordOrdinary(tx, torrent, &baseline, "test", false) },
+		),
+	)
+	first, err := app.Prepare(t.Context(), hash, false, false)
+	require.NoError(t, err)
+
+	content := model.Content{
+		Type:        model.ContentTypeTvShow,
+		Source:      model.SourceTmdb,
+		ID:          "10",
+		Title:       "Enhanced series",
+		ReleaseYear: 2001,
+	}
+	require.NoError(
+		t,
+		app.Complete(
+			t.Context(),
+			first,
+			Evaluation{
+				Outcome: OutcomeAccepted,
+				Result: &Metadata{
+					Type:      WorkSeries,
+					Work:      &Work{Type: WorkSeries, ID: 10},
+					Languages: []string{"en"},
+					Episodes:  map[int][]int{2: {5}},
+				},
+			},
+			&content,
+		),
+	)
+	persistent, err := app.Prepare(t.Context(), hash, true, false)
+	require.NoError(t, err)
+	require.Equal(t, first.Evidence, persistent.Evidence)
+	tx, err := db.Pool.BeginTx(t.Context(), pgx.TxOptions{AccessMode: pgx.ReadOnly})
+
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(t.Context()) }()
+
+	readonly, err := LoadEvidence(t.Context(), tx, []protocol.ID{hash}, 0)
+	require.NoError(t, err)
+	require.Len(t, readonly, 1)
+	require.JSONEq(t, string(persistent.Evidence.Classification), string(readonly[0].Classification))
+	require.Equal(t, persistent.Evidence, readonly[0])
+	require.NoError(t, tx.Rollback(t.Context()))
+	// Without durable ordinary state, legacy classifications still use the same projection.
+	require.NoError(
+		t,
+		db.Gorm.Where("info_hash = ? AND stage = 'ordinary'", hash).
+			Delete(&model.ClassificationEvaluation{}).
+			Error,
+	)
+	require.NoError(
+		t,
+		db.Gorm.Preload("Hint").
+			Preload("Files").
+			Preload("Contents.Content").
+			Where("info_hash = ?", hash).
+			First(&torrent).
+			Error,
+	)
+	expected, err := BuildEvidence(torrent)
+	require.NoError(t, err)
+	legacy, err := db.Pool.BeginTx(t.Context(), pgx.TxOptions{AccessMode: pgx.ReadOnly})
+
+	require.NoError(t, err)
+	defer func() { _ = legacy.Rollback(t.Context()) }()
+
+	actual, err := LoadEvidence(t.Context(), legacy, []protocol.ID{hash}, 0)
+	require.NoError(t, err)
+	require.Equal(t, expected, actual[0])
 }
