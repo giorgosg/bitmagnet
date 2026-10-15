@@ -151,7 +151,7 @@ Migration `00028` adds the independent evaluation table and inferred title/year 
 on `torrent_contents`. It backfills no evaluation records and creates no catalogue works. A partial index
 on non-null inferred years supports the fallback facet values without a full release
 scan on each request. Building that initially empty index still reads the existing
-torrent index once during migration; budget upgrade time with catalogue writers stopped.
+`torrent_contents` table once during migration; budget upgrade time with catalogue writers stopped.
 Release Year facets use catalogue years first and inferred years second; full-text
 vectors and display titles follow the same preference. Torznab uses the effective title
 and year while magnet names retain the original release name.

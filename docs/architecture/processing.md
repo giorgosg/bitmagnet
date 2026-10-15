@@ -142,7 +142,9 @@ accepted output; unresolved and limited completions suppress repeat calls for th
 input/recipe. A newer admitted generation rejects an older completion.
 
 Reconstruction reads the ordinary snapshot before reusing sourced matches, then
-replays accepted enhancement only when its evidence fingerprint still matches. This
+replays accepted enhancement only when its evidence fingerprint still matches. Shared
+work metadata is hydrated from current catalogue rows rather than an old snapshot
+copy, so ordinary reconstruction also refreshes title/year search vectors. This
 keeps enhancement output out of its own evidence and preserves results across changes
 to search-row identity. Popularity and incidental timestamps do not enter fingerprints.
 The application transaction shares moderation advisory locks with ingestion and decision
