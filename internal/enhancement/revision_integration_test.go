@@ -334,3 +334,46 @@ func TestCatalogueAuthenticationPausesAutomaticSearchAndDetails(t *testing.T) {
 		})
 	}
 }
+
+func TestPausedAdmissionCommitsExpiredReservationCleanup(t *testing.T) {
+	t.Parallel()
+	db, _, _ := applicationFixture(t)
+	c := automaticConfig()
+
+	var calls atomic.Int32
+
+	provider := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	defer provider.Close()
+
+	c.BaseURL = provider.URL
+	engine, err := NewEvaluator(c, nil, provider.Client())
+	require.NoError(t, err)
+
+	s := NewScheduler(db.Gorm, c, NewApplication(db.Gorm, engine, nil, c), nil)
+	claim, err := s.Claim(t.Context())
+	require.NoError(t, err)
+
+	a := &accounting{db: db.Gorm, config: c, claim: claim.Token}
+	_, err = a.reserve(t.Context(), 0.01)
+	require.NoError(t, err)
+	require.NoError(
+		t,
+		db.Gorm.Exec("UPDATE enhancement_reservations SET expires_at=now()-interval '1 minute'").Error,
+	)
+	require.NoError(t, db.Gorm.Exec("DELETE FROM enhancement_claims").Error)
+	require.NoError(t, a.pause(t.Context()))
+	claim, err = s.Claim(t.Context())
+	require.ErrorIs(t, err, ErrPaused)
+	require.Empty(t, claim.Token)
+
+	var count int64
+	require.NoError(t, db.Gorm.Table("enhancement_reservations").Count(&count).Error)
+	require.Zero(t, count)
+	require.NoError(t, db.Gorm.Table("enhancement_claims").Count(&count).Error)
+	require.Zero(t, count)
+	require.Zero(t, calls.Load())
+
+	var charged float64
+	require.NoError(t, db.Gorm.Raw("SELECT charged FROM enhancement_daily_spending").Scan(&charged).Error)
+	require.InDelta(t, 0.01, charged, 1e-9)
+}

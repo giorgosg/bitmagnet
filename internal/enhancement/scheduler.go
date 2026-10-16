@@ -49,6 +49,8 @@ func (s *Scheduler) Claim(ctx context.Context) (claim Claim, err error) {
 		return claim, err
 	}
 
+	var admissionErr error
+
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := schedulerLock(tx); err != nil {
 			return err
@@ -64,7 +66,9 @@ func (s *Scheduler) Claim(ctx context.Context) (claim Claim, err error) {
 		}
 
 		if paused > 0 {
-			return ErrPaused
+			// Commit bounded reservation maintenance without admitting work.
+			admissionErr = ErrPaused
+			return nil
 		}
 		// A crash after any request consumes this attempt's caps. Recover as limited,
 		// preserving accepted output and the pessimistic spending already reserved.
@@ -171,8 +175,11 @@ tc.info_hash=t.info_hash),
 
 		return nil
 	})
+	if err != nil {
+		return claim, err
+	}
 
-	return claim, err
+	return claim, admissionErr
 }
 
 var selectionSQL = `WITH ranked AS MATERIALIZED (
