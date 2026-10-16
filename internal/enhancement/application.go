@@ -112,7 +112,18 @@ token = ? AND expires_at > now()`, run.generation, run.InputFingerprint, run.rec
 		content, err = s.details(ctx, *result.Result.Work)
 		if err != nil {
 			result.Outcome = OutcomeProviderFailure
+			result.Failure = catalogueFailure(err)
+			result.Error = "catalogue details failed"
+			err = errors.New(result.Error)
 			result.Result = nil
+		}
+	}
+
+	if result.Failure != "" {
+		if a := automaticAccounting(ctx); a != nil {
+			if pauseErr := a.pause(ctx); pauseErr != nil {
+				return result, pauseErr
+			}
 		}
 	}
 
@@ -136,7 +147,7 @@ token = ? AND expires_at > now()`, run.generation, run.InputFingerprint, run.rec
 
 func (s *Application) details(ctx context.Context, w Work) (*model.Content, error) {
 	if s.catalogue == nil {
-		return nil, errors.New("catalogue client is required")
+		return nil, tmdb.ErrConfiguration
 	}
 
 	var (

@@ -76,6 +76,7 @@ type Usage struct {
 	Cost            *float64 `json:"cost,omitempty"`
 }
 type Evaluation struct {
+	Failure   string    `json:"failure,omitempty"`
 	InfoHash  string    `json:"infoHash"`
 	Outcome   string    `json:"outcome"`
 	Result    *Metadata `json:"result,omitempty"`

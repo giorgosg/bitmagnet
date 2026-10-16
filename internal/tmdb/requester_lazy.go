@@ -43,7 +43,7 @@ func (r *requesterLazy) Request(
 
 func newRequester(ctx context.Context, config Config, logger *zap.SugaredLogger) (Requester, error) {
 	if !config.Enabled {
-		return nil, errors.New("TMDB is disabled")
+		return nil, ErrConfiguration
 	}
 
 	if config.APIKey == defaultTmdbAPIKey {

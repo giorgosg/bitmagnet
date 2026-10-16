@@ -242,7 +242,11 @@ Daily allowances use UTC dates. An in-flight reservation remains charged to the 
 on which it was admitted; settlement after midnight adjusts that original day. A new
 day gets its own allowance. Unknown reservations are never refunded on restart.
 `enhancement_daily_spending` holds totals and `enhancement_reservations` holds only
-unreconciled request charges. Accepted evaluation state is independent of both.
+live request tokens. Terminal responses retire their tokens even when usage is unknown,
+without refunding the daily charge. Crash-orphaned tokens expire five seconds after
+claim expiry and are reclaimed in indexed pages of 64 during admission. Known late
+usage can reconcile exactly once within that settlement grace; expired tokens cannot
+refund charges. Accepted evaluation state is independent of both.
 
 Active claims expire after three evaluation timeouts, allowing ordinary preparation
 and the bounded inference run. An interrupted claim with no request becomes ready
@@ -258,6 +262,10 @@ as limited. If final persistence fails, conservative recovery records that paid 
 as limited before releasing its claim, preserving the effective caps.
 
 HTTP 400/401/403/404/422 model failures durably pause further automatic admission.
+Catalogue authentication and configuration failures also pause admission, whether
+encountered during search or detail retrieval; missing catalogue works do not pause it.
+Error classification retains only a safe failure kind, without provider response bodies
+or credentials.
 Restarting the process does not clear the pause. Correct the endpoint/key/model first;
 internal operator integrations can call `Scheduler.Resume`, which clears the pause
 and explicitly readmits failed/malformed attempts. Bounded operator CLI controls are

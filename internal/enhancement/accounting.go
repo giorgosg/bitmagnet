@@ -90,9 +90,12 @@ DO NOTHING`,
 		}
 
 		return tx.Exec(
-			`INSERT INTO enhancement_reservations(token, day, cost) VALUES (?, (now() AT TIME ZONE 'UTC')::date, ?)`,
+			`INSERT INTO enhancement_reservations(token, day, cost, expires_at)
+ SELECT ?, (now() AT TIME ZONE 'UTC')::date, ?, expires_at + interval '5 seconds'
+ FROM enhancement_claims WHERE token = ?`,
 			token,
 			cost,
+			a.claim,
 		).Error
 	})
 
@@ -109,24 +112,32 @@ func (a *accounting) settle(parent context.Context, token string, actual *float6
 		}
 
 		if status == 400 || status == 401 || status == 403 || status == 404 || status == 422 {
-			if err := tx.Exec(
-				`INSERT INTO key_values(key,value,created_at,updated_at) VALUES ('enhancement/paused','model
-authentication or configuration failure',now(),now()) ON CONFLICT (key) DO NOTHING`,
-			).Error; err != nil {
+			if err := pauseAutomatic(tx); err != nil {
 				return err
 			}
 		}
 
 		if actual == nil {
-			return nil
+			// The caller has terminated with uncertain usage. Keep the full daily
+			// charge, but retire its token so later duplicate settlement cannot refund it.
+			return tx.Exec("DELETE FROM enhancement_reservations WHERE token = ?", token).Error
 		}
 
 		return tx.Exec(
-			`WITH reservation AS (DELETE FROM enhancement_reservations WHERE token = ? RETURNING day,cost)
+			`WITH reservation AS (DELETE FROM enhancement_reservations WHERE token = ? AND expires_at > now()
+ RETURNING day,cost)
 UPDATE enhancement_daily_spending d SET charged = greatest(0,charged + ? - r.cost) FROM reservation
 r WHERE d.day=r.day`,
 			token,
 			*actual,
 		).Error
 	})
+}
+
+// Only unsettled requests retain tokens. A crash may orphan one after its lease
+// disappears; expiry includes the same five-second settlement grace as settle.
+func retireExpiredReservations(tx *gorm.DB) error {
+	return tx.Exec(`DELETE FROM enhancement_reservations WHERE token IN (
+ SELECT token FROM enhancement_reservations WHERE expires_at <= now()
+ ORDER BY expires_at,token LIMIT 64)`).Error
 }

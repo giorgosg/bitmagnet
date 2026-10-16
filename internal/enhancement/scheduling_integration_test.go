@@ -526,8 +526,8 @@ func TestSharedBudgetDayRolloverSettlesOriginalDay(t *testing.T) {
 	require.NoError(
 		t,
 		db.Gorm.Exec(
-			`INSERT INTO enhancement_reservations(token,day,cost) VALUES ('yesterday',(now() AT TIME ZONE 'UTC'
-)::date-1,0.9)`,
+			`INSERT INTO enhancement_reservations(token,day,cost,expires_at) VALUES ('yesterday',
+(now() AT TIME ZONE 'UTC')::date-1,0.9,now()+interval '1 hour')`,
 		).Error,
 	)
 	_, err = a.reserve(t.Context(), 0.8)

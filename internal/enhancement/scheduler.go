@@ -54,6 +54,10 @@ func (s *Scheduler) Claim(ctx context.Context) (claim Claim, err error) {
 			return err
 		}
 
+		if err := retireExpiredReservations(tx); err != nil {
+			return err
+		}
+
 		var paused int64
 		if err := tx.Table("key_values").Where("key = 'enhancement/paused'").Count(&paused).Error; err != nil {
 			return err

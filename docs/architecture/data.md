@@ -169,7 +169,7 @@ recompute only that infohash's maximum. GORM generation excludes the operational
 columns, preventing generic upserts from resetting them.
 
 `enhancement_claims` contains active leases only. `enhancement_daily_spending` stores
-UTC-day totals; `enhancement_reservations` stores unreconciled per-request reservations
+UTC-day totals; `enhancement_reservations` stores expiring live per-request reservation tokens
 so only known usage can refund a charge once. Unknown charges survive crashes.
 Authentication pause and the next admission group use existing `key_values` entries.
 Attempt fingerprints on `classification_evaluations` suppress exhausted failures

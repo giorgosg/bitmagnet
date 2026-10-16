@@ -373,6 +373,7 @@ func (e *Evaluator) Evaluate(parent context.Context, evidence Evidence) (result 
 
 							result.Outcome = OutcomeProviderFailure
 							result.Error = "catalogue search failed"
+							result.Failure = catalogueFailure(searchErr)
 
 							return result
 						}
@@ -576,6 +577,10 @@ func (e *Evaluator) search(ctx context.Context, call toolCall) ([]Candidate, err
 	args, err := parseSearch(call)
 	if err != nil {
 		return nil, err
+	}
+
+	if e.catalogue == nil {
+		return nil, tmdb.ErrConfiguration
 	}
 
 	client, err := e.catalogue.Get()

@@ -58,8 +58,10 @@ CREATE TABLE enhancement_daily_spending (
 CREATE TABLE enhancement_reservations (
     token text PRIMARY KEY,
     day date NOT NULL REFERENCES enhancement_daily_spending(day),
-    cost numeric NOT NULL CHECK (cost > 0)
+    cost numeric NOT NULL CHECK (cost > 0),
+    expires_at timestamptz NOT NULL
 );
+CREATE INDEX enhancement_reservations_expiry ON enhancement_reservations (expires_at, token);
 ALTER TABLE classification_evaluations ADD COLUMN attempt_input text NOT NULL DEFAULT '',
     ADD COLUMN attempt_recipe text NOT NULL DEFAULT '';
 
