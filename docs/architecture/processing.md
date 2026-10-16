@@ -129,8 +129,12 @@ It does not resolve the migration-decorated database or start workers. Process-l
 reservations bound concurrent experimental calls. Its command-specific lifecycle
 hook cancels reads and provider calls on application shutdown and waits for the active
 command to finish reporting; it does not change the shared CLI lifecycle. See [the operator guide](../enhancement.md)
-for selection, limits, accounting and JSON outcomes. This command still saves no evaluation or metadata. Automatic enhancement remains
-unavailable.
+for selection, limits, accounting and JSON outcomes. This command still saves no evaluation or metadata. Automatic enhancement remains disabled by default. Explicit `process` requests use
+`Scheduler.Request` and `ProcessRequested`: the same active claims, durable pause and
+UTC daily request ledger as the worker, while sharing whole-command evaluator caps.
+`preview`/`status` use the independent read-only connection without provider calls;
+`resume` clears persistent pause through the existing scheduler. JSON command logs go
+to stderr.
 
 Ordinary processor persistence now records actual completion in
 `classification_evaluations` under `(info_hash, ordinary)`, together with the ordinary

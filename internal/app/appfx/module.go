@@ -73,6 +73,7 @@ func New() fx.Option {
 			classifiercmd.New,
 			configcmd.New,
 			enhancementcmd.New,
+			enhancementcmd.LogOutput,
 			reprocesscmd.New,
 			processcmd.New,
 			workercmd.New,

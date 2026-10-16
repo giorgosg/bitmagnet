@@ -1,4 +1,4 @@
-// Package enhancementcmd exposes bounded, explicitly requested read-only experiments.
+// Package enhancementcmd exposes bounded metadata experiments and operator controls.
 package enhancementcmd
 
 import (
@@ -11,9 +11,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bitmagnet-io/bitmagnet/internal/database/dao"
 	"github.com/bitmagnet-io/bitmagnet/internal/database/postgres"
 	"github.com/bitmagnet-io/bitmagnet/internal/enhancement"
 	"github.com/bitmagnet-io/bitmagnet/internal/lazy"
+	"github.com/bitmagnet-io/bitmagnet/internal/processor"
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol"
 	"github.com/bitmagnet-io/bitmagnet/internal/tmdb"
 	"github.com/jackc/pgx/v5"
@@ -27,6 +29,8 @@ type Params struct {
 	Config    enhancement.Config
 	Postgres  postgres.Config
 	Catalogue lazy.Lazy[tmdb.Client]
+	Dao       lazy.Lazy[*dao.Query]
+	Processor lazy.Lazy[processor.Processor]
 	Tracer    pgx.QueryTracer `optional:"true"`
 }
 type Result struct {
@@ -34,21 +38,33 @@ type Result struct {
 	Command *cli.Command `group:"commands"`
 }
 type Report struct {
-	Accounting  string                   `json:"accounting"`
-	Model       string                   `json:"model"`
-	Evaluations []enhancement.Evaluation `json:"evaluations"`
+	Accounting        string                   `json:"accounting"`
+	Model             string                   `json:"model"`
+	RecipeFingerprint string                   `json:"recipeFingerprint"`
+	Recipe            json.RawMessage          `json:"recipe"`
+	Evaluations       []enhancement.Evaluation `json:"evaluations"`
 }
+
+const (
+	evaluateCommand = "evaluate"
+	processCommand  = "process"
+	resumeCommand   = "resume"
+)
 
 func New(p Params) Result {
 	action := lifecycleAction(p)
 
-	return Result{
+	result := Result{
 		Command: &cli.Command{
 			Name:  "enhancement",
 			Usage: "Inspect LLM metadata enhancement without applying results",
 			Subcommands: []*cli.Command{
 				{
-					Name:  "evaluate",
+					Name: evaluateCommand,
+					Description: "Runs explicit experiments again regardless of saved fingerprints. No migrations, " +
+						"workers, metadata, recipe, evaluation or shared budget writes. Spending is " +
+						"process-local; concurrent commands multiply the allowance. Save returned JSON for " +
+						"comparisons.",
 					Usage: "Read visible torrents and return JSON; performs no database writes",
 					Flags: []cli.Flag{
 						&cli.StringSliceFlag{
@@ -123,6 +139,61 @@ func New(p Params) Result {
 			},
 		},
 	}
+
+	evaluate := result.Command.Subcommands[0]
+	for _, mode := range []string{"preview", "status", processCommand, resumeCommand} {
+		command := *evaluate
+		command.Name = mode
+
+		command.Flags = append([]cli.Flag(nil), evaluate.Flags...)
+
+		switch mode {
+		case "preview":
+			command.Description = "Shows bounded evidence and eligibility without provider calls. ordinary_required " +
+				"needs ordinary classification; unchanged_completed suppresses the same input/recipe; " +
+				"exhausted_failure needs explicit retry or resume. Admission still rechecks " +
+				"freshness, moderation and spending."
+			command.Usage = "Preview bounded visible evidence and evaluation state; no writes or provider calls"
+		case "status":
+			command.Description = "Shows latest completed outcome separately from last attempt and retained accepted " +
+				"output, persistent pause and latest seven UTC spending totals. Failed or stale " +
+				"attempts do not erase valid accepted output. Daily charges include conservative " +
+				"unknown usage; per-run token/latency history is not retained."
+			command.Usage = "Inspect bounded latest completion, retained output, pause and daily spending; no writes"
+		case resumeCommand:
+			command.Flags = nil
+			command.Description = "Correct provider configuration first. Clears the durable pause and readmits " +
+				"provider/malformed failures. Does not enable automatic processing, start workers, " +
+				"reset spending, or retry unchanged completed limited outcomes."
+			command.Usage = "Explicitly clear persistent pause and readmit exhausted failures; starts no workers"
+		case processCommand:
+			command.Description = "Requires explicit hashes, positive configured daily_budget and run-max-cost, " +
+				"endpoint, model and token prices. Shares claim capacity, pause and daily ledger with " +
+				"automatic workers. Completed accepted/unresolved/limited input+recipe suppress " +
+				"repeats unless force/rematch is explicit. Force does not grant authority to replace " +
+				"importer values or existing works; rematch does. Failures retain valid accepted " +
+				"output. First-request budget denial defers; paid interruption becomes limited. A " +
+				"model answer can still be rejected as stale before application."
+			command.Usage = "Persist explicit hashes with shared concurrency/daily budget, even when automatic is off"
+			command.Flags = append(
+				command.Flags,
+				&cli.BoolFlag{
+					Name:  "force",
+					Usage: "Retry unchanged input/recipe; does not grant rematch authority",
+				},
+				&cli.BoolFlag{
+					Name:  "rematch",
+					Usage: "Explicitly permit replacing importer hints or existing work identity",
+				},
+			)
+		}
+
+		result.Command.Subcommands = append(result.Command.Subcommands, &command)
+	}
+
+	result.Command.Usage = "Bounded metadata evaluation, processing and operator inspection"
+
+	return result
 }
 
 // The shared CLI currently runs commands with a Background context. Bind only this
@@ -228,15 +299,20 @@ func run(parent context.Context, c *cli.Context, p Params) error {
 	cfg.InputCostPerMillion = c.Float64("input-cost-per-million")
 
 	cfg.OutputCostPerMillion = c.Float64("output-cost-per-million")
-	if cfg.MaxRunCost <= 0 {
-		return errors.New(
-			"evaluation requires positive run-max-cost and conservative input/output token prices",
-		)
+	if c.Command.Name == resumeCommand {
+		return resume(parent, c, p, cfg)
 	}
 
-	engine, err := enhancement.NewEvaluator(cfg, p.Catalogue, http.DefaultClient)
-	if err != nil {
-		return err
+	if c.Command.Name == evaluateCommand || c.Command.Name == processCommand {
+		if cfg.MaxRunCost <= 0 {
+			return errors.New(
+				"evaluation requires positive run-max-cost and conservative input/output token prices",
+			)
+		}
+
+		if err := cfg.Validate(); err != nil {
+			return err
+		}
 	}
 
 	hashes := make([]protocol.ID, 0)
@@ -254,6 +330,28 @@ func run(parent context.Context, c *cli.Context, p Params) error {
 	if len(hashes) > 100 || sample > 100 || sample < 0 || (len(hashes) == 0 && sample == 0) ||
 		(len(hashes) > 0 && sample > 0) {
 		return errors.New("select either 1-100 hashes or --sample 1-100")
+	}
+
+	if c.Command.Name == processCommand {
+		if cfg.Concurrency != p.Config.Concurrency {
+			return errors.New(
+				"persistent processing uses configured shared concurrency; " +
+					"concurrency overrides are for read-only experiments",
+			)
+		}
+
+		required := cfg
+
+		required.Automatic = true
+		if err := required.Validate(); err != nil {
+			return err
+		}
+
+		if sample != 0 {
+			return errors.New("persistent processing requires explicit --hash selection")
+		}
+
+		return process(parent, c, p, cfg, hashes)
 	}
 
 	ctx, cancel := context.WithTimeout(parent, cfg.RunTimeout)
@@ -295,11 +393,23 @@ func run(parent context.Context, c *cli.Context, p Params) error {
 		return errors.New("cannot close read-only catalogue transaction")
 	}
 
+	if c.Command.Name != evaluateCommand {
+		return inspect(ctx, c, conn, cfg, evidence)
+	}
+
+	engine, err := enhancement.NewEvaluator(cfg, p.Catalogue, http.DefaultClient)
+	if err != nil {
+		return err
+	}
+
 	report := Report{
-		Accounting:  "process-local only; no shared database budget ledger or evaluation state is read or written",
+		Accounting:  "process-local only; no shared database budget ledger is used and no evaluation state is written",
 		Model:       cfg.Model,
 		Evaluations: make([]enhancement.Evaluation, len(evidence)),
 	}
+	report.RecipeFingerprint, _, _ = enhancement.Recipe(cfg, "read-only-experiment")
+	_, canonical, _ := enhancement.Recipe(cfg, "read-only-experiment")
+	report.Recipe = json.RawMessage(canonical)
 	jobs := make(chan int)
 
 	var wg sync.WaitGroup
