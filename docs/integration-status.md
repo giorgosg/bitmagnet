@@ -121,6 +121,8 @@ review in [porting.md](porting.md) and a test seen **red**.
 | [#106](https://github.com/giorgosg/magnes/pull/106)  | Durable enhancement application and effective metadata replay                    | local                                                                | PostgreSQL regressions red: replay/search, fallback fingerprints, new hint values, locked expiry/cancellation, retained catalogue authority, read-only evidence equality and tags; full Go/race checks pass; rematch, FTS |
 | [#107](https://github.com/giorgosg/magnes/pull/107)  | Durable background enhancement and shared request budgets                        | local                                                                | Handoff/lease recovery, partial-budget cap reset, storage failure, hidden-prefix selection and fixture plans observed red; real PostgreSQL full/race, zero-write CLI, generation and Nix lint pass                        |
 
+| [#108](https://github.com/giorgosg/magnes/pull/108) | Bounded enhancement operator controls and rollout validation | local | Preview eligibility, stored-state decoding, JSON stdout logs and persistent concurrency override observed red; PostgreSQL/seeded full suite, focused force/rematch/pause/budget, race, Nix lint and website checks pass; automatic remains disabled |
+
 ## In flight
 
 None.
