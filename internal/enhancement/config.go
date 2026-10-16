@@ -10,6 +10,10 @@ import (
 )
 
 type Config struct {
+	Automatic            bool
+	DailyBudget          float64
+	PollInterval         time.Duration
+	ReconsiderInterval   time.Duration
 	BaseURL              string
 	APIKey               string
 	Model                string
@@ -35,6 +39,8 @@ type Config struct {
 func NewDefaultConfig() Config {
 	return Config{
 		Concurrency:          2,
+		PollInterval:         5 * time.Second,
+		ReconsiderInterval:   24 * time.Hour,
 		MaxRequests:          4,
 		MaxToolCalls:         6,
 		Timeout:              2 * time.Minute,
@@ -57,6 +63,14 @@ func NewDefaultConfig() Config {
 }
 
 func (c Config) Validate() error {
+	if c.Automatic && (c.DailyBudget <= 0 || math.IsNaN(c.DailyBudget) || math.IsInf(c.DailyBudget, 0) ||
+		c.InputCostPerMillion <= 0 || c.OutputCostPerMillion <= 0 ||
+		c.PollInterval <= 0 || c.ReconsiderInterval <= 0) {
+		return errors.New(
+			"automatic enhancement requires positive budget, token prices and scheduling intervals",
+		)
+	}
+
 	if c.Thinking != "" && c.Thinking != "enabled" && c.Thinking != "disabled" {
 		return errors.New("thinking must be empty, enabled or disabled")
 	}

@@ -16,8 +16,9 @@ func newError(msg string) error {
 }
 
 var (
-	ErrUnauthorized = newError("401 Unauthorized")
-	ErrNotFound     = newError("404 Not Found")
+	ErrConfiguration = newError("invalid configuration")
+	ErrUnauthorized  = newError("401 Unauthorized")
+	ErrNotFound      = newError("404 Not Found")
 )
 
 func (c client) ValidateAPIKey(ctx context.Context) error {

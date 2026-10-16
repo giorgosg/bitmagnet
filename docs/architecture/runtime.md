@@ -47,7 +47,9 @@ before anything touches the database.
 Anything long-running is a `worker.Worker` — a key plus an `fx.Hook` — contributed to the
 `workers` group and collected by `internal/worker`'s registry. Registered workers include
 `dht_crawler`, `dht_server`, `http_server`, `queue_server`, and the metrics/telemetry
-collectors.
+collectors. The `enhancement` worker is also registered but inert unless explicitly
+configured for automatic operation with a positive daily budget. Its shutdown cancels
+its contexts and waits for in-flight handlers.
 
 The registry is **not** driven by fx's own lifecycle. Nothing starts until a CLI command
 calls `Registry.Enable(...)` then `Registry.Start(ctx)`:

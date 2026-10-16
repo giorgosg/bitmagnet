@@ -99,6 +99,8 @@ func TestCommandWiringNeverAttemptsWrites(t *testing.T) {
 			cfg.BaseURL = server.URL
 			cfg.APIKey = "fake"
 			cfg.Model = "fake"
+			cfg.Automatic = true
+			cfg.DailyBudget = 1
 			cfg.MaxRunCost = 1
 			cfg.InputCostPerMillion = 1
 			cfg.OutputCostPerMillion = 1

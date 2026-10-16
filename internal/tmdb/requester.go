@@ -28,7 +28,9 @@ func (r requester) Request(
 		Get(path)
 	if err == nil && !res.IsSuccess() {
 		switch res.StatusCode() {
-		case http.StatusUnauthorized:
+		case http.StatusBadRequest, http.StatusUnprocessableEntity:
+			err = ErrConfiguration
+		case http.StatusUnauthorized, http.StatusForbidden:
 			err = ErrUnauthorized
 		case http.StatusNotFound:
 			err = ErrNotFound

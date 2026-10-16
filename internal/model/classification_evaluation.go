@@ -9,6 +9,8 @@ import (
 // ClassificationEvaluation belongs to a torrent and stage, never a replaceable search row.
 // Accepted state is independent of the last attempt and last completed evaluation.
 type ClassificationEvaluation struct {
+	AttemptInput      string       `gorm:"column:attempt_input"        json:"attemptInput"`
+	AttemptRecipe     string       `gorm:"column:attempt_recipe"       json:"attemptRecipe"`
 	InfoHash          protocol.ID  `gorm:"column:info_hash;primaryKey" json:"infoHash"`
 	Stage             string       `gorm:"column:stage;primaryKey"     json:"stage"`
 	InputFingerprint  string       `gorm:"column:input_fingerprint"    json:"inputFingerprint"`

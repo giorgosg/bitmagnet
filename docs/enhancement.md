@@ -140,9 +140,8 @@ It requires a real completed ordinary classification for current evidence, runs 
 bounded evaluator, fetches selected TMDB work details outside the application transaction,
 and rechecks freshness, authority and moderation before writing. The application
 transaction follows the original run deadline and cancellation through lock waits,
-regardless of the completion caller context, and checks again before committing. It does not run on its
-own. Dedicated applying CLI commands, scheduling and shared automatic budgets are not
-yet available; `enhancement evaluate` remains read-only even with this storage present.
+regardless of the completion caller context, and checks again before committing. It can also be invoked by the separately registered automatic worker. Dedicated
+applying CLI commands are not yet available; `enhancement evaluate` remains read-only even with this storage present.
 
 Ordinary enhancement may correct unsourced rule results. Importer hints and existing
 catalogue identity are protected; a type-only hint permits adding a compatible absent
@@ -168,7 +167,8 @@ identity, including an absent match, independently of whether ordinary evidence 
 Valid release fields still replay, but cannot restore the prior identity proposal. When
 changed evidence invalidates release fields, reconstruction rebuilds the search vector
 from the retained catalogue work. Failed/malformed later attempts retain valid accepted
-output and remain retryable.
+output. Internal explicit callers may retry; automatic processing suppresses exhausted
+provider/malformed attempts for unchanged evidence and recipe until explicit resume.
 Completed unresolved and limited results suppress unchanged input/recipe; explicit force,
 rematch or a changed recipe/evidence can reconsider them. These records are backed up
 with the database; catalogue exports omit evaluation/recipe internals. A search-vector
@@ -180,5 +180,95 @@ concurrency/run bounds. They include the requested endpoint/model/generation set
 prompt, controlled tags, implementation revision and ordinary workflow recipe. Hosted
 model aliases may change behind the same requested recipe. The reserved generated tag
 set is replaced atomically while user/importer tags outside it survive. No year tags
-are generated. All processing remains explicitly invoked; nothing is enabled or deployed
-by migrating the database.
+are generated. Automatic processing remains disabled by default; migrating the database enables no calls.
+
+## Automatic worker and shared spending
+
+The registered `enhancement` worker only runs inference when `enhancement.automatic`
+is explicitly true. It requires a positive `daily_budget`, `input_cost_per_million`
+and `output_cost_per_million`, together with the endpoint, key and model. Prices and
+budget use the same operator-chosen currency. No model or price fallback is selected.
+`worker run --all` includes this worker; `worker run --keys=enhancement` selects it alone.
+Keep automatic processing disabled until manually reviewed evaluation evidence supports
+its use. Deterministic tests do not measure model quality.
+
+```yaml
+enhancement:
+  automatic: false
+  daily_budget: 0
+  concurrency: 2
+  poll_interval: 5s
+  reconsider_interval: 24h
+```
+
+Ordinary classification transactionally marks the torrent ready after successful
+persistence. Moderation early stops never hand off work. A migration marks existing
+classified rows eligible without inventing ordinary completion records; selected
+legacy rows go through real ordinary classification before inference. Populated
+metadata and existing catalogue matches remain eligible, with the existing authority
+checks unchanged.
+
+Admission alternates slots between discovery within seven days and older discovery.
+Each group orders the maximum reported seeder count across sources descending,
+unknown last, then oldest instance discovery and infohash. Empty groups lend slots.
+Source writes refresh the maximum, including deletion of a source. A bounded boundary
+refresh moves expired recent rows to the older group in pages of 64 per poll. Admission
+waits for boundary catch-up to finish, so an incomplete older group cannot admit lower
+ranked work first. A large simultaneous crossing can therefore pause admission. Queue notifications
+cannot select enhancement work. The shared claim count enforces concurrency across
+processes; configure the same concurrency and budget on all instances sharing a database.
+
+Selection uses an indexed readiness hint on the torrent, without a job per catalogue
+row. Checked and hidden rows leave the ranking index. Selection examines at most 64
+ranked candidates per group; a hidden prefix is discarded page by page. Up to 64 rows whose last check is older
+than `reconsider_interval` reenter per poll, so changed recipes and evidence are
+reconsidered gradually. Persistent evaluations suppress unchanged accepted, unresolved
+and limited work even after queue cleanup. Exhausted provider and malformed attempts
+are also suppressed automatically for unchanged evidence/recipe. Reprocessing makes
+new ordinary evidence ready immediately. Low ranked work has no exhaustive coverage
+promise.
+
+Every model request, including retries, first reserves its configured worst-case price
+for 8,000 input tokens and the requested remaining billed output limit. Reservation
+and budget comparison serialize across processes. Known billed usage reconciles the
+reservation exactly once; completion output includes reasoning, without double counting
+reasoning already included by the provider. Missing usage, timeouts and crashes retain
+the full charge. Configured prices must cover the actual provider's billed token rates.
+A provider exceeding its advertised token ceiling can exceed a reservation; further
+requests stop when local limits detect it. No client can prevent an upstream provider
+from violating its requested cap.
+
+Daily allowances use UTC dates. An in-flight reservation remains charged to the day
+on which it was admitted; settlement after midnight adjusts that original day. A new
+day gets its own allowance. Unknown reservations are never refunded on restart.
+`enhancement_daily_spending` holds totals and `enhancement_reservations` holds only
+live request tokens. Terminal responses retire their tokens even when usage is unknown,
+without refunding the daily charge. Crash-orphaned tokens expire five seconds after
+claim expiry and are reclaimed in indexed pages of 64 during admission. Known late
+usage can reconcile exactly once within that settlement grace; expired tokens cannot
+refund charges. Accepted evaluation state is independent of both.
+
+Active claims expire after three evaluation timeouts, allowing ordinary preparation
+and the bounded inference run. An interrupted claim with no request becomes ready
+again. Once any request was reserved, recovery records `limited` for that generation
+and input/recipe, retaining accepted output and charges. A late worker cannot apply
+metadata or release a successor's claim. Its deadline is bounded by the stored lease
+expiry, and expired claims remain for conservative recovery. Completion preserves any
+ordinary handoff recorded after admission, including one concurrent with result persistence. Model requests retain the evaluator's
+configured request/tool/token/deadline limits, three total transient attempts and one
+malformed retry; the scheduler adds no queue retry layer. A budget stop before the
+first request defers work. After any paid request, a budget stop completes the attempt
+as limited. If final persistence fails, conservative recovery records that paid attempt
+as limited before releasing its claim, preserving the effective caps.
+
+HTTP 400/401/403/404/422 model failures durably pause further automatic admission.
+Catalogue authentication and configuration failures also pause admission, whether
+encountered during search or detail retrieval; missing catalogue works do not pause it.
+Error classification retains only a safe failure kind, without provider response bodies
+or credentials.
+Restarting the process does not clear the pause. Correct the endpoint/key/model first;
+internal operator integrations can call `Scheduler.Resume`, which clears the pause
+and explicitly readmits failed/malformed attempts. Bounded operator CLI controls are
+separate work. To stop calls now, disable the worker and stop its running process;
+shutdown cancels in-flight contexts and waits for handlers. `enhancement evaluate`
+never starts this worker or uses its ledger, even when automatic configuration is enabled.

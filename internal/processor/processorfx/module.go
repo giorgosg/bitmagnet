@@ -12,6 +12,7 @@ func New() fx.Option {
 		"processor",
 		fx.Provide(
 			processor.New,
+			processor.NewEnhancementWorker,
 			processorqueue.New,
 			batchqueue.New,
 		),

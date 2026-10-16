@@ -176,3 +176,20 @@ episodes remain separate from shared work identity. Accepted generated tags repl
 only the configured reserved set atomically. Search/display year and title prefer
 catalogue values, falling back to retained inferred values without synthetic content
 rows. The torrent retains its original name.
+
+## Automatic enhancement admission
+
+The separate `enhancement` worker is registered by the processor module so selected
+legacy classifications can use the real processor without a dependency cycle. It is
+inert unless `enhancement.automatic` and a positive daily spending budget are configured.
+Ordinary persistence marks readiness in the same transaction. SQL-only torrent hints
+support bounded ranking; a source trigger caches the maximum source seeder count.
+GORM generation deliberately omits these hints so generic ingestion upserts cannot
+reset them. See [operator configuration and recovery](../enhancement.md).
+
+A shared advisory lock serializes alternating recent/older claims, crash recovery and
+request spending reservations. Only active claims get rows, with expiry and owner tokens.
+Inference runs outside transactions. Application completion still locks the torrent,
+checks ordinary inputs, effective authority, moderation, generation, cancellation and
+the automatic lease. Interrupted charged attempts become limited rather than restarting
+with fresh caps. Last completed/accepted evaluations remain independent of spending.

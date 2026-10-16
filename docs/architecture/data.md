@@ -102,7 +102,7 @@ They are distinct from full administrative database backups.
 
 Goose SQL in [`migrations/`](../../migrations), embedded and run through
 `internal/database/migrations` — an fx decorator, so they apply before anything queries.
-Current high-water mark is `00028_classification_evaluations.sql`; `ls migrations/` rather than trusting this
+Current high-water mark is `00029_enhancement_scheduling.sql`; `ls migrations/` rather than trusting this
 sentence.
 
 **Forks number theirs independently and the numbers collide.** Anything cherry-picked gets
@@ -159,3 +159,19 @@ scan on each request. Building that initially empty index still reads the existi
 Release Year facets use catalogue years first and inferred years second; full-text
 vectors and display titles follow the same preference. Torznab uses the effective title
 and year while magnet names retain the original release name.
+
+Migration `00029` adds SQL-only readiness/ranking hints to `torrents`, three partial
+indexes and source/insert triggers. It scans existing torrent/source/search rows to
+initialize ranking and legacy eligibility, without fabricating ordinary evaluations
+or populating a queue. This is an upgrade cost: stop catalogue writers and budget
+space/time for three index builds and torrent updates. Source changes subsequently
+recompute only that infohash's maximum. GORM generation excludes the operational
+columns, preventing generic upserts from resetting them.
+
+`enhancement_claims` contains active leases only. `enhancement_daily_spending` stores
+UTC-day totals; `enhancement_reservations` stores expiring live per-request reservation tokens
+so only known usage can refund a charge once. Unknown charges survive crashes.
+Authentication pause and the next admission group use existing `key_values` entries.
+Attempt fingerprints on `classification_evaluations` suppress exhausted failures
+without replacing completed/accepted state. These operational tables are excluded
+from catalogue exports. They are not a full evaluation history.

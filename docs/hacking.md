@@ -288,3 +288,10 @@ do not migrate the prior sealed template or the source fixture database in place
 00027 index build is a one-time full-index operation; file imports perform bounded indexed
 lookups. See [the operator import contract](moderation-ban-file.md) and
 [upgrade cost](architecture/data.md).
+
+Automatic enhancement tests exercise PostgreSQL admission locks, leases and per-request
+spending with fake providers. `TestSchedulerSelectionUsesRankIndexAtFixtureScale` uses
+a separately migrated `btm_seed_29` template and checks both group query plans. Rebuild
+from a disposable clone of the prior template; preserve source and sealed fixtures.
+Scheduling columns on `torrents` are intentionally excluded by `internal/database/gen`
+so generated ingestion upserts cannot overwrite SQL-maintained readiness/ranking.
