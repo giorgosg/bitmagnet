@@ -91,15 +91,15 @@ once carried a shutdown deadlock. Treat any change to a stop path as security-gr
 
 `internal/app/cmd/`, each contributing a `*cli.Command` to the `commands` group:
 
-| Command       | Does                                                              |
-| ------------- | ----------------------------------------------------------------- |
-| `auth`        | `initial-invitation` — print the outstanding bootstrap code       |
-| `worker`      | `run` / `list` — the normal way to run the application            |
-| `process`     | Process specific infohashes through the classifier now            |
-| `reprocess`   | Re-run classification in bulk over the existing catalogue         |
-| `classifier`  | Inspect and test the classifier configuration and its JSON schema |
-| `enhancement` | `evaluate` — bounded read-only metadata experiments               |
-| `config`      | Show and validate resolved configuration                          |
+| Command       | Does                                                                                  |
+| ------------- | ------------------------------------------------------------------------------------- |
+| `auth`        | `initial-invitation` — print the outstanding bootstrap code                           |
+| `worker`      | `run` / `list` — the normal way to run the application                                |
+| `process`     | Process specific infohashes through the classifier now                                |
+| `reprocess`   | Re-run classification in bulk over the existing catalogue                             |
+| `classifier`  | Inspect and test the classifier configuration and its JSON schema                     |
+| `enhancement` | `evaluate`, `preview`, `status`, `process`, `resume` — bounded enhancement operations |
+| `config`      | Show and validate resolved configuration                                              |
 
 `internal/dev` is a **separate binary** with its own `commands` group, and nothing in it
 reaches the shipped surface above: `migrate` and `gorm` (the generators `task` calls), and

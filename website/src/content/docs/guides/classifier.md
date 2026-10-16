@@ -132,3 +132,40 @@ processor does not create a harmful-content decision or persistent suppression; 
 torrents may be rediscovered. Make a backup and test the
 rules before reprocessing existing data. Use [reprocessing](../reprocessing/) to apply
 changed rules to torrents already in the database.
+
+## Optional metadata enhancement
+
+LLM enhancement is a separate stage after ordinary classification. It ships with
+`enhancement.automatic: false` and has no dedicated UI or public submission API.
+Configure an explicit OpenAI-compatible endpoint, API key, model, conservative token
+prices and spending limits before making paid calls; no provider/model is selected
+for you.
+
+Use `bitmagnet enhancement preview --sample 10` to inspect bounded visible evidence
+without calls or writes. `enhancement evaluate` runs a bounded read-only experiment
+and prints JSON; it does not save metadata, evaluation state or shared budget charges.
+Its process-local allowance is independent of the database daily ledger. Save and
+review reports privately, since they contain torrent metadata. Read-only commands
+start no workers and require an already migrated database.
+
+`enhancement process --hash <infohash>` explicitly persists selected hashes through
+shared concurrency, daily spending, moderation and authority checks, even while
+automation is disabled. It requires a positive configured daily budget and run ceiling.
+`--force` retries unchanged evidence; `--rematch` additionally permits replacing
+supplied fields or an existing catalogue identity. Use rematch deliberately.
+`enhancement status --hash <infohash>` shows latest completion, last attempt, retained
+accepted output, pause and recent UTC spending. A failed attempt does not erase valid
+accepted metadata. `limited` is incomplete investigation, and `unresolved` is a completed
+empty answer; both suppress unchanged automatic repeats.
+
+Provider authentication/configuration failures pause persistent processing. Fix the
+configuration, inspect state/spend, then use `enhancement resume` to clear that pause;
+it does not enable automation or reset spend. Stop the worker process and leave
+automation disabled during recovery. For command flags and bounds, run
+`bitmagnet enhancement <command> --help`.
+
+Before enabling automatic work, independently review identification and release-field
+quality on a varied corpus and measure usage/cost, retries and latency. Existing matches
+are suggestions rather than ground truth. Successful JSON and passing software tests
+do not approve a rollout. Start with bounded explicit selections and approve the measured
+evidence separately before enabling automatic processing with a positive daily budget.

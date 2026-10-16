@@ -18,6 +18,8 @@ import (
 	"github.com/bitmagnet-io/bitmagnet/internal/protocol"
 	"github.com/bitmagnet-io/bitmagnet/internal/tmdb"
 	tmdb_mocks "github.com/bitmagnet-io/bitmagnet/internal/tmdb/mocks"
+	"github.com/bitmagnet-io/bitmagnet/internal/torznab"
+	torznabAdapter "github.com/bitmagnet-io/bitmagnet/internal/torznab/adapter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -258,8 +260,18 @@ func TestSeriesIdentitySurvivesReconstructionRematchAndReindex(t *testing.T) {
 	}
 
 	engine := &selectedWorkEngine{id: 42}
-	app := enhancement.NewApplication(db.Gorm, engine, catalogue, enhancement.NewDefaultConfig())
-	result, err := app.Enhance(t.Context(), hash, false, false)
+	cfgEnhancement := enhancement.NewDefaultConfig()
+	cfgEnhancement.BaseURL = "https://example.invalid/v1"
+	cfgEnhancement.APIKey = "fake"
+	cfgEnhancement.Model = "fake"
+	cfgEnhancement.DailyBudget = 1
+	cfgEnhancement.InputCostPerMillion = 1
+	cfgEnhancement.OutputCostPerMillion = 1
+	app := enhancement.NewApplication(db.Gorm, engine, catalogue, cfgEnhancement)
+	scheduler := enhancement.NewScheduler(db.Gorm, cfgEnhancement, app, nil)
+	claim, err := scheduler.Request(t.Context(), hash)
+	require.NoError(t, err)
+	result, err := scheduler.Process(t.Context(), claim)
 	require.NoError(t, err)
 	require.Equal(t, "accepted", result.Outcome)
 
@@ -289,6 +301,32 @@ func TestSeriesIdentitySurvivesReconstructionRematchAndReindex(t *testing.T) {
 	require.NoError(t, db.Gorm.Where("info_hash = ?", hash).First(&replayed).Error)
 	require.Equal(t, first.ID, replayed.ID)
 	require.Equal(t, first.Episodes, replayed.Episodes)
+
+	assertTorznab := func(id string) {
+		t.Helper()
+		result, searchErr := torznabAdapter.New(searcher).
+			Search(t.Context(), torznab.SearchRequest{
+				Profile: torznab.ProfileDefault,
+				Type:    torznab.FunctionTV,
+				TMDBID:  model.NewNullString(id),
+			})
+		require.NoError(t, searchErr)
+		require.Len(t, result.Channel.Items, 1)
+		require.Equal(t, "Catalogue Series (2001) S02E05", result.Channel.Items[0].Title)
+
+		foundID := false
+
+		for _, attr := range result.Channel.Items[0].TorznabAttrs {
+			if attr.AttrName == torznab.AttrTmdb {
+				require.Equal(t, id, attr.AttrValue)
+
+				foundID = true
+			}
+		}
+
+		require.True(t, foundID, "Torznab carries series-level work ID")
+	}
+	assertTorznab("42")
 
 	// A later ordinary enhancement cannot replace authority introduced by the first one.
 	for _, metadata := range []*enhancement.Metadata{
@@ -326,7 +364,9 @@ func TestSeriesIdentitySurvivesReconstructionRematchAndReindex(t *testing.T) {
 	}
 
 	engine.id = 43
-	_, err = app.Enhance(t.Context(), hash, true, true)
+	claim, err = scheduler.Request(t.Context(), hash)
+	require.NoError(t, err)
+	_, err = scheduler.ProcessRequested(t.Context(), claim, true, true)
 	require.NoError(t, err)
 	require.NoError(t, p.Process(t.Context(), MessageParams{InfoHashes: []protocol.ID{hash}}))
 
@@ -341,6 +381,7 @@ func TestSeriesIdentitySurvivesReconstructionRematchAndReindex(t *testing.T) {
 	)
 	require.Equal(t, "43", replayed.ContentID.String)
 	require.NotEqual(t, first.ID, replayed.ID)
+	assertTorznab("43")
 	// Reindex is a vector rebuild only: no stage is newly evaluated.
 	var before model.ClassificationEvaluation
 	require.NoError(

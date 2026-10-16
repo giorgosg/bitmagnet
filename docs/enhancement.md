@@ -3,7 +3,8 @@
 `bitmagnet enhancement evaluate` reads selected visible torrents, evaluates their
 metadata through an explicitly configured OpenAI-compatible Chat Completions endpoint,
 and prints one JSON report. It does not apply metadata or save evaluation state.
-Automatic enhancement is unavailable; no enhancement worker runs.
+Automatic enhancement ships disabled. Evaluation starts no workers, even when automatic
+processing is configured for other invocations.
 
 Configure the existing `postgres` and `tmdb` sections as usual. The database must
 already be migrated. This command opens a separate PostgreSQL connection with
@@ -140,8 +141,8 @@ It requires a real completed ordinary classification for current evidence, runs 
 bounded evaluator, fetches selected TMDB work details outside the application transaction,
 and rechecks freshness, authority and moderation before writing. The application
 transaction follows the original run deadline and cancellation through lock waits,
-regardless of the completion caller context, and checks again before committing. It can also be invoked by the separately registered automatic worker. Dedicated
-applying CLI commands are not yet available; `enhancement evaluate` remains read-only even with this storage present.
+regardless of the completion caller context, and checks again before committing. It can also be invoked by the separately registered automatic worker. The bounded `enhancement process` command uses this application through shared scheduler
+admission and accounting. `enhancement evaluate` remains read-only with this storage present.
 
 Ordinary enhancement may correct unsourced rule results. Importer hints and existing
 catalogue identity are protected; a type-only hint permits adding a compatible absent
@@ -267,8 +268,94 @@ encountered during search or detail retrieval; missing catalogue works do not pa
 Error classification retains only a safe failure kind, without provider response bodies
 or credentials.
 Restarting the process does not clear the pause. Correct the endpoint/key/model first;
-internal operator integrations can call `Scheduler.Resume`, which clears the pause
-and explicitly readmits failed/malformed attempts. Bounded operator CLI controls are
-separate work. To stop calls now, disable the worker and stop its running process;
+run `bitmagnet enhancement resume`, which clears the pause
+and explicitly readmits failed/malformed attempts. It does not enable automation or
+start workers. To stop calls now, disable the worker and stop its running process;
 shutdown cancels in-flight contexts and waits for handlers. `enhancement evaluate`
 never starts this worker or uses its ledger, even when automatic configuration is enabled.
+
+## Operator commands and recovery
+
+All commands print one JSON document to stdout; diagnostic logs go to stderr. Keep
+reports private when names, stored paths or accepted output identify sensitive material.
+No command accepts results submitted by a remote model or exposes an HTTP surface.
+
+```bash
+# No provider calls or database writes; inspect at most 100 visible torrents.
+bitmagnet enhancement preview --sample 10
+bitmagnet enhancement status --hash 0123456789abcdef0123456789abcdef01234567
+
+# Explicit writes and paid calls: endpoint/key/model/prices, daily_budget and
+# positive max_run_cost must already be configured under enhancement.
+bitmagnet enhancement process --hash 0123456789abcdef0123456789abcdef01234567
+bitmagnet enhancement process --hash 0123456789abcdef0123456789abcdef01234567 --force
+bitmagnet enhancement process --hash 0123456789abcdef0123456789abcdef01234567 --rematch
+
+# After correcting authentication or provider configuration:
+bitmagnet enhancement resume
+```
+
+`preview` and `status` read the same bounded explicit hashes or deterministic sample.
+They show evidence, latest completed and attempted evaluations, retained accepted
+output, automatic configuration, persistent pause and the latest seven UTC spending
+totals. These are snapshots, not reservations or a promise of admission. An
+`ordinary_required` item needs real ordinary classification before enhancement;
+`eligible` has no unchanged completion suppressing this recipe; `unchanged_completed`
+needs force, rematch, changed evidence or a changed recipe to run again.
+`exhausted_failure` needs explicit resume, force or rematch (or changed evidence/recipe).
+A failed attempt can coexist with a prior accepted completion and retained output.
+The ledger stores charged currency totals, including pessimistic unknown usage;
+it is not a per-torrent token or latency history. Current process/evaluate reports
+contain per-attempt requests, tools, tokens, estimated/known usage, cost and latency.
+
+`process` requires explicit hashes (repeatable, at most 100); it never applies a
+sample implicitly. It runs selected torrents sequentially within one command deadline
+and shared process-local request/output/spending caps. Its requests additionally reserve
+against the same UTC daily ledger and claim capacity as automatic workers on every
+process. Persistent processing uses configured shared concurrency; command-line
+`--concurrency` overrides are available only for read-only experiments.
+`automatic: false` permits these explicit requests but starts no worker.
+Positive daily budget, token prices and model configuration are still required.
+Moderation, current ordinary evidence, importer authority, deadline and late-write
+checks remain enforced. Older legacy evidence may first undergo ordinary processing.
+Capacity exhaustion returns `not_admitted`; retry once active owners finish or expire.
+A persistent pause also prevents manual calls until explicit resume. Budget denial
+before any request is `deferred`; it is not an unresolved identification.
+
+`--force` retries unchanged evaluations, including `limited` results, without granting
+permission to replace importer-supplied fields or an existing work. `--rematch` grants
+that additional authority and can replace or remove an attached work. Ordinary
+reconstruction reuses valid retained output; reindexing does not re-evaluate it.
+Failure, cancellation, or stale output cannot overwrite a newer result. `not_completed`
+reports preparation/application failure separately from a successful model answer.
+Read the returned error and inspect state rather than assuming a paid answer was applied.
+
+An accepted or unresolved evaluation is completed. `limited` means the configured
+investigation could not finish; unchanged limited results suppress automatic repeats
+so restarts cannot silently buy fresh caps. A provider or malformed failure retains
+previous accepted output and records the failed attempt separately. Authentication
+and configuration failures pause admission durably; restarting does not resume it.
+Run `resume` after fixing configuration: it clears the pause and readmits exhausted
+provider/malformed attempts, but does not reset daily spending or automatically retry
+unchanged completed limited results. Paid interrupted claims recover conservatively
+as limited; unknown charges remain charged.
+
+Before automatic rollout, compare saved read-only reports on a reviewed corpus with
+clear releases, translations, remakes, ambiguous names, episodes, season packs and
+mixed works. Verify work IDs independently; existing automatic matches can be wrong.
+Record recipe and configuration identifiers, expected IDs/abstention, field errors,
+tool calls, retries/failures, latency, billed reasoning/output and cost per 1,000 with
+the sample mix and uncertainty. Review every wrong attachment. Valid JSON and passing
+fake-provider tests do not establish identification quality. The recipe in an evaluation
+report is sanitized and excludes credentials. Provider model aliases can change.
+
+Start with a small explicit selection and a conservative run allowance. Inspect both
+results and charged daily spend before expanding it. Deliberately record prompt/model
+changes, which change the recipe and allow gradual reconsideration of old evidence.
+Approve measured quality separately before setting `automatic: true` with a positive
+daily budget. To pause new automatic work, set `automatic: false` and stop/restart the
+worker process; stopping cancels in-flight calls and waits for bounded cleanup.
+Keep automation disabled during recovery, correct configuration, inspect retained state
+and charges, then resume explicitly. Never delete the ledger or fingerprints to recover
+from a provider failure. No model, price, acceptance threshold or rollout approval is
+implied by the examples in this guide.

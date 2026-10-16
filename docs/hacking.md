@@ -295,3 +295,13 @@ a separately migrated `btm_seed_29` template and checks both group query plans. 
 from a disposable clone of the prior template; preserve source and sealed fixtures.
 Scheduling columns on `torrents` are intentionally excluded by `internal/database/gen`
 so generated ingestion upserts cannot overwrite SQL-maintained readiness/ranking.
+
+Operator CLI tests in `internal/app/cmd/enhancementcmd` run the real app wiring with a
+write-denying PostgreSQL connection for evaluate/preview/status, including automatic
+configuration enabled. Explicit processing tests cover shared request accounting,
+unchanged suppression, force, retained completion after authentication failure, durable
+pause/resume and daily denial. `internal/enhancement` tests cover cross-mode capacity
+and recovery; the processor series scenario follows admitted processing through work
+attachment, reprocessing and explicit rematch. Paid model evaluations are separate
+operator activities, excluded from normal CI. See [the operator guide](enhancement.md)
+for corpus review, cost reporting and rollout/recovery requirements.

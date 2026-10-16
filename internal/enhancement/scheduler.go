@@ -70,20 +70,8 @@ func (s *Scheduler) Claim(ctx context.Context) (claim Claim, err error) {
 			admissionErr = ErrPaused
 			return nil
 		}
-		// A crash after any request consumes this attempt's caps. Recover as limited,
-		// preserving accepted output and the pessimistic spending already reserved.
-		if err := limitInterruptedClaims(tx, ""); err != nil {
-			return err
-		}
 
-		if err := tx.Exec(`UPDATE torrents t SET enhancement_ready = NOT c.started OR EXISTS (
- SELECT 1 FROM classification_evaluations e WHERE e.info_hash=t.info_hash
- AND e.stage='ordinary' AND e.completed_at > c.claimed_at), enhancement_checked_at=now()
-   FROM enhancement_claims c WHERE c.expires_at<=now() AND c.info_hash=t.info_hash`).Error; err != nil {
-			return err
-		}
-
-		if err := tx.Exec("DELETE FROM enhancement_claims WHERE expires_at<=now()").Error; err != nil {
+		if err := recoverClaims(tx); err != nil {
 			return err
 		}
 
@@ -209,6 +197,11 @@ func selectionQuery(recent bool) string {
 // Process reclassifies selected legacy/stale evidence before admission, without
 // fabricating an ordinary completion record from a pre-upgrade search row.
 func (s *Scheduler) Process(ctx context.Context, c Claim) (Evaluation, error) {
+	return s.ProcessRequested(ctx, c, false, false)
+}
+
+// ProcessRequested preserves admission, accounting and application safeguards for explicit requests.
+func (s *Scheduler) ProcessRequested(ctx context.Context, c Claim, force, rematch bool) (Evaluation, error) {
 	var expiry time.Time
 	if err := s.db.WithContext(ctx).Raw(`SELECT expires_at FROM enhancement_claims
      WHERE token=? AND info_hash=? AND expires_at>now()`, c.Token, c.InfoHash).Row().Scan(&expiry); err != nil {
@@ -224,10 +217,10 @@ func (s *Scheduler) Process(ctx context.Context, c Claim) (Evaluation, error) {
 
 	ctx = automaticContext(ctx, &accounting{db: s.db, config: s.config, claim: c.Token})
 
-	result, err := s.app.Enhance(ctx, c.InfoHash, false, false)
+	result, err := s.app.Enhance(ctx, c.InfoHash, force, rematch)
 	if errors.Is(err, ErrNotClassified) && s.classify != nil {
 		if err = s.classify(ctx, c.InfoHash); err == nil {
-			result, err = s.app.Enhance(ctx, c.InfoHash, false, false)
+			result, err = s.app.Enhance(ctx, c.InfoHash, force, rematch)
 		}
 	}
 

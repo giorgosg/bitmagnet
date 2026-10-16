@@ -7,8 +7,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v2"
 	"go.uber.org/fx"
+	"go.uber.org/zap"
 )
 
 // urfave's global help flag is mutated by RunContext. These integration tests run
@@ -50,6 +53,10 @@ func (a *audit) TraceQueryStart(ctx context.Context, _ *pgx.Conn, d pgx.TraceQue
 }
 func (*audit) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
 
+type inspectionItem struct {
+	Eligibility string `json:"eligibility"`
+}
+
 func TestCommandWiringNeverAttemptsWrites(t *testing.T) {
 	t.Parallel()
 	db := dbtest.New(t)
@@ -67,107 +74,153 @@ func TestCommandWiringNeverAttemptsWrites(t *testing.T) {
 		).Error,
 	)
 
-	for _, failure := range []bool{false, true} {
-		t.Run(map[bool]string{false: "success", true: "provider failure"}[failure], func(t *testing.T) {
-			t.Parallel()
-			lockCLI(t)
+	for _, mode := range []string{"evaluate", "preview", "status"} {
+		for _, failure := range []bool{false, true} {
+			t.Run(
+				mode+map[bool]string{false: "success", true: "provider failure"}[failure],
+				func(t *testing.T) {
+					t.Parallel()
+					lockCLI(t)
 
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				if failure {
-					w.WriteHeader(http.StatusUnauthorized)
-					return
-				}
+					var providerCalls atomic.Int32
 
-				_ = json.NewEncoder(w).
-					Encode(map[string]any{
-						"choices": []any{
-							map[string]any{
-								"message": map[string]string{
-									"role": "assistant", "content": "{}",
+					server := httptest.NewServer(
+						http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+							providerCalls.Add(1)
+
+							if failure {
+								w.WriteHeader(http.StatusUnauthorized)
+								return
+							}
+
+							_ = json.NewEncoder(w).
+								Encode(map[string]any{
+									"choices": []any{
+										map[string]any{
+											"message": map[string]string{
+												"role":    "assistant",
+												"content": "{}",
+											},
+											"finish_reason": "stop",
+										},
+									},
+									"usage": map[string]int{
+										"prompt_tokens":     200,
+										"completion_tokens": 5,
+									},
+								})
+						}),
+					)
+					defer server.Close()
+
+					cfg := enhancement.NewDefaultConfig()
+					cfg.BaseURL = server.URL
+					cfg.APIKey = "fake"
+					cfg.Model = "fake"
+					cfg.Automatic = true
+					cfg.DailyBudget = 1
+					cfg.MaxRunCost = 1
+					cfg.InputCostPerMillion = 1
+					cfg.OutputCostPerMillion = 1
+					// default_transaction_read_only is installed before any application SQL.
+					pc := postgres.NewDefaultConfig()
+					pc.DSN = db.DSN + "?default_transaction_read_only=on"
+					trace := &audit{}
+					stdout, err := os.CreateTemp(t.TempDir(), "stdout")
+					require.NoError(t, err)
+
+					originalStdout := os.Stdout
+
+					os.Stdout = stdout
+					defer func() { os.Stdout = originalStdout; _ = stdout.Close() }()
+
+					var output bytes.Buffer
+
+					app := fx.New(
+						appfx.New(),
+						fx.NopLogger,
+						fx.Replace(cfg, pc),
+						fx.Replace(
+							fx.Annotate(
+								[]string{
+									"bitmagnet",
+									"enhancement",
+									mode,
+									"--hash",
+									hash.String(),
 								},
-								"finish_reason": "stop",
+								fx.ResultTags(`name:"cli_args"`),
+							),
+						),
+						fx.Supply(fx.Annotate(trace, fx.As(new(pgx.QueryTracer)))),
+						fx.Decorate(
+							func(commandApp *cli.App) *cli.App { commandApp.Writer = &output; return commandApp },
+						),
+						fx.Invoke(
+							func(_ *cli.App, _ hooks.AttachedHooks, log *zap.SugaredLogger) {
+								log.Warn("enhancement diagnostic")
 							},
-						},
-						"usage": map[string]int{
-							"prompt_tokens": 200, "completion_tokens": 5,
-						},
-					})
-			}))
-			defer server.Close()
+						),
+					)
+					require.NoError(t, app.Err())
+					require.NoError(t, app.Start(t.Context()))
 
-			cfg := enhancement.NewDefaultConfig()
-			cfg.BaseURL = server.URL
-			cfg.APIKey = "fake"
-			cfg.Model = "fake"
-			cfg.Automatic = true
-			cfg.DailyBudget = 1
-			cfg.MaxRunCost = 1
-			cfg.InputCostPerMillion = 1
-			cfg.OutputCostPerMillion = 1
-			// default_transaction_read_only is installed before any application SQL.
-			pc := postgres.NewDefaultConfig()
-			pc.DSN = db.DSN + "?default_transaction_read_only=on"
-			trace := &audit{}
+					select {
+					case <-app.Done():
+					case <-time.After(10 * time.Second):
+						t.Fatal("command did not terminate")
+					}
 
-			var output bytes.Buffer
+					require.NoError(t, app.Stop(t.Context()))
 
-			app := fx.New(
-				appfx.New(),
-				fx.NopLogger,
-				fx.Replace(cfg, pc),
-				fx.Replace(
-					fx.Annotate(
-						[]string{
-							"bitmagnet",
-							"enhancement",
-							"evaluate",
-							"--hash",
-							hash.String(),
-						},
-						fx.ResultTags(`name:"cli_args"`),
-					),
-				),
-				fx.Supply(fx.Annotate(trace, fx.As(new(pgx.QueryTracer)))),
-				fx.Decorate(
-					func(commandApp *cli.App) *cli.App { commandApp.Writer = &output; return commandApp },
-				),
-				fx.Invoke(func(_ *cli.App, _ hooks.AttachedHooks) {}),
+					logged, readErr := os.ReadFile(stdout.Name())
+					require.NoError(t, readErr)
+					require.NotContains(
+						t,
+						string(logged),
+						"enhancement diagnostic",
+						"operator JSON stdout must stay clean",
+					)
+
+					var report struct {
+						Evaluations []enhancement.Evaluation `json:"evaluations"`
+						Items       []inspectionItem         `json:"items"`
+					}
+					require.NoError(t, json.Unmarshal(output.Bytes(), &report))
+
+					if mode != "evaluate" {
+						require.Zero(
+							t,
+							providerCalls.Load(),
+							"preview/status cannot call the model",
+						)
+						require.Len(t, report.Items, 1)
+						require.Equal(t, "ordinary_required", report.Items[0].Eligibility)
+					} else {
+						require.Len(t, report.Evaluations, 1)
+
+						want := "unresolved"
+						if failure {
+							want = "provider_failure"
+						}
+
+						require.Equal(t, want, report.Evaluations[0].Outcome)
+					}
+
+					require.NotEmpty(t, trace.statements)
+
+					for _, sql := range trace.statements {
+						upper := strings.ToUpper(strings.TrimSpace(sql))
+						require.True(
+							t,
+							strings.HasPrefix(upper, "SELECT ") || strings.HasPrefix(upper, "BEGIN ") ||
+								upper == "ROLLBACK",
+							sql,
+						)
+					}
+				},
 			)
-			require.NoError(t, app.Err())
-			require.NoError(t, app.Start(t.Context()))
-
-			select {
-			case <-app.Done():
-			case <-time.After(10 * time.Second):
-				t.Fatal("command did not terminate")
-			}
-
-			require.NoError(t, app.Stop(t.Context()))
-
-			var report struct {
-				Evaluations []enhancement.Evaluation `json:"evaluations"`
-			}
-			require.NoError(t, json.Unmarshal(output.Bytes(), &report))
-			require.Len(t, report.Evaluations, 1)
-
-			want := "unresolved"
-			if failure {
-				want = "provider_failure"
-			}
-
-			require.Equal(t, want, report.Evaluations[0].Outcome)
-			require.NotEmpty(t, trace.statements)
-
-			for _, sql := range trace.statements {
-				upper := strings.ToUpper(strings.TrimSpace(sql))
-				require.True(
-					t,
-					strings.HasPrefix(upper, "SELECT ") || strings.HasPrefix(upper, "BEGIN ") ||
-						upper == "ROLLBACK",
-					sql,
-				)
-			}
-		})
+		}
 	}
 }
 

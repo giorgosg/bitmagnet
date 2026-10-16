@@ -1,4 +1,4 @@
-// Package enhancement evaluates bounded torrent evidence without applying metadata.
+// Package enhancement evaluates bounded torrent evidence and safely applies retained metadata.
 package enhancement
 
 import (
