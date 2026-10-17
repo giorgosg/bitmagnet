@@ -550,53 +550,6 @@ func usageAnswer(w http.ResponseWriter, usage string) {
 	}
 }
 
-func TestDefaultConfigSendsMeasuredOperatorInstructions(t *testing.T) {
-	t.Parallel()
-
-	system := func(change func(*enhancement.Config)) string {
-		var content string
-
-		e, _ := evaluator(t, func(w http.ResponseWriter, r *http.Request) {
-			var request struct {
-				Messages []json.RawMessage `json:"messages"`
-			}
-
-			var first struct {
-				Content string `json:"content"`
-			}
-
-			err := json.NewDecoder(r.Body).Decode(&request)
-			if err != nil {
-				t.Error(err)
-			}
-
-			if len(request.Messages) > 0 {
-				err = json.Unmarshal(request.Messages[0], &first)
-				if err != nil {
-					t.Error(err)
-				}
-			}
-
-			content = first.Content
-
-			answer(w, `{}`, 10, 0)
-		}, change)
-		require.Equal(t, "unresolved", e.Evaluate(t.Context(), enhancement.Evidence{}).Outcome)
-
-		return content
-	}
-
-	defaults := system(nil)
-	require.Contains(t, defaults, "Additional operator instructions: Existing classification and hints")
-	require.Contains(t, defaults, "Treat a one-year difference")
-	require.Contains(t, defaults, "Never use episode zero")
-
-	// A configured prompt replaces the default rather than adding to it.
-	custom := system(func(c *enhancement.Config) { c.Prompt = "custom" })
-	require.True(t, strings.HasSuffix(custom, "Additional operator instructions: custom"))
-	require.NotContains(t, custom, "Treat a one-year difference")
-}
-
 func TestRequestByteBoundAdmitsTwelveKilobytesAndRejectsAboveThirtyTwo(t *testing.T) {
 	t.Parallel()
 

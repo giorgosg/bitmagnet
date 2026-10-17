@@ -47,8 +47,8 @@ sample ordered by infohash. Choose one selection mode, with at most 100 torrents
 An explicit experiment always runs again: no saved fingerprint or previous answer
 suppresses it. `--model`, `--base-url`, `--temperature`, and `--prompt-file` override
 configuration for comparison. A prompt file replaces the configured operator
-instructions, including the default, for that run; it cannot relax local output
-validation. Save reports yourself when comparing experiments.
+instructions for that run; like them, it adds to the built-in instructions and cannot
+relax local output validation. Save reports yourself when comparing experiments.
 Application shutdown, including SIGINT handled by fx, cancels this command's
 in-flight HTTP work and waits for its bounded result reporting; canceled work
 cannot become an accepted late result.
@@ -80,18 +80,14 @@ By default the whitelist permits `llm-platform-windows`, `llm-platform-linux`,
 `llm-edition-deluxe`, and `llm-edition-collectors`. Tags must use lowercase
 kebab-case, the `llm-` prefix and at most 30 characters.
 
-`prompt` defaults to the operator instructions in
-`internal/enhancement/default_prompt.txt`. They require a fresh `search_works` call
-before any work ID, abstain on competing regional versions and unresolved year
-conflicts, tolerate a one-year title/catalogue difference only with otherwise clear
-evidence, and accept release languages only from explicit audio or subtitle markers.
-Setting `prompt` replaces these instructions rather than adding to them, so copy the
-file and edit it if you only want to extend it. Without them, the built-in instructions
-alone made almost every response fail validation in a measured comparison.
-
-The default is long. Its first request is about 5.3 KB, which is why the request bound
-below was raised from 8,000 bytes: under that bound about a fifth of evaluations in the
-measured comparison became `limited` after a search or two.
+The model's rules live in `internal/enhancement/instructions.txt` and are part of the
+recipe revision. They require a fresh `search_works` call before any work ID, abstain on
+competing regional versions and unresolved year conflicts, treat a one-year
+title/catalogue difference as a soft mismatch, and accept release languages only from
+explicit audio or subtitle markers. `prompt` is empty by default; when set, it is sent
+after these rules and the tag list as additional operator instructions. The rules, tag
+list and any operator instructions are the same for every request, so providers can
+cache them as one prefix.
 
 Spending, request and output reservations are shared by concurrent evaluations in
 this command only. They do **not** enter a database-backed shared budget ledger.
