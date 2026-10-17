@@ -46,7 +46,7 @@ type Work struct {
 type Candidate struct {
 	Work
 	Title         string `json:"title"`
-	OriginalTitle string `json:"originalTitle"`
+	OriginalTitle string `json:"originalTitle,omitempty"`
 	Date          string `json:"date"`
 	Overview      string `json:"overview"`
 }
