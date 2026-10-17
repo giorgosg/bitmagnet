@@ -61,6 +61,12 @@ type message struct {
 
 var errMalformedEnvelope = errors.New("invalid model response envelope")
 
+// maxRequestBytes bounds each serialized request. A token is never shorter than a
+// UTF-8 byte, so the same number also bounds input tokens without assuming the
+// model's tokenizer, and is what a request reserves and is checked against.
+// Measured on DeepSeek, 32,000 bytes of this request is about 9,500 tokens.
+const maxRequestBytes = 32000
+
 type completion struct {
 	Choices []struct {
 		Message      message `json:"message"`
@@ -191,13 +197,13 @@ func (e *Evaluator) Evaluate(parent context.Context, evidence Evidence) (result 
 		}
 		// A conservative byte ceiling bounds tokens without guessing the configured model's tokenizer.
 		// It covers instructions, evidence, tool definitions, previous calls and search summaries.
-		if len(body) > 8000 {
-			result.Error = "input context limit (8000 UTF-8 bytes)"
+		if len(body) > maxRequestBytes {
+			result.Error = fmt.Sprintf("input context limit (%d UTF-8 bytes)", maxRequestBytes)
 			return result
 		}
 
 		reservedCost := float64(
-			8000,
+			maxRequestBytes,
 		)*e.config.InputCostPerMillion/1e6 + float64(
 			remaining,
 		)*e.config.OutputCostPerMillion/1e6
@@ -332,7 +338,7 @@ func (e *Evaluator) Evaluate(parent context.Context, evidence Evidence) (result 
 			return result
 		}
 
-		if billed > remaining || *reply.Usage.PromptTokens > 8000 || e.overBudget() {
+		if billed > remaining || *reply.Usage.PromptTokens > maxRequestBytes || e.overBudget() {
 			result.Error = "provider exceeded reserved budget"
 			return result
 		}
@@ -453,7 +459,7 @@ func (e *Evaluator) Evaluate(parent context.Context, evidence Evidence) (result 
 // Keep the report aligned with the full reservation retained in the run ledger.
 // Missing counters are unknown, never a zero-token completion or a refund.
 func (e *Evaluator) accountUnknownUsage(usage *Usage, output int, cost float64) {
-	usage.InputTokens += 8000
+	usage.InputTokens += maxRequestBytes
 	usage.OutputTokens += output
 
 	usage.Estimated = true

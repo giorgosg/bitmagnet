@@ -75,6 +75,10 @@ CLI run-limit flags use `--run-max-requests`, `--run-max-output-tokens`,
 `--run-timeout`, and `--run-max-cost`; evaluation flags use the corresponding
 hyphenated setting names. `base_url`, `api_key`, `model`, `temperature`, `prompt`
 and `tags` configure the provider, additional instructions and tag whitelist.
+By default the whitelist permits `llm-platform-windows`, `llm-platform-linux`,
+`llm-platform-macos`, `llm-platform-android`, `llm-platform-ios`,
+`llm-edition-deluxe`, and `llm-edition-collectors`. Tags must use lowercase
+kebab-case, the `llm-` prefix and at most 30 characters.
 
 `prompt` defaults to the operator instructions in
 `internal/enhancement/default_prompt.txt`. They require a fresh `search_works` call
@@ -85,15 +89,9 @@ Setting `prompt` replaces these instructions rather than adding to them, so copy
 file and edit it if you only want to extend it. Without them, the built-in instructions
 alone made almost every response fail validation in a measured comparison.
 
-The default is long: with it, an evaluation's first request already uses about two
-thirds of the 8,000-byte request bound, and in the same comparison about a fifth of
-evaluations became `limited` after a search or two. On the evaluations that finished,
-it identified works more accurately and with fewer unsafe attachments than a shorter
-prompt that rarely hit the bound.
-By default the whitelist permits `llm-platform-windows`, `llm-platform-linux`,
-`llm-platform-macos`, `llm-platform-android`, `llm-platform-ios`,
-`llm-edition-deluxe`, and `llm-edition-collectors`. Tags must use lowercase
-kebab-case, the `llm-` prefix and at most 30 characters.
+The default is long. Its first request is about 5.3 KB, which is why the request bound
+below was raised from 8,000 bytes: under that bound about a fifth of evaluations in the
+measured comparison became `limited` after a search or two.
 
 Spending, request and output reservations are shared by concurrent evaluations in
 this command only. They do **not** enter a database-backed shared budget ledger.
@@ -120,9 +118,10 @@ Evidence contains the name, size/count, ordinary classification, supplied hints 
 at most twenty representative stored paths/sizes, favoring large relevant files and
 directory diversity. Missing/truncated lists are explicitly marked. Names and paths
 are bounded; content bytes and NFO text are never available. Each request, including
-tool definitions and accumulated search summaries, is limited to 8,000 UTF-8 bytes.
-This deliberately conservative input bound stays below the 8,000-token target without
-assuming the runtime model's tokenizer; a long conversation can become `limited`.
+tool definitions and accumulated search summaries, is limited to 32,000 UTF-8 bytes.
+A token is in practice never shorter than a byte, so this also bounds input tokens without assuming the
+runtime model's tokenizer; measured on DeepSeek it is about 9,500 tokens. A conversation
+that would exceed it ends `limited` without sending the request.
 
 The only model-facing tool is `search_works(title, type, year?)`, backed by TMDB's
 existing movie/TV search client. It returns at most ten short summaries and only
@@ -246,10 +245,10 @@ new ordinary evidence ready immediately. Low ranked work has no exhaustive cover
 promise.
 
 Every model request, including retries, first reserves its configured worst-case price
-for 8,000 input tokens and the requested remaining billed output limit. Reservation
-and budget comparison serialize across processes. Known billed usage reconciles the
-reservation exactly once; completion output includes reasoning, without double counting
-reasoning already included by the provider. Missing usage, timeouts and crashes retain
+for 32,000 input tokens, the request bound, and the requested remaining billed output
+limit. Reservation and budget comparison serialize across processes. Known billed
+usage reconciles the reservation exactly once; completion output includes reasoning,
+without double counting reasoning already included by the provider. Missing usage, timeouts and crashes retain
 the full charge. Configured prices must cover the actual provider's billed token rates.
 A provider exceeding its advertised token ceiling can exceed a reservation; further
 requests stop when local limits detect it. No client can prevent an upstream provider
