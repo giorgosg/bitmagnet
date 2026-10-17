@@ -2,6 +2,7 @@
 package enhancement
 
 import (
+	_ "embed"
 	"errors"
 	"math"
 	"net/url"
@@ -36,8 +37,16 @@ type Config struct {
 	OutputCostPerMillion float64
 }
 
+// defaultPrompt is the operator-instruction recipe measured against the reviewed
+// evaluation corpus. Configuring a prompt replaces it, and changing it changes the
+// recipe fingerprint, so retained results are reconsidered.
+//
+//go:embed default_prompt.txt
+var defaultPrompt string
+
 func NewDefaultConfig() Config {
 	return Config{
+		Prompt:               defaultPrompt,
 		Concurrency:          2,
 		PollInterval:         5 * time.Second,
 		ReconsiderInterval:   24 * time.Hour,
