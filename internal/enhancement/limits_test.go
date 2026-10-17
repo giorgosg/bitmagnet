@@ -348,14 +348,14 @@ func TestMissingUsageCountersKeepSharedReservations(t *testing.T) {
 			}, func(c *enhancement.Config) {
 				c.InputCostPerMillion = 1
 				c.OutputCostPerMillion = 1
-				c.MaxRunCost = 0.015
+				c.MaxRunCost = 0.05
 			})
 			first := e.Evaluate(t.Context(), enhancement.Evidence{})
 			require.Equal(t, "provider_failure", first.Outcome)
 			require.True(t, first.Usage.Estimated)
 			require.Equal(t, 2000, first.Usage.OutputTokens)
 			require.NotNil(t, first.Usage.Cost)
-			require.InDelta(t, 0.01, *first.Usage.Cost, 0.000001)
+			require.InDelta(t, 0.034, *first.Usage.Cost, 0.000001)
 			second := e.Evaluate(t.Context(), enhancement.Evidence{})
 			require.Equal(t, "limited", second.Outcome)
 			require.EqualValues(t, 1, calls.Load())
@@ -386,14 +386,14 @@ func TestPartialUsageAfterEarlierTurnReportsEntireAccountedCost(t *testing.T) {
 			}, func(c *enhancement.Config) {
 				c.InputCostPerMillion = 1
 				c.OutputCostPerMillion = 1
-				c.MaxRunCost = 0.01025
+				c.MaxRunCost = 0.03425
 			})
 			result := e.Evaluate(t.Context(), enhancement.Evidence{})
 			require.Equal(t, "provider_failure", result.Outcome)
 			require.True(t, result.Usage.Estimated)
 			require.Equal(t, 2100, result.Usage.OutputTokens)
 			require.NotNil(t, result.Usage.Cost)
-			require.InDelta(t, 0.0102, *result.Usage.Cost, 0.000001)
+			require.InDelta(t, 0.0342, *result.Usage.Cost, 0.000001)
 			require.Equal(t, "limited", e.Evaluate(t.Context(), enhancement.Evidence{}).Outcome)
 			require.EqualValues(t, 2, calls.Load())
 		})
@@ -478,7 +478,7 @@ func TestUnknownUsageConsumesSharedOutputAllowance(t *testing.T) {
 	}, func(c *enhancement.Config) { c.MaxRunOutputTokens = 2000 })
 	first := e.Evaluate(t.Context(), enhancement.Evidence{})
 	require.Equal(t, "provider_failure", first.Outcome)
-	require.Equal(t, 8000, first.Usage.InputTokens)
+	require.Equal(t, 32000, first.Usage.InputTokens)
 	require.Equal(t, 2000, first.Usage.OutputTokens)
 	require.Equal(t, "limited", e.Evaluate(t.Context(), enhancement.Evidence{}).Outcome)
 	require.EqualValues(t, 1, calls.Load())
@@ -595,4 +595,22 @@ func TestDefaultConfigSendsMeasuredOperatorInstructions(t *testing.T) {
 	custom := system(func(c *enhancement.Config) { c.Prompt = "custom" })
 	require.True(t, strings.HasSuffix(custom, "Additional operator instructions: custom"))
 	require.NotContains(t, custom, "Treat a one-year difference")
+}
+
+func TestRequestByteBoundAdmitsTwelveKilobytesAndRejectsAboveThirtyTwo(t *testing.T) {
+	t.Parallel()
+
+	e, calls := evaluator(t, func(w http.ResponseWriter, _ *http.Request) {
+		answer(w, `{}`, 10, 0)
+	}, func(c *enhancement.Config) { c.Prompt = strings.Repeat("x", 9000) })
+	require.Equal(t, "unresolved", e.Evaluate(t.Context(), enhancement.Evidence{}).Outcome)
+	require.EqualValues(t, 1, calls.Load())
+
+	e, calls = evaluator(t, func(w http.ResponseWriter, _ *http.Request) {
+		answer(w, `{}`, 10, 0)
+	}, func(c *enhancement.Config) { c.Prompt = strings.Repeat("x", 32000) })
+	result := e.Evaluate(t.Context(), enhancement.Evidence{})
+	require.Equal(t, "limited", result.Outcome)
+	require.Equal(t, "input context limit (32000 UTF-8 bytes)", result.Error)
+	require.Zero(t, calls.Load())
 }

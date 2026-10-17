@@ -272,10 +272,10 @@ func TestAutomaticEvaluatorChargesRetriesAndSuppressesRestart(t *testing.T) {
 	require.NoError(t, db.Gorm.Raw("SELECT charged FROM enhancement_daily_spending").Scan(&spent).Error)
 	require.InDelta(
 		t,
-		0.01015,
+		0.03415,
 		spent,
 		1e-9,
-		"unknown first request retains 8000 input + 2000 output; reasoning included in second",
+		"unknown first request retains 32000 input + 2000 output; reasoning included in second",
 	)
 	require.NoError(t, db.Gorm.Exec("UPDATE torrents SET enhancement_ready=true WHERE info_hash=?", hash).Error)
 	claim, err = s.Claim(t.Context())
@@ -742,7 +742,8 @@ func TestBudgetStopAfterRequestCompletesLimitedWithoutRestartingCaps(t *testing.
 	t.Parallel()
 	db, _, hash := applicationFixture(t)
 	c := automaticConfig()
-	c.DailyBudget = 0.01
+	// One $0.034 reservation fits; after $0.009 is charged, a second does not.
+	c.DailyBudget = 0.04
 
 	var calls atomic.Int32
 

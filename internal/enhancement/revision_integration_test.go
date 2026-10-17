@@ -27,7 +27,7 @@ func TestTerminalUnknownUsageRetiresReservationWithoutRefund(t *testing.T) {
 					_, _ = io.Copy(io.Discard, r.Body)
 					select {
 					case <-r.Context().Done():
-					case <-time.After(time.Second):
+					case <-time.After(30 * time.Second):
 					}
 
 					return
@@ -45,7 +45,9 @@ func TestTerminalUnknownUsageRetiresReservationWithoutRefund(t *testing.T) {
 
 			c.BaseURL = server.URL
 			if scenario == "timeout" {
-				c.Timeout = 100 * time.Millisecond
+				// Long enough that reserving under load cannot use it up before the
+				// request is sent, which would leave nothing to retire.
+				c.Timeout = 2 * time.Second
 			}
 
 			engine, err := NewEvaluator(c, nil, server.Client())
@@ -65,7 +67,7 @@ func TestTerminalUnknownUsageRetiresReservationWithoutRefund(t *testing.T) {
 				t,
 				db.Gorm.Raw("SELECT charged FROM enhancement_daily_spending").Scan(&charged).Error,
 			)
-			require.InDelta(t, 0.01, charged, 1e-9)
+			require.InDelta(t, 0.034, charged, 1e-9)
 		})
 	}
 }
