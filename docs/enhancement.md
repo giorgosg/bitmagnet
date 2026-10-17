@@ -46,8 +46,9 @@ Repeat `--hash` for explicit selections, or use `--sample 10` for a deterministi
 sample ordered by infohash. Choose one selection mode, with at most 100 torrents.
 An explicit experiment always runs again: no saved fingerprint or previous answer
 suppresses it. `--model`, `--base-url`, `--temperature`, and `--prompt-file` override
-configuration for comparison. Prompt files add operator instructions; they cannot
-relax local output validation. Save reports yourself when comparing experiments.
+configuration for comparison. A prompt file replaces the configured operator
+instructions, including the default, for that run; it cannot relax local output
+validation. Save reports yourself when comparing experiments.
 Application shutdown, including SIGINT handled by fx, cancels this command's
 in-flight HTTP work and waits for its bounded result reporting; canceled work
 cannot become an accepted late result.
@@ -74,6 +75,21 @@ CLI run-limit flags use `--run-max-requests`, `--run-max-output-tokens`,
 `--run-timeout`, and `--run-max-cost`; evaluation flags use the corresponding
 hyphenated setting names. `base_url`, `api_key`, `model`, `temperature`, `prompt`
 and `tags` configure the provider, additional instructions and tag whitelist.
+
+`prompt` defaults to the operator instructions in
+`internal/enhancement/default_prompt.txt`. They require a fresh `search_works` call
+before any work ID, abstain on competing regional versions and unresolved year
+conflicts, tolerate a one-year title/catalogue difference only with otherwise clear
+evidence, and accept release languages only from explicit audio or subtitle markers.
+Setting `prompt` replaces these instructions rather than adding to them, so copy the
+file and edit it if you only want to extend it. Without them, the built-in instructions
+alone made almost every response fail validation in a measured comparison.
+
+The default is long: with it, an evaluation's first request already uses about two
+thirds of the 8,000-byte request bound, and in the same comparison about a fifth of
+evaluations became `limited` after a search or two. On the evaluations that finished,
+it identified works more accurately and with fewer unsafe attachments than a shorter
+prompt that rarely hit the bound.
 By default the whitelist permits `llm-platform-windows`, `llm-platform-linux`,
 `llm-platform-macos`, `llm-platform-android`, `llm-platform-ios`,
 `llm-edition-deluxe`, and `llm-edition-collectors`. Tags must use lowercase
